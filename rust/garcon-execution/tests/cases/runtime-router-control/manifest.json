@@ -1,0 +1,15 @@
+{
+  "module": "rust/garcon-execution/tests/support/runtime-router-control-oracle.ts",
+  "tests": [
+    "server/controller/agents/__tests__/runtime-router-permissions.test.js",
+    "server/controller/agents/__tests__/runtime-router-permission-retry.test.js",
+    "server/controller/agents/__tests__/runtime-router-running-sessions.test.js"
+  ],
+  "inputs": "rust/garcon-execution/tests/inputs/runtime-router-control.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 18,
+  "sha256": "10533417ef5491f0608bab47aef95600ab34ed2eee92f4374dcd87915b4f20d7"
+}

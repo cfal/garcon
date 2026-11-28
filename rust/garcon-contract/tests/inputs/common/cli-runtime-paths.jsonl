@@ -1,0 +1,7 @@
+{"fn":"executorDataDirectory","args":["/fixture/config"]}
+{"fn":"executorDataDirectory","args":[""]}
+{"fn":"cliGatewayRuntimeFile","args":["/fixture/config/executor"]}
+{"fn":"cliRuntimeFile","args":["/fixture/config","controller"]}
+{"fn":"cliRuntimeFile","args":["/fixture/config","executor"]}
+{"fn":"cliRuntimeFile","args":["tmp/../config","controller"]}
+{"fn":"cliRuntimeFile","args":["tmp/../config","executor"]}

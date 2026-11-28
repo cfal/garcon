@@ -1,0 +1,21 @@
+{"fn":"parseControllerCliRequest","args":[{"expectedServerInstanceId":"synthetic","http":{"operation":"GET /api/v1/models","query":[["executorId","local"]],"body":null}}]}
+{"fn":"parseControllerCliRequest","args":[{"expectedServerInstanceId":"synthetic","http":{"operation":"GET /api/v1/models","query":[["executorId","local"],["executorId","local"]],"body":null}}]}
+{"fn":"parseControllerCliRequest","args":[{"expectedServerInstanceId":"synthetic","http":{"operation":"DELETE /api/v1/executors/:executorId","executorId":"22222222-2222-4222-8222-222222222222","query":[],"body":null}}]}
+{"fn":"parseControllerCliRequest","args":[{"expectedServerInstanceId":"synthetic","http":{"operation":"DELETE /api/v1/executors/:executorId","executorId":"22222222-2222-4222-8222-222222222222","query":[["anything","x"]],"body":null}}]}
+{"fn":"parseControllerCliRequest","args":[{"expectedServerInstanceId":"synthetic","http":{"operation":"PUT /api/v1/app/settings","query":[],"body":{"features":{"transcriptSearch":{"enabled":false}}}}}]}
+{"fn":"parseControllerCliRequest","args":[{"expectedServerInstanceId":"synthetic","http":{"operation":"PUT /api/v1/app/settings","query":[],"body":{"features":{"transcriptSearch":{"enabled":false,"other":true}}}}}]}
+{"fn":"parseControllerCliRequest","args":[{"expectedServerInstanceId":"synthetic","http":{"operation":"POST /api/v1/scheduled-prompts","query":[],"body":{"scheduledPrompt":{"target":{"type":"new-chat"}}}}}]}
+{"fn":"parseControllerCliRequest","args":[{"expectedServerInstanceId":"synthetic","http":{"operation":"POST /api/v1/chats/start","query":[],"body":{"executorId":"local"}}}]}
+{"fn":"parseControllerCliRequest","args":[{"expectedServerInstanceId":"synthetic","http":{"operation":"POST /api/v1/chats/start","query":[],"body":{"executorId":"stale"}}}]}
+{"fn":"parseCliHttpResponse","args":[{"status":200,"body":null,"extra":{"synthetic":true}}]}
+{"fn":"parseCliHttpResponse","args":[{"extra":1,"body":null,"status":200}]}
+{"fn":"parseControllerCliRequest","args":[{"http":{"body":null,"query":[["executorId","local"]],"operation":"GET /api/v1/models"},"expectedServerInstanceId":"synthetic"}]}
+{"fn":"parseCliHttpResponse","args":[{"status":429,"body":{"error":"synthetic"},"retryAfter":"10"}]}
+{"fn":"parseCliHttpResponse","args":[{"status":429,"body":{"error":"synthetic"},"retryAfter":"1.5"}]}
+{"fn":"parseCliHttpResponse","args":[{"status":300,"body":null}]}
+{"fn":"parseCliHttpResponse","args":[{"status":201}]}
+{"fn":"cliReplyBytes","args":["primary"]}
+{"fn":"cliReplyBytes","args":["bulk"]}
+{"fn":"cliRequestBytes","args":["bulk"]}
+{"fn":"cliRequestTooLarge","args":["primary"]}
+{"fn":"cliRequestTooLarge","args":["bulk"]}

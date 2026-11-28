@@ -1,0 +1,16 @@
+{
+  "module": "rust/garcon-execution/tests/support/agent-registry-session-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-execution/tests/inputs/agent-registry-session.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "sessionConfigTrace",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 14,
+  "sha256": "075e6b27e02b890597666438a5d4632a02d842dc44c39a51cb85dde95248f570"
+}

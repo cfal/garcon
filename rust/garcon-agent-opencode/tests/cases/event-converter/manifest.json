@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agent-opencode/tests/oracles/event-converter.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-opencode/tests/inputs/event-converter.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 7,
+  "sha256": "898ef8e4b096677aaf0ff47918ba40e6159ff1b52026e0fc2c05122fa4130ae4"
+}

@@ -1,0 +1,37 @@
+{
+  "module": "rust/garcon-search/tests/inputs/search-leaves-oracle.ts",
+  "tests": [
+    "rust/garcon-search/tests/inputs/search-leaves.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "projectSearchMessage",
+      "argument": 0,
+      "guard": "acceptsMessage",
+      "dropped": 15,
+      "kept": 60
+    },
+    {
+      "fn": "queryLatencySnapshot",
+      "argument": 0,
+      "guard": "acceptsLatencyOperations",
+      "dropped": 22,
+      "kept": 60
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "projectSearchMessage",
+      "argument": 0
+    },
+    {
+      "fn": "queryLatencySnapshot",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 184,
+  "sha256": "edaad18a317350464d94c73809a26859b38ac0b1c912e93db426ec6f251a81ff"
+}

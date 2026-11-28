@@ -18,6 +18,7 @@ const directoryLanes = [
 const lanes = [
   { name: 'common', include: ['common/__tests__/*.test.js'] },
   { name: 'scripts', include: ['scripts/__tests__/*.test.js'] },
+  { name: 'parity', include: ['rust/parity/src/__tests__/*.test.ts'] },
   { name: 'providers', include: ['server-agents/**/__tests__/*.{test.js,test.ts}'] },
   { name: 'server', include: ['server/**/__tests__/*.{test.js,test.ts}'] },
   { name: 'cli', include: ['cli/__tests__/*.test.ts'] },
@@ -43,7 +44,7 @@ function owners(file, definitions = lanes) {
 
 test('inventory patterns match the executable discovery commands', () => {
   expect(rootScripts.test).toBe('bun run test:server && bun run test:cli && bun run --cwd native test && bun run --cwd web test');
-  expect(rootScripts['test:server']).toBe(`bun test ./${pattern('common')} && bun test ./${pattern('scripts')} && bun scripts/run-test-files.js '${pattern('providers')}' && bun scripts/run-test-files.js '${pattern('server')}'`);
+  expect(rootScripts['test:server']).toBe(`bun test ./${pattern('common')} && bun test ./${pattern('scripts')} && bun test ./${pattern('parity')} && bun scripts/run-test-files.js '${pattern('providers')}' && bun scripts/run-test-files.js '${pattern('server')}'`);
   expect(rootScripts['test:cli']).toBe('bun run --cwd cli test');
   expect(scripts('cli').test).toBe(`bun test ${pattern('cli').replace(/^cli\//, '')}`);
   expect(scripts('web').test).toBe('vitest run');

@@ -1,0 +1,13 @@
+{
+  "module": "rust/garcon-execution/tests/support/attachment-admission-oracle.ts",
+  "tests": [
+    "server/controller/attachments/__tests__/support.test.js"
+  ],
+  "inputs": "rust/garcon-execution/tests/inputs/attachment-admission.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 19,
+  "sha256": "07d84619a485854c36c60e0c765b31f48102643ef48be9675fe835ea8d6dd24e"
+}

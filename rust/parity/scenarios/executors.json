@@ -1,0 +1,1180 @@
+{
+  "name": "executors",
+  "description": "Executor configuration routes with only the local executor: the list, create validation field by field for both directions, labels, address and credential checks, the public address taken from the Host header, an address that expands past the connection URL limit, successful executor-connects creates, and update, connection and remove for a created executor.",
+  "steps": [
+    {
+      "name": "executors-local-only",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors"
+      }
+    },
+    {
+      "name": "create-empty-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {}
+      }
+    },
+    {
+      "name": "create-array-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": [
+          "x"
+        ]
+      }
+    },
+    {
+      "name": "create-null-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": null
+      }
+    },
+    {
+      "name": "create-label-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "direction": "executor-connects"
+        }
+      }
+    },
+    {
+      "name": "create-label-blank",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "  ",
+          "direction": "executor-connects"
+        }
+      }
+    },
+    {
+      "name": "create-label-101-characters",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "direction": "executor-connects"
+        }
+      }
+    },
+    {
+      "name": "create-label-not-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": 7,
+          "direction": "executor-connects"
+        }
+      }
+    },
+    {
+      "name": "create-direction-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor"
+        }
+      }
+    },
+    {
+      "name": "create-direction-unknown",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "sideways"
+        }
+      }
+    },
+    {
+      "name": "create-unknown-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects",
+          "unknown": true
+        }
+      }
+    },
+    {
+      "name": "create-flags-not-boolean",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects",
+          "allowControllerCli": "yes"
+        }
+      }
+    },
+    {
+      "name": "create-management-flag-not-boolean",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects",
+          "allowExecutorManagement": 1
+        }
+      }
+    },
+    {
+      "name": "create-no-tls-not-boolean",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects",
+          "noTls": "no"
+        }
+      }
+    },
+    {
+      "name": "create-label-reserved",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": " local ",
+          "direction": "executor-connects"
+        }
+      }
+    },
+    {
+      "name": "create-label-reserved-upper-case",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "LOCAL",
+          "direction": "executor-connects"
+        }
+      }
+    },
+    {
+      "name": "create-advertised-url-too-long",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects",
+          "advertisedUrl": "wss://xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      }
+    },
+    {
+      "name": "create-advertised-url-not-a-url",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects",
+          "advertisedUrl": "not a url"
+        }
+      }
+    },
+    {
+      "name": "create-advertised-url-without-tls",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects",
+          "advertisedUrl": "ws://executor.example.invalid/link"
+        }
+      }
+    },
+    {
+      "name": "create-advertised-url-not-websocket",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects",
+          "advertisedUrl": "https://executor.example.invalid/link"
+        }
+      }
+    },
+    {
+      "name": "create-advertised-url-unspecified-address",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects",
+          "advertisedUrl": "wss://0.0.0.0/link"
+        }
+      }
+    },
+    {
+      "name": "create-advertised-url-unspecified-ipv6-address",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects",
+          "advertisedUrl": "wss://[::]/link"
+        }
+      }
+    },
+    {
+      "name": "create-advertised-url-with-fragment",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects",
+          "advertisedUrl": "wss://executor.example.invalid/link#x"
+        }
+      }
+    },
+    {
+      "name": "create-advertised-url-with-credentials",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects",
+          "advertisedUrl": "wss://user:pass@executor.example.invalid/link"
+        }
+      }
+    },
+    {
+      "name": "create-advertised-url-with-allow-unverified-tls",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects",
+          "advertisedUrl": "wss://executor.example.invalid/link",
+          "allowUnverifiedTls": true
+        }
+      }
+    },
+    {
+      "name": "create-advertised-url-empty",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects",
+          "advertisedUrl": ""
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-and-reserved-host",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "example.com:8080"
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-and-unspecified-host",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "0.0.0.0:8080"
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-and-host-with-a-space",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "bad host"
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-and-host-without-a-port-range",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "host:99999"
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-and-non-ascii-host",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "bücher.example"
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-and-host-with-credentials",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "user:pass@host"
+        }
+      }
+    },
+    {
+      "name": "create-both-directions-fields",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "executor-connects",
+          "advertisedUrl": "wss://executor.example.invalid/link",
+          "connectionUrl": "wss://executor.example.invalid/other"
+        }
+      }
+    },
+    {
+      "name": "create-controller-connects-without-url",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "controller-connects"
+        }
+      }
+    },
+    {
+      "name": "create-controller-connects-url-not-websocket",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "controller-connects",
+          "connectionUrl": "https://executor.example.invalid/#secret=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ"
+        }
+      }
+    },
+    {
+      "name": "create-controller-connects-url-with-credentials",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "controller-connects",
+          "connectionUrl": "wss://user:pass@executor.example.invalid/#secret=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ"
+        }
+      }
+    },
+    {
+      "name": "create-controller-connects-without-secret",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "controller-connects",
+          "connectionUrl": "wss://executor.example.invalid/"
+        }
+      }
+    },
+    {
+      "name": "create-controller-connects-secret-too-short",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "controller-connects",
+          "connectionUrl": "wss://executor.example.invalid/#secret=short"
+        }
+      }
+    },
+    {
+      "name": "create-controller-connects-secret-with-invalid-base64",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "controller-connects",
+          "connectionUrl": "wss://executor.example.invalid/#secret=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+        }
+      }
+    },
+    {
+      "name": "create-controller-connects-extra-fragment-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "controller-connects",
+          "connectionUrl": "wss://executor.example.invalid/#secret=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ&other=1"
+        }
+      }
+    },
+    {
+      "name": "create-controller-connects-url-too-long",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor",
+          "direction": "controller-connects",
+          "connectionUrl": "wss://xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/#secret=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ"
+        }
+      }
+    },
+    {
+      "name": "patch-local",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/local",
+        "json": {
+          "label": "Local"
+        }
+      }
+    },
+    {
+      "name": "delete-local",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/executors/local"
+      }
+    },
+    {
+      "name": "patch-identifier-not-a-uuid",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/remote",
+        "json": {
+          "label": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "delete-identifier-not-a-uuid",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/executors/remote"
+      }
+    },
+    {
+      "name": "patch-empty-body",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {}
+      }
+    },
+    {
+      "name": "patch-unknown-key",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "rename": "x"
+        }
+      }
+    },
+    {
+      "name": "patch-label-blank",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "label": " "
+        }
+      }
+    },
+    {
+      "name": "patch-enabled-not-boolean",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "enabled": "no"
+        }
+      }
+    },
+    {
+      "name": "patch-connection-without-no-tls",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "direction": "executor-connects"
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-connection-direction-unknown",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "direction": "sideways",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-connection-executor-connects-with-bypass",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "noTls": false,
+            "allowUnverifiedTls": true
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-connection-scalar",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": "executor-connects"
+        }
+      }
+    },
+    {
+      "name": "patch-connection-without-direction",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "connectionUrl": "wss://executor.example.invalid",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-connection-unknown-key",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "noTls": false,
+            "rename": "x"
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-connection-allow-unverified-tls-not-boolean",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "direction": "controller-connects",
+            "connectionUrl": "wss://executor.example.invalid/#secret=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ",
+            "noTls": false,
+            "allowUnverifiedTls": "yes"
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-connection-url-empty",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-connection-url-too-long",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "wss://xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-label-101-characters",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "label": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      }
+    },
+    {
+      "name": "patch-unknown-executor-connection-url-not-a-url",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "not a url",
+            "noTls": true
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-unknown-executor-connection-url-without-tls",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "ws://executor.example.invalid",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-unknown-executor",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "label": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "patch-unknown-executor-connection",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "wss://executor.example.invalid",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "delete-unknown-executor",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000"
+      }
+    },
+    {
+      "name": "connection-local",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/local/connection"
+      }
+    },
+    {
+      "name": "connection-identifier-not-a-uuid",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/remote/connection"
+      }
+    },
+    {
+      "name": "connection-unknown-executor",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/0badf00d-0000-4000-8000-000000000000/connection"
+      }
+    },
+    {
+      "name": "connection-identifier-too-short",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/x/connection"
+      }
+    },
+    {
+      "name": "create-executor-connects",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "  Executor One  ",
+          "direction": "executor-connects",
+          "advertisedUrl": "wss://executor-one.example.invalid/{executorId}",
+          "allowControllerCli": true,
+          "allowExecutorManagement": true
+        }
+      }
+    },
+    {
+      "name": "create-duplicate-label",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": " executor one ",
+          "direction": "executor-connects"
+        }
+      }
+    },
+    {
+      "name": "create-executor-connects-without-tls",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor Two",
+          "direction": "executor-connects",
+          "advertisedUrl": "ws://127.0.0.1:1/link",
+          "noTls": true
+        }
+      }
+    },
+    {
+      "name": "create-executor-connects-without-advertised-url",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor Three",
+          "direction": "executor-connects"
+        }
+      }
+    },
+    {
+      "name": "create-executor-connects-ipv6-address",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Executor Four",
+          "direction": "executor-connects",
+          "advertisedUrl": "wss://[::1]:443/link"
+        }
+      }
+    },
+    {
+      "name": "executors-after-create",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors"
+      }
+    },
+    {
+      "name": "patch-created-empty-body",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
+        "json": {}
+      }
+    },
+    {
+      "name": "patch-created-duplicate-label",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
+        "json": {
+          "label": " executor two "
+        }
+      }
+    },
+    {
+      "name": "patch-created-reserved-label",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
+        "json": {
+          "label": "Local"
+        }
+      }
+    },
+    {
+      "name": "patch-created-direction-change-without-url",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
+        "json": {
+          "connection": {
+            "direction": "controller-connects",
+            "noTls": true
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-created-address-with-tls-bypass",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "wss://uno.example.invalid/other",
+            "noTls": false,
+            "allowUnverifiedTls": true
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-created-credential-checked-before-address",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "wss://0.0.0.0/other",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-created-connection-url-not-a-url",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "not a url",
+            "noTls": false
+          }
+        }
+      }
+    },
+    {
+      "name": "patch-created-same-label",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
+        "json": {
+          "label": "  executor one  "
+        }
+      }
+    },
+    {
+      "name": "patch-created-rename",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
+        "json": {
+          "label": "  Executor Uno  "
+        }
+      }
+    },
+    {
+      "name": "patch-created-flags",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
+        "json": {
+          "allowControllerCli": false,
+          "allowExecutorManagement": false
+        }
+      }
+    },
+    {
+      "name": "patch-created-address",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
+        "json": {
+          "connection": {
+            "direction": "executor-connects",
+            "connectionUrl": "wss://uno.example.invalid/other/#secret=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBAQ",
+            "noTls": true
+          }
+        }
+      }
+    },
+    {
+      "name": "connection-created",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}/connection"
+      }
+    },
+    {
+      "name": "connection-created-without-advertised-url",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/{{create-executor-connects-without-advertised-url.body.id}}/connection"
+      }
+    },
+    {
+      "name": "connection-without-advertised-url-and-reserved-host",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/{{create-executor-connects-without-advertised-url.body.id}}/connection",
+        "headers": {
+          "Host": "example.com:8080"
+        }
+      }
+    },
+    {
+      "name": "connection-without-advertised-url-from-upper-case-host",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/{{create-executor-connects-without-advertised-url.body.id}}/connection",
+        "headers": {
+          "Host": "EXECUTOR.example.invalid"
+        }
+      }
+    },
+    {
+      "name": "connection-without-advertised-url-and-host-with-a-space",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/{{create-executor-connects-without-advertised-url.body.id}}/connection",
+        "headers": {
+          "Host": "bad host"
+        }
+      }
+    },
+    {
+      "name": "executors-after-update",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors"
+      }
+    },
+    {
+      "name": "patch-created-disable",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
+        "json": {
+          "enabled": false
+        }
+      }
+    },
+    {
+      "name": "executors-after-disable",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors"
+      }
+    },
+    {
+      "name": "connection-created-disabled",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}/connection"
+      }
+    },
+    {
+      "name": "delete-created",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}"
+      }
+    },
+    {
+      "name": "executors-after-remove",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors"
+      }
+    },
+    {
+      "name": "delete-created-again",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}"
+      }
+    },
+    {
+      "name": "connection-removed",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}/connection"
+      }
+    },
+    {
+      "name": "patch-removed",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors/{{create-executor-connects.body.id}}",
+        "json": {
+          "label": "Back"
+        }
+      }
+    },
+    {
+      "name": "delete-second-created",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/executors/{{create-executor-connects-without-tls.body.id}}"
+      }
+    },
+    {
+      "name": "executors-at-end",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors"
+      }
+    },
+    {
+      "name": "create-advertised-url-expanding-to-4096-characters",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Expander One",
+          "direction": "executor-connects",
+          "advertisedUrl": "wss://e.example.invalid/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      }
+    },
+    {
+      "name": "create-advertised-url-expanding-to-4097-characters",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Expander Two",
+          "direction": "executor-connects",
+          "advertisedUrl": "wss://e.example.invalid/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/{executorId}/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-from-upper-case-host",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Host Upper",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "EXECUTOR.example.invalid"
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-from-ipv6-host",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Host IPv6",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "[::1]:8080"
+        }
+      }
+    },
+    {
+      "name": "create-without-advertised-url-from-host-with-trailing-dot",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/executors",
+        "json": {
+          "label": "Host Dot",
+          "direction": "executor-connects"
+        },
+        "headers": {
+          "Host": "executor.example.invalid."
+        }
+      }
+    },
+    {
+      "name": "executors-after-creates-from-host",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/executors"
+      }
+    },
+    {
+      "name": "executors-wrong-method",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/executors",
+        "json": {}
+      }
+    }
+  ],
+  "traps": true
+}

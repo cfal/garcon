@@ -1,0 +1,12 @@
+{"fn":"isManualBypassMode","args":[{"$":"undefined"}]}
+{"fn":"isManualBypassMode","args":["default"]}
+{"fn":"isManualBypassMode","args":["manualBypass"]}
+{"fn":"isManualBypassMode","args":["acceptEdits"]}
+{"fn":"isManualBypassMode","args":["bypassPermissions"]}
+{"fn":"isManualBypassMode","args":["plan"]}
+{"fn":"providerStartupPermissionMode","args":[{"$":"undefined"}]}
+{"fn":"providerStartupPermissionMode","args":["default"]}
+{"fn":"providerStartupPermissionMode","args":["manualBypass"]}
+{"fn":"providerStartupPermissionMode","args":["acceptEdits"]}
+{"fn":"providerStartupPermissionMode","args":["bypassPermissions"]}
+{"fn":"providerStartupPermissionMode","args":["plan"]}

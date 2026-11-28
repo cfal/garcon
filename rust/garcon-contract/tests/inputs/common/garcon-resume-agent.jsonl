@@ -1,0 +1,3 @@
+{"fn":"parseGarconResumeAgent","args":["<garcon-resume-agent ref=\"a\" chat-id=\"1000000000000001\">\r\nA < B & C\r\n</garcon-resume-agent>"]}
+{"fn":"parseGarconResumeAgent","args":["<garcon-resume-agent ref=\"a\" chat-id=\"1000000000000001\"><!-- </garcon-resume-agent> --><garcon-stop-agent chat-id=\"1000000000000001\" /></garcon-resume-agent>"]}
+{"fn":"parseGarconResumeAgent","args":["<garcon-resume-agent ref=\"a\" chat-id=\"1000000000000001\">Body</garcon-resume-agent>\n</garcon-resume-agent>"]}

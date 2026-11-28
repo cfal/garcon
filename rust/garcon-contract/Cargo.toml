@@ -1,0 +1,28 @@
+[package]
+name = "garcon-contract"
+version = "0.0.0"
+description = "Contracts shared by the Garcon server, worker, CLI, and web client; ports common/."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+garcon-js.workspace = true
+# Pins Unicode 17 normalization, matching Bun 1.4.3 and the collation data generation.
+icu_normalizer = { version = "=2.3.0", default-features = false, features = ["compiled_data"] }
+indexmap.workspace = true
+regex = "1"
+regress = { version = "0.12", features = ["utf16"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio-util.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+garcon-cases.workspace = true

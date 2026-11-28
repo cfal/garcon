@@ -10,7 +10,8 @@
     "server",
     "web",
     "native",
-    "server-agents/*"
+    "server-agents/*",
+    "rust/parity"
   ],
   "files": [
     "cli/",
@@ -51,7 +52,7 @@
     "test": "bun run test:server && bun run test:cli && bun run --cwd native test && bun run --cwd web test",
     "test:transcript-inventory": "bun scripts/validate-transcript-ledger-v5-cases.js",
     "test:cli": "bun run --cwd cli test",
-    "test:server": "bun test ./common/__tests__/*.test.js && bun test ./scripts/__tests__/*.test.js && bun scripts/run-test-files.js 'server-agents/**/__tests__/*.{test.js,test.ts}' && bun scripts/run-test-files.js 'server/**/__tests__/*.{test.js,test.ts}'",
+    "test:server": "bun test ./common/__tests__/*.test.js && bun test ./scripts/__tests__/*.test.js && bun test ./rust/parity/src/__tests__/*.test.ts && bun scripts/run-test-files.js 'server-agents/**/__tests__/*.{test.js,test.ts}' && bun scripts/run-test-files.js 'server/**/__tests__/*.{test.js,test.ts}'",
     "test:server:no-descriptor-paths": "bun test --preload ./scripts/test-preloads/no-descriptor-paths.ts server/runtime/files/__tests__/service.test.ts server/controller/routes/__tests__/files.test.js server/remote/__tests__/files-rpc.test.ts server/remote/__tests__/integration-conformance.test.ts",
     "test:integration": "bun run --cwd integration-tests test",
     "test:integration:server": "bun run --cwd integration-tests test:server",
@@ -66,10 +67,17 @@
     "test:live:codex": "bun run --cwd integration-tests test:live:codex",
     "test:live:opencode": "bun run --cwd integration-tests test:live:opencode",
     "lint:runtime": "eslint server/remote server-agents --no-warn-ignored --max-warnings=0",
+    "rust:build": "cargo build --locked --release --manifest-path rust/Cargo.toml",
+    "rust:bench": "bun rust/parity/bench.ts",
+    "parity:record": "bun rust/parity/cli.ts record",
+    "parity:replay": "bun rust/parity/cli.ts replay",
+    "parity:replay:rust": "bun rust/parity/cli.ts replay --build rust/target/release/garcon-server --label garcon-server --report rust/parity/replay-report.md",
+    "parity:unit:record": "bun rust/parity/cli.ts unit record",
+    "parity:unit:replay": "bun rust/parity/cli.ts unit replay",
     "lint": "bun run lint:runtime && bun run --cwd web lint",
     "check": "bun run lint && bun run typecheck",
     "typecheck:tests": "bun scripts/test-debt-gate.ts && bunx tsc -p tsconfig.tests.json",
-    "typecheck:server": "bun run --filter '@garcon/server-agent-*' --if-present typecheck && bun run --cwd server typecheck && bun run typecheck:tests",
+    "typecheck:server": "bun run --filter '@garcon/server-agent-*' --if-present typecheck && bun run --cwd server typecheck && bun run --cwd rust/parity typecheck && bun run typecheck:tests",
     "typecheck": "bun run typecheck:server && bun run --cwd cli typecheck && bun run --cwd web check && bun run --cwd integration-tests typecheck",
     "help": "bun run server --help"
   },

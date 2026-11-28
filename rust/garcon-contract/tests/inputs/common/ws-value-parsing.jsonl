@@ -1,0 +1,23 @@
+{"fn":"str","args":[" \tvalue "]}
+{"fn":"str","args":[{}]}
+{"fn":"str","args":[]}
+{"fn":"requiredStr","args":[" \tvalue "]}
+{"fn":"requiredStr","args":[false]}
+{"fn":"requiredStr","args":["﻿  "]}
+{"fn":"requiredPath","args":[" \t/path "]}
+{"fn":"requiredPath","args":[" "]}
+{"fn":"requiredPath","args":[12]}
+{"fn":"nonNegativeInt","args":[42]}
+{"fn":"nonNegativeInt","args":[{"$":"number","value":"-0"}]}
+{"fn":"nonNegativeInt","args":[-1]}
+{"fn":"nonNegativeInt","args":[0.5]}
+{"fn":"nonNegativeInt","args":[9007199254740991]}
+{"fn":"nonNegativeInt","args":[9007199254740992]}
+{"fn":"nonNegativeInt","args":["42"]}
+{"fn":"nonNegativeInt","args":[null]}
+{"fn":"canonicalChatId","args":["1783725900000123"]}
+{"fn":"canonicalChatId","args":["1783725900000"]}
+{"fn":"canonicalChatId","args":[1783725900000123]}
+{"fn":"canonicalChatId","args":[[]]}
+{"fn":"canonicalChatId","args":["0000000000000000"]}
+{"fn":"canonicalChatId","args":[]}

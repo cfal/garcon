@@ -1,0 +1,21 @@
+{
+  "module": "server-agents/common/src/usage/usage-pricing.ts",
+  "tests": [
+    "server-agents/common/src/usage/__tests__/usage-pricing.test.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "priceUsageRecord",
+      "argument": 0,
+      "guard": "rust/garcon-agents-common/tests/oracles/usage-pricing.ts#isTypedUsageRecord",
+      "dropped": 9,
+      "kept": 60
+    }
+  ],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 243,
+  "sha256": "04d17c5b5a6ca893d4bd2b67854fdb1a9b3116b1b299cef93118b987dfc4cfeb"
+}

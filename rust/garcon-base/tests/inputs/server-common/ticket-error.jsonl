@@ -1,0 +1,27 @@
+{"fn":"ticketDomainErrorFixture","args":["TICKET_VALIDATION_FAILED","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_UNAUTHORIZED","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_FORBIDDEN","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_COMMANDS_DISABLED","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_NOT_FOUND","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_COMMENT_NOT_FOUND","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_CHAT_NOT_FOUND","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_STORE_CHANGED","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_REVISION_CONFLICT","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_COMMENT_REVISION_CONFLICT","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_ALREADY_CLAIMED","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_REQUEST_CONFLICT","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_COLLECTION_CHANGED","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_RELATIONSHIP_CYCLE","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_INVALID_TRANSITION","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_LIMIT_REACHED","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_SOURCE_UNAVAILABLE","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_REQUEST_TOO_LARGE","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_RESULT_TOO_LARGE","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_PROJECT_UNAVAILABLE","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_STORAGE_UNAVAILABLE","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_INTERNAL_ERROR","synthetic ticket failure"]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_REVISION_CONFLICT","fixture ticket",{"id":"G-42","number":42,"revision":2,"title":"fixture","description":"description","project":"fixture","status":"open","resolution":null,"priority":0,"labels":[],"assignee":null,"parentId":null,"createdAt":"2024-01-01T00:00:00.000Z","updatedAt":"2024-01-01T00:00:00.000Z","createdBy":{"kind":"user","username":"local","principalMode":"local","declaredChatId":null}}]}
+{"fn":"ticketDomainErrorFixture","args":["TICKET_COMMENT_REVISION_CONFLICT","fixture comment",{"$":"undefined"},{"id":"aaaaaaaa-0000-4000-8000-aaaaaaaaaaaa","ticketId":"G-42","sequence":1,"revision":2,"body":"fixture","deletedAt":null,"author":{"kind":"user","username":"local","principalMode":"local","declaredChatId":null},"createdAt":"2024-01-01T00:00:00.000Z","updatedAt":"2024-01-01T00:00:00.000Z"}]}
+{"fn":"validateTicketInputFixture","args":[4]}
+{"fn":"validateTicketInputFixture","args":["/fixture"]}
+{"fn":"validateTicketInputFixture","args":[1,true]}

@@ -1,0 +1,22 @@
+{
+  "module": "common/chat-tags-contracts.ts",
+  "tests": [
+    "common/__tests__/chat-metadata-contracts.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseSetChatTagsRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseSetChatTagsResponse",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 127,
+  "sha256": "d47eea597f5ee78cb2b870877c9c67d5281f192fbb21b09a182f9884a7727287"
+}

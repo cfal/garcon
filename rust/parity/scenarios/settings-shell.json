@@ -1,0 +1,74 @@
+{
+  "name": "settings-shell",
+  "description": "A settings write followed by the SPA shell and manifest, which render the app title from workspace settings.",
+  "steps": [
+    {
+      "name": "shell-default-title",
+      "http": {
+        "method": "GET",
+        "path": "/",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "set-title",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/settings",
+        "json": {
+          "ui": {
+            "appIdentity": {
+              "title": "  Parity <b>&\"ü 雪 "
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "shell-custom-title",
+      "http": {
+        "method": "GET",
+        "path": "/",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "manifest-custom-title",
+      "http": {
+        "method": "GET",
+        "path": "/site.webmanifest",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "chat-shell-custom-title",
+      "http": {
+        "method": "GET",
+        "path": "/chat/parity",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "clear-title",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/settings",
+        "json": {
+          "ui": {
+            "appIdentity": {
+              "title": ""
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "shell-cleared-title",
+      "http": {
+        "method": "GET",
+        "path": "/",
+        "auth": "none"
+      }
+    }
+  ]
+}

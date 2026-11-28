@@ -1,0 +1,42 @@
+{
+  "module": "common/git-request-validation.ts",
+  "tests": [
+    "common/__tests__/gh-identity.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/git-request-validation.jsonl",
+  "guards": [
+    {
+      "fn": "validateGhRequest",
+      "argument": 0,
+      "guard": "isGhMethod",
+      "dropped": 6,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "isGitDocumentRef",
+      "argument": 0
+    },
+    {
+      "fn": "isGitMethod",
+      "argument": 0
+    },
+    {
+      "fn": "isGhMethod",
+      "argument": 0
+    },
+    {
+      "fn": "validateGhRequest",
+      "argument": 1
+    },
+    {
+      "fn": "validateGitRequest",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 2218,
+  "sha256": "f21d65d2c09185f3e8fd1db50aaeef020c623117e41825e495b7f25838851cac"
+}

@@ -1,0 +1,6 @@
+{"fn":"stripResolvedFileMentionContext","args":[""]}
+{"fn":"stripResolvedFileMentionContext","args":["Read @file"]}
+{"fn":"stripResolvedFileMentionContext","args":["😀 Read @file\n\nReferenced file contents from @file mentions:\n\nsecret"]}
+{"fn":"stripResolvedFileMentionContext","args":["\n\nReferenced file contents from @file mentions:\n\nmentioned"]}
+{"fn":"stripResolvedFileMentionContext","args":["a\n\nReferenced file contents from @file mentions:\n\nsource\n\nReferenced file contents from @file mentions:\n\nsecond"]}
+{"fn":"stripResolvedFileMentionContext","args":["Read @file\n\nReferenced file contents from @file mentions:\npartial"]}

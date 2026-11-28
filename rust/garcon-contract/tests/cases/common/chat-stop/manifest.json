@@ -1,0 +1,11 @@
+{
+  "module": "common/chat-stop.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-stop.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 6,
+  "sha256": "3bfe8a1abdbd6834e552ba7fc5f2e6d7664b279b379b1bd27844380a40dd403a"
+}

@@ -1,0 +1,6 @@
+{"fn":"isCodexSolModel","args":["gpt-6.1-sol"]}
+{"fn":"isCodexSolModel","args":["gpt-6-sol"]}
+{"fn":"isCodexSolModel","args":[":gpt-5.6-sol"]}
+{"fn":"isCodexSolModel","args":["outer:inner:gpt-6.1-sol"]}
+{"fn":"isCodexSolModel","args":["gpt-6.2-sol:"]}
+{"fn":"isCodexSolModel","args":["endpoint:GPT-6.2-SOL"]}

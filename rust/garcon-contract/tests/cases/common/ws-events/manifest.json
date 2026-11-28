@@ -1,0 +1,59 @@
+{
+  "module": "common/ws-events.ts",
+  "tests": [
+    "rust/garcon-contract/tests/inputs/common/ws-events-session.cases.ts"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/ws-events.jsonl",
+  "guards": [
+    {
+      "fn": "new WsPongMessage",
+      "argument": 1,
+      "guard": "rust/garcon-contract/tests/inputs/common/ws-events-guards.ts#finiteNumber",
+      "dropped": 3,
+      "kept": 7
+    },
+    {
+      "fn": "new WsPongMessage",
+      "argument": 3,
+      "guard": "rust/garcon-contract/tests/inputs/common/ws-events-guards.ts#processing",
+      "dropped": 28,
+      "kept": 11
+    },
+    {
+      "fn": "new ReconnectStateMessage",
+      "argument": 0,
+      "guard": "rust/garcon-contract/tests/inputs/common/ws-events-guards.ts#processing",
+      "dropped": 34,
+      "kept": 12
+    },
+    {
+      "fn": "new ReconnectStateMessage",
+      "argument": 1,
+      "guard": "rust/garcon-contract/tests/inputs/common/ws-events-guards.ts#controlResults",
+      "dropped": 35,
+      "kept": 27
+    },
+    {
+      "fn": "new ClientRequestErrorMessage",
+      "argument": 2,
+      "guard": "rust/garcon-contract/tests/inputs/common/ws-events-guards.ts#clientRequestErrorCode",
+      "dropped": 15,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "parseServerWsMessage",
+      "argument": 0
+    },
+    {
+      "fn": "isChatListInvalidationReason",
+      "argument": 0
+    }
+  ],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 407,
+  "sha256": "86dcab0bd3399d607b52eec48264c0be6512759efdfe0865857b1d7d4bcd2c4e"
+}

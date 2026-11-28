@@ -1,0 +1,12 @@
+{
+  "module": "rust/garcon-agent-antigravity/tests/oracles/tool-use.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-antigravity/tests/inputs/tool-use.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 46,
+  "sha256": "08cbf48a22c2590c191c799e3ff560dd85ee1c1b4135a7366c63001366597798"
+}

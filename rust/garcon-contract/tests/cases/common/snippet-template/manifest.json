@@ -1,0 +1,22 @@
+{
+  "module": "common/snippet-template.ts",
+  "tests": [
+    "server/controller/snippets/__tests__/template.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "expandScheduledSnippetTemplate",
+      "argument": 1
+    },
+    {
+      "fn": "expandSnippetTemplate",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 175,
+  "sha256": "9eddce62cc6503cc02617ecf49d1ca5c6239fb32ee315581e956b5f9e94b5b23"
+}

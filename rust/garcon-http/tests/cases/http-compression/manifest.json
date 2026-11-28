@@ -1,0 +1,22 @@
+{
+  "module": "server/controller/lib/http-compression.ts",
+  "tests": [
+    "server/controller/lib/__tests__/http-compression.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.args[0]",
+      "type": "a Request instance",
+      "where": "args",
+      "at": null,
+      "fn": "compressHttpResponse",
+      "count": 53
+    }
+  ],
+  "cases": 78,
+  "sha256": "d3c2d6364ab84fdf1422ae1cae6a2fb70641fff2646d5e7e06f3091063162699"
+}

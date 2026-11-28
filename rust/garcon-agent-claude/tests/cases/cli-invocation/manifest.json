@@ -1,0 +1,22 @@
+{
+  "module": "server-agents/claude/src/agents/claude/cli-invocation.ts",
+  "tests": [
+    "server-agents/claude/src/agents/claude/__tests__/cli-invocation.test.js"
+  ],
+  "inputs": "rust/garcon-agent-claude/tests/inputs/cli-invocation.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.args[2].binary",
+      "type": "a function",
+      "where": "args",
+      "at": "server-agents/claude/src/agents/claude/__tests__/cli-invocation.test.js:72:20",
+      "fn": "runSingleQuery",
+      "count": 1
+    }
+  ],
+  "cases": 73,
+  "sha256": "212229cd0df9e7505b3e8f30144e660aaee21f33139c50239351659974e45bb3"
+}

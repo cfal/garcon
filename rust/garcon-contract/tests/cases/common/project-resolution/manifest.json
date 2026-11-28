@@ -1,0 +1,26 @@
+{
+  "module": "common/project-resolution.ts",
+  "tests": [
+    "common/__tests__/project-resolution.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/project-resolution.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "projectTargetKey",
+      "argument": 0
+    },
+    {
+      "fn": "isProjectUnavailableReason",
+      "argument": 0
+    },
+    {
+      "fn": "parseProjectResolutionResponse",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 277,
+  "sha256": "6f41617b6eb404a7b65d4150706e096d8d1c8bd5f19a7746a0f858ca7a9c04b3"
+}

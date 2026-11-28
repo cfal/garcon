@@ -1,0 +1,44 @@
+[package]
+name = "garcon-stores"
+version = "0.0.0"
+description = "Controller-owned stores: credentials, settings, and the workspace catalogs."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+argon2 = "0.5"
+async-trait.workspace = true
+bcrypt = "0.19.3"
+garcon-base.workspace = true
+garcon-contract.workspace = true
+garcon-interface.workspace = true
+garcon-js.workspace = true
+garcon-link.workspace = true
+getrandom = "0.4"
+indexmap.workspace = true
+jsonwebtoken = { version = "12", default-features = false, features = ["rust_crypto"] }
+percent-encoding = "2"
+regex = "1"
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util = { workspace = true, features = ["rt"] }
+url.workspace = true
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+garcon-cases.workspace = true
+tempfile.workspace = true

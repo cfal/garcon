@@ -1,0 +1,16 @@
+{"fn":"parseLoginRequest","args":[{"username":" current ","password":" short "}]}
+{"fn":"parseLoginRequest","args":[{}]}
+{"fn":"parseLoginRequest","args":[{"username":"owner","password":"p","extra":1}]}
+{"fn":"parseRegisterRequest","args":[{"username":" owner ","password":"password"}]}
+{"fn":"parseRegisterRequest","args":[{"username":" ","password":""}]}
+{"fn":"parseRegisterRequest","args":[{"username":"owner","password":"short"}]}
+{"fn":"parseAuthUser","args":[{"id":" stable ","username":" exact "}]}
+{"fn":"parseAuthUser","args":[{"id":"owner"}]}
+{"fn":"parseAuthSessionResponse","args":[{"success":false,"user":{},"token":""}]}
+{"fn":"validateUsername","args":["\ufffd"]}
+{"fn":"validateUsername","args":["\ufeff owner \u00a0"]}
+{"fn":"validateUsername","args":["owner\u0085suffix"]}
+{"fn":"isAuthSessionId","args":["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"]}
+{"fn":"isAuthSessionId","args":["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n"]}
+{"fn":"isAuthSessionId","args":["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeF"]}
+{"fn":"isAuthSessionId","args":[null]}

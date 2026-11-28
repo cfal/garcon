@@ -1,0 +1,14 @@
+{
+  "module": "server/runtime/git/diff-file-list.ts",
+  "tests": [
+    "rust/parity/fixtures/git/pure.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 156,
+  "sha256": "09c42eb5cd2d496a41a87be6f1cd67913a9d95bf09995a401d85d9df2051801d"
+}

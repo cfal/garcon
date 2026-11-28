@@ -1,0 +1,24 @@
+{
+  "name": "static-assets-duplicate-encoding",
+  "description": "Static asset compression joins ordered Accept-Encoding fields before negotiating.",
+  "steps": [
+    {
+      "name": "gzip-after-unsupported-encoding",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/assets/app.css",
+        "auth": "none",
+        "rawHeaders": [["Accept-Encoding", "br"], ["Accept-Encoding", "gzip"]]
+      }
+    },
+    {
+      "name": "later-gzip-zero-quality-wins",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/assets/app.css",
+        "auth": "none",
+        "rawHeaders": [["Accept-Encoding", "gzip"], ["Accept-Encoding", "gzip;q=0"]]
+      }
+    }
+  ]
+}

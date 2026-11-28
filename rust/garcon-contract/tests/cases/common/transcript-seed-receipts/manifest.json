@@ -1,0 +1,59 @@
+{
+  "module": "common/transcript-seed.ts",
+  "tests": [
+    "rust/garcon-contract/tests/inputs/common/transcript-seed-receipts.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "createNativeSeedReceipt",
+      "argument": 0,
+      "guard": "rust/garcon-contract/tests/inputs/common/transcript-seed-receipts-guards.ts#acceptsCreateInput",
+      "dropped": 40,
+      "kept": 60
+    },
+    {
+      "fn": "receiptForCarriedContext",
+      "argument": 0,
+      "guard": "rust/garcon-contract/tests/inputs/common/transcript-seed-receipts-guards.ts#acceptsContext",
+      "dropped": 0,
+      "kept": 27
+    },
+    {
+      "fn": "receiptForCarriedContext",
+      "argument": 2,
+      "guard": "rust/garcon-contract/tests/inputs/common/transcript-seed-receipts-guards.ts#acceptsPlacement",
+      "dropped": 10,
+      "kept": 0
+    },
+    {
+      "fn": "retargetNativeSeedReceipt",
+      "argument": 0,
+      "guard": "rust/garcon-contract/tests/inputs/common/transcript-seed-receipts-guards.ts#acceptsReceipt",
+      "dropped": 102,
+      "kept": 32
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "createNativeSeedReceipt",
+      "argument": 0
+    },
+    {
+      "fn": "parseNativeSeedReceipt",
+      "argument": 0
+    },
+    {
+      "fn": "receiptForCarriedContext",
+      "argument": 0
+    },
+    {
+      "fn": "retargetNativeSeedReceipt",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 265,
+  "sha256": "368d7e7e5f60070d91ca2d107a4946c710581d667ba3164ac0fc5a1aec38ef6f"
+}

@@ -1,0 +1,23 @@
+{
+  "module": "common/json.ts",
+  "tests": [
+    "common/__tests__/json.test.js",
+    "common/__tests__/tickets.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/json.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isRecord",
+      "argument": 0
+    },
+    {
+      "fn": "stableJsonStringify",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 149,
+  "sha256": "9259ebb09e03eb9256c8d065eb5aec1cfef6c0a4591760c67e82fd6df5a6b7d2"
+}

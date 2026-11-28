@@ -1,0 +1,43 @@
+{
+  "module": "common/chat-execution-command-parsing.ts",
+  "tests": [
+    "common/__tests__/chat-command-contracts.test.js",
+    "rust/garcon-contract/tests/inputs/common/chat-execution-command-parsing.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "optionalAgentHandoffRequest",
+      "argument": 0
+    },
+    {
+      "fn": "optionalAgentSettings",
+      "argument": 0
+    },
+    {
+      "fn": "optionalApiProtocol",
+      "argument": 0
+    },
+    {
+      "fn": "optionalPermissionMode",
+      "argument": 0
+    },
+    {
+      "fn": "optionalThinkingMode",
+      "argument": 0
+    },
+    {
+      "fn": "parseAgentHandoffCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "requiredAgentSettings",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 455,
+  "sha256": "a96354981343cc93c179e9fd5b302dd5f2fcdb11776fc00001035d87da400f60"
+}

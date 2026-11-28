@@ -1,0 +1,1629 @@
+{
+  "scenario": "static-assets-base-path",
+  "cases": [
+    {
+      "name": "bare-mount-redirect",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "0",
+          "location": "/tools/garcon/?next=%2Fchat"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/tools/garcon?next=%2Fchat"
+        },
+        "status": 308
+      },
+      "noise": []
+    },
+    {
+      "name": "shell-root",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "<!doctype html>\n<html lang=\"en\">\n\t<head>\n\t\t<meta charset=\"utf-8\" />\n\t\t<meta name=\"apple-mobile-web-app-title\" content=\"Garcon\" />\n\t\t<link rel=\"manifest\" href=\"/tools/garcon/site.webmanifest\" />\n\t\t<link rel=\"icon\" href=\"/tools/garcon/icons/icon.svg\" type=\"image/svg+xml\" />\n\t\t<title>Garcon</title>\n\t\t<script>globalThis.__GARCON_BASE__ = \"/tools/garcon\";</script>\n\t\t\t<script>globalThis.__GARCON_APP_TITLE__={\"title\":\"Garcon\",\"version\":0}</script>\n\t</head>\n\t<body>\n\t\t<div id=\"app\">Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. </div>\n\t\t<script type=\"module\" src=\"/tools/garcon/_app/immutable/entry/start.js\"></script>\n\t</body>\n</html>\n"
+        },
+        "headers": {
+          "cache-control": "no-cache, no-store, must-revalidate",
+          "content-encoding": "gzip",
+          "content-type": "text/html; charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "shell-chat-id",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "<!doctype html>\n<html lang=\"en\">\n\t<head>\n\t\t<meta charset=\"utf-8\" />\n\t\t<meta name=\"apple-mobile-web-app-title\" content=\"Garcon\" />\n\t\t<link rel=\"manifest\" href=\"/tools/garcon/site.webmanifest\" />\n\t\t<link rel=\"icon\" href=\"/tools/garcon/icons/icon.svg\" type=\"image/svg+xml\" />\n\t\t<title>Garcon</title>\n\t\t<script>globalThis.__GARCON_BASE__ = \"/tools/garcon\";</script>\n\t\t\t<script>globalThis.__GARCON_APP_TITLE__={\"title\":\"Garcon\",\"version\":0}</script>\n\t</head>\n\t<body>\n\t\t<div id=\"app\">Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. </div>\n\t\t<script type=\"module\" src=\"/tools/garcon/_app/immutable/entry/start.js\"></script>\n\t</body>\n</html>\n"
+        },
+        "headers": {
+          "cache-control": "no-cache, no-store, must-revalidate",
+          "content-encoding": "gzip",
+          "content-type": "text/html; charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/chat/parity"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "manifest",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "display": "standalone",
+            "icons": [
+              {
+                "sizes": "192x192",
+                "src": "icons/icon-192.png",
+                "type": "image/png"
+              }
+            ],
+            "name": "Garcon",
+            "short_name": "Garcon",
+            "start_url": "."
+          }
+        },
+        "headers": {
+          "cache-control": "no-cache, no-store, must-revalidate",
+          "content-length": "193",
+          "content-type": "application/manifest+json; charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/site.webmanifest"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "immutable-js",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "// start fixture line 0 keeps this asset above the compression threshold.\n// start fixture line 1 keeps this asset above the compression threshold.\n// start fixture line 2 keeps this asset above the compression threshold.\n// start fixture line 3 keeps this asset above the compression threshold.\n// start fixture line 4 keeps this asset above the compression threshold.\n// start fixture line 5 keeps this asset above the compression threshold.\n// start fixture line 6 keeps this asset above the compression threshold.\n// start fixture line 7 keeps this asset above the compression threshold.\n// start fixture line 8 keeps this asset above the compression threshold.\n// start fixture line 9 keeps this asset above the compression threshold.\n// start fixture line 10 keeps this asset above the compression threshold.\n// start fixture line 11 keeps this asset above the compression threshold.\n// start fixture line 12 keeps this asset above the compression threshold.\n// start fixture line 13 keeps this asset above the compression threshold.\n// start fixture line 14 keeps this asset above the compression threshold.\n// start fixture line 15 keeps this asset above the compression threshold.\n// start fixture line 16 keeps this asset above the compression threshold.\n// start fixture line 17 keeps this asset above the compression threshold.\n// start fixture line 18 keeps this asset above the compression threshold.\n// start fixture line 19 keeps this asset above the compression threshold.\n// start fixture line 20 keeps this asset above the compression threshold.\n// start fixture line 21 keeps this asset above the compression threshold.\n// start fixture line 22 keeps this asset above the compression threshold.\n// start fixture line 23 keeps this asset above the compression threshold.\n// start fixture line 24 keeps this asset above the compression threshold.\n// start fixture line 25 keeps this asset above the compression threshold.\n// start fixture line 26 keeps this asset above the compression threshold.\n// start fixture line 27 keeps this asset above the compression threshold.\n// start fixture line 28 keeps this asset above the compression threshold.\n// start fixture line 29 keeps this asset above the compression threshold.\n// start fixture line 30 keeps this asset above the compression threshold.\n// start fixture line 31 keeps this asset above the compression threshold.\n// start fixture line 32 keeps this asset above the compression threshold.\n// start fixture line 33 keeps this asset above the compression threshold.\n// start fixture line 34 keeps this asset above the compression threshold.\n// start fixture line 35 keeps this asset above the compression threshold.\n// start fixture line 36 keeps this asset above the compression threshold.\n// start fixture line 37 keeps this asset above the compression threshold.\n// start fixture line 38 keeps this asset above the compression threshold.\n// start fixture line 39 keeps this asset above the compression threshold.\n"
+        },
+        "headers": {
+          "cache-control": "public, max-age=31536000, immutable",
+          "content-encoding": "gzip",
+          "content-type": "text/javascript;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/entry/start.js"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "icon-svg",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/></svg>\n"
+        },
+        "headers": {
+          "cache-control": "public, max-age=31536000, immutable",
+          "content-encoding": "gzip",
+          "content-type": "image/svg+xml",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/icons/icon.svg"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "missing-asset",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Not found",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/missing.js"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-root",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-asset",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/entry/start.js"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "mount-prefix-sibling",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/tools/garconx/_app/version.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-api",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/status"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "bare-mount-redirect~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "0",
+          "location": "/tools/garcon/?next=%2Fchat"
+        },
+        "request": {
+          "auth": "none",
+          "method": "HEAD",
+          "path": "/tools/garcon?next=%2Fchat"
+        },
+        "status": 308
+      },
+      "noise": []
+    },
+    {
+      "name": "bare-mount-redirect~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "0",
+          "location": "/tools/garcon/?next=%2Fchat/"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/tools/garcon?next=%2Fchat/"
+        },
+        "status": 308
+      },
+      "noise": []
+    },
+    {
+      "name": "bare-mount-redirect~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "0",
+          "location": "/tools/garcon/?next=%2Fchat/../garcon?next=%2Fchat"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/tools/garcon?next=%2Fchat/../garcon?next=%2Fchat"
+        },
+        "status": 308
+      },
+      "noise": []
+    },
+    {
+      "name": "bare-mount-redirect~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "0",
+          "location": "/tools/garcon/?next=%2Fchat/%2e%2e%2fauth.json"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/tools/garcon?next=%2Fchat/%2e%2e%2fauth.json"
+        },
+        "status": 308
+      },
+      "noise": []
+    },
+    {
+      "name": "bare-mount-redirect~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "0",
+          "location": "/tools/garcon/?next=%2Fchat/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/tools/garcon?next=%2Fchat/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 308
+      },
+      "noise": []
+    },
+    {
+      "name": "bare-mount-redirect~double-slash",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "0",
+          "location": "/tools/garcon/?next=%2Fchat"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "//tools/garcon?next=%2Fchat"
+        },
+        "status": 308
+      },
+      "noise": []
+    },
+    {
+      "name": "shell-root~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-cache, no-store, must-revalidate",
+          "content-length": "1906",
+          "content-type": "text/html; charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "HEAD",
+          "path": "/"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "shell-root~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "<!doctype html>\n<html lang=\"en\">\n\t<head>\n\t\t<meta charset=\"utf-8\" />\n\t\t<meta name=\"apple-mobile-web-app-title\" content=\"Garcon\" />\n\t\t<link rel=\"manifest\" href=\"/tools/garcon/site.webmanifest\" />\n\t\t<link rel=\"icon\" href=\"/tools/garcon/icons/icon.svg\" type=\"image/svg+xml\" />\n\t\t<title>Garcon</title>\n\t\t<script>globalThis.__GARCON_BASE__ = \"/tools/garcon\";</script>\n\t\t\t<script>globalThis.__GARCON_APP_TITLE__={\"title\":\"Garcon\",\"version\":0}</script>\n\t</head>\n\t<body>\n\t\t<div id=\"app\">Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. </div>\n\t\t<script type=\"module\" src=\"/tools/garcon/_app/immutable/entry/start.js\"></script>\n\t</body>\n</html>\n"
+        },
+        "headers": {
+          "cache-control": "no-cache, no-store, must-revalidate",
+          "content-encoding": "gzip",
+          "content-type": "text/html; charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "shell-root~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/../"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "shell-root~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "shell-root~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "shell-root~double-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "//"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "shell-chat-id~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-cache, no-store, must-revalidate",
+          "content-length": "1906",
+          "content-type": "text/html; charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "HEAD",
+          "path": "/chat/parity"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "shell-chat-id~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/chat/parity/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "shell-chat-id~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "<!doctype html>\n<html lang=\"en\">\n\t<head>\n\t\t<meta charset=\"utf-8\" />\n\t\t<meta name=\"apple-mobile-web-app-title\" content=\"Garcon\" />\n\t\t<link rel=\"manifest\" href=\"/tools/garcon/site.webmanifest\" />\n\t\t<link rel=\"icon\" href=\"/tools/garcon/icons/icon.svg\" type=\"image/svg+xml\" />\n\t\t<title>Garcon</title>\n\t\t<script>globalThis.__GARCON_BASE__ = \"/tools/garcon\";</script>\n\t\t\t<script>globalThis.__GARCON_APP_TITLE__={\"title\":\"Garcon\",\"version\":0}</script>\n\t</head>\n\t<body>\n\t\t<div id=\"app\">Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. </div>\n\t\t<script type=\"module\" src=\"/tools/garcon/_app/immutable/entry/start.js\"></script>\n\t</body>\n</html>\n"
+        },
+        "headers": {
+          "cache-control": "no-cache, no-store, must-revalidate",
+          "content-encoding": "gzip",
+          "content-type": "text/html; charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/chat/parity/../parity"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "shell-chat-id~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/chat/parity/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "shell-chat-id~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/chat/parity/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "shell-chat-id~double-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "//chat/parity"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "manifest~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-cache, no-store, must-revalidate",
+          "content-length": "193",
+          "content-type": "application/manifest+json; charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "HEAD",
+          "path": "/site.webmanifest"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "manifest~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/site.webmanifest/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "manifest~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "display": "standalone",
+            "icons": [
+              {
+                "sizes": "192x192",
+                "src": "icons/icon-192.png",
+                "type": "image/png"
+              }
+            ],
+            "name": "Garcon",
+            "short_name": "Garcon",
+            "start_url": "."
+          }
+        },
+        "headers": {
+          "cache-control": "no-cache, no-store, must-revalidate",
+          "content-length": "193",
+          "content-type": "application/manifest+json; charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/site.webmanifest/../site.webmanifest"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "manifest~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/site.webmanifest/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "manifest~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/site.webmanifest/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "manifest~double-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "//site.webmanifest"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "immutable-js~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "public, max-age=31536000, immutable",
+          "content-length": "2990",
+          "content-type": "text/javascript;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "HEAD",
+          "path": "/_app/immutable/entry/start.js"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "immutable-js~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "// start fixture line 0 keeps this asset above the compression threshold.\n// start fixture line 1 keeps this asset above the compression threshold.\n// start fixture line 2 keeps this asset above the compression threshold.\n// start fixture line 3 keeps this asset above the compression threshold.\n// start fixture line 4 keeps this asset above the compression threshold.\n// start fixture line 5 keeps this asset above the compression threshold.\n// start fixture line 6 keeps this asset above the compression threshold.\n// start fixture line 7 keeps this asset above the compression threshold.\n// start fixture line 8 keeps this asset above the compression threshold.\n// start fixture line 9 keeps this asset above the compression threshold.\n// start fixture line 10 keeps this asset above the compression threshold.\n// start fixture line 11 keeps this asset above the compression threshold.\n// start fixture line 12 keeps this asset above the compression threshold.\n// start fixture line 13 keeps this asset above the compression threshold.\n// start fixture line 14 keeps this asset above the compression threshold.\n// start fixture line 15 keeps this asset above the compression threshold.\n// start fixture line 16 keeps this asset above the compression threshold.\n// start fixture line 17 keeps this asset above the compression threshold.\n// start fixture line 18 keeps this asset above the compression threshold.\n// start fixture line 19 keeps this asset above the compression threshold.\n// start fixture line 20 keeps this asset above the compression threshold.\n// start fixture line 21 keeps this asset above the compression threshold.\n// start fixture line 22 keeps this asset above the compression threshold.\n// start fixture line 23 keeps this asset above the compression threshold.\n// start fixture line 24 keeps this asset above the compression threshold.\n// start fixture line 25 keeps this asset above the compression threshold.\n// start fixture line 26 keeps this asset above the compression threshold.\n// start fixture line 27 keeps this asset above the compression threshold.\n// start fixture line 28 keeps this asset above the compression threshold.\n// start fixture line 29 keeps this asset above the compression threshold.\n// start fixture line 30 keeps this asset above the compression threshold.\n// start fixture line 31 keeps this asset above the compression threshold.\n// start fixture line 32 keeps this asset above the compression threshold.\n// start fixture line 33 keeps this asset above the compression threshold.\n// start fixture line 34 keeps this asset above the compression threshold.\n// start fixture line 35 keeps this asset above the compression threshold.\n// start fixture line 36 keeps this asset above the compression threshold.\n// start fixture line 37 keeps this asset above the compression threshold.\n// start fixture line 38 keeps this asset above the compression threshold.\n// start fixture line 39 keeps this asset above the compression threshold.\n"
+        },
+        "headers": {
+          "cache-control": "public, max-age=31536000, immutable",
+          "content-encoding": "gzip",
+          "content-type": "text/javascript;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/entry/start.js/"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "immutable-js~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "// start fixture line 0 keeps this asset above the compression threshold.\n// start fixture line 1 keeps this asset above the compression threshold.\n// start fixture line 2 keeps this asset above the compression threshold.\n// start fixture line 3 keeps this asset above the compression threshold.\n// start fixture line 4 keeps this asset above the compression threshold.\n// start fixture line 5 keeps this asset above the compression threshold.\n// start fixture line 6 keeps this asset above the compression threshold.\n// start fixture line 7 keeps this asset above the compression threshold.\n// start fixture line 8 keeps this asset above the compression threshold.\n// start fixture line 9 keeps this asset above the compression threshold.\n// start fixture line 10 keeps this asset above the compression threshold.\n// start fixture line 11 keeps this asset above the compression threshold.\n// start fixture line 12 keeps this asset above the compression threshold.\n// start fixture line 13 keeps this asset above the compression threshold.\n// start fixture line 14 keeps this asset above the compression threshold.\n// start fixture line 15 keeps this asset above the compression threshold.\n// start fixture line 16 keeps this asset above the compression threshold.\n// start fixture line 17 keeps this asset above the compression threshold.\n// start fixture line 18 keeps this asset above the compression threshold.\n// start fixture line 19 keeps this asset above the compression threshold.\n// start fixture line 20 keeps this asset above the compression threshold.\n// start fixture line 21 keeps this asset above the compression threshold.\n// start fixture line 22 keeps this asset above the compression threshold.\n// start fixture line 23 keeps this asset above the compression threshold.\n// start fixture line 24 keeps this asset above the compression threshold.\n// start fixture line 25 keeps this asset above the compression threshold.\n// start fixture line 26 keeps this asset above the compression threshold.\n// start fixture line 27 keeps this asset above the compression threshold.\n// start fixture line 28 keeps this asset above the compression threshold.\n// start fixture line 29 keeps this asset above the compression threshold.\n// start fixture line 30 keeps this asset above the compression threshold.\n// start fixture line 31 keeps this asset above the compression threshold.\n// start fixture line 32 keeps this asset above the compression threshold.\n// start fixture line 33 keeps this asset above the compression threshold.\n// start fixture line 34 keeps this asset above the compression threshold.\n// start fixture line 35 keeps this asset above the compression threshold.\n// start fixture line 36 keeps this asset above the compression threshold.\n// start fixture line 37 keeps this asset above the compression threshold.\n// start fixture line 38 keeps this asset above the compression threshold.\n// start fixture line 39 keeps this asset above the compression threshold.\n"
+        },
+        "headers": {
+          "cache-control": "public, max-age=31536000, immutable",
+          "content-encoding": "gzip",
+          "content-type": "text/javascript;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/entry/start.js/../start.js"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "immutable-js~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Not found",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/entry/start.js/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "immutable-js~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Not found",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/entry/start.js/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "immutable-js~double-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "//_app/immutable/entry/start.js"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "icon-svg~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "public, max-age=31536000, immutable",
+          "content-length": "1747",
+          "content-type": "image/svg+xml"
+        },
+        "request": {
+          "auth": "none",
+          "method": "HEAD",
+          "path": "/icons/icon.svg"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "icon-svg~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/></svg>\n"
+        },
+        "headers": {
+          "cache-control": "public, max-age=31536000, immutable",
+          "content-encoding": "gzip",
+          "content-type": "image/svg+xml",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/icons/icon.svg/"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "icon-svg~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/><rect width=\"1\" height=\"1\"/></svg>\n"
+        },
+        "headers": {
+          "cache-control": "public, max-age=31536000, immutable",
+          "content-encoding": "gzip",
+          "content-type": "image/svg+xml",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/icons/icon.svg/../icon.svg"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "icon-svg~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Not found",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/icons/icon.svg/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "icon-svg~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Not found",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/icons/icon.svg/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "icon-svg~double-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "//icons/icon.svg"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "missing-asset~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "87",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "HEAD",
+          "path": "/_app/immutable/missing.js"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "missing-asset~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Not found",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/missing.js/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "missing-asset~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Not found",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/missing.js/../missing.js"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "missing-asset~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Not found",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/missing.js/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "missing-asset~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Not found",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/missing.js/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "missing-asset~double-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "//_app/immutable/missing.js"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-root~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "9"
+        },
+        "request": {
+          "auth": "none",
+          "method": "HEAD",
+          "path": "/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-root~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-root~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/../"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-root~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-root~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-root~double-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "//"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-asset~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "9"
+        },
+        "request": {
+          "auth": "none",
+          "method": "HEAD",
+          "path": "/_app/immutable/entry/start.js"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-asset~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/entry/start.js/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-asset~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/entry/start.js/../start.js"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-asset~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/entry/start.js/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-asset~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/_app/immutable/entry/start.js/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-asset~double-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "//_app/immutable/entry/start.js"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "mount-prefix-sibling~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "9"
+        },
+        "request": {
+          "auth": "none",
+          "method": "HEAD",
+          "path": "/tools/garconx/_app/version.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "mount-prefix-sibling~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/tools/garconx/_app/version.json/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "mount-prefix-sibling~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/tools/garconx/_app/version.json/../version.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "mount-prefix-sibling~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/tools/garconx/_app/version.json/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "mount-prefix-sibling~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/tools/garconx/_app/version.json/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "mount-prefix-sibling~double-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "//tools/garconx/_app/version.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-api~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "9"
+        },
+        "request": {
+          "auth": "none",
+          "method": "HEAD",
+          "path": "/api/v1/auth/status"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-api~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/status/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-api~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/status/../status"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-api~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/status/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-api~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/auth/status/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "outside-mount-api~double-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "//api/v1/auth/status"
+        },
+        "status": 404
+      },
+      "noise": []
+    }
+  ]
+}

@@ -119,6 +119,24 @@ describe('filesystem static paths', () => {
       await fs.realpath(assetPath),
     );
   });
+
+  it('serves assets from GARCON_WEB_BUILD_DIR when it is set', async () => {
+    const buildPath = path.join(os.tmpdir(), `garcon-static-${randomUUID()}`);
+    temporaryDirectories.push(buildPath);
+    await fs.mkdir(path.join(buildPath, '_app'), { recursive: true });
+    await fs.writeFile(path.join(buildPath, '_app', 'version.json'), '{"version":"override"}\n', 'utf8');
+    const previous = process.env.GARCON_WEB_BUILD_DIR;
+    process.env.GARCON_WEB_BUILD_DIR = buildPath;
+    try {
+      const url = new URL('http://localhost/_app/version.json');
+      const response = await routes['/_app/*'].GET(new Request(url), url);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ version: 'override' });
+    } finally {
+      if (previous === undefined) delete process.env.GARCON_WEB_BUILD_DIR;
+      else process.env.GARCON_WEB_BUILD_DIR = previous;
+    }
+  });
 });
 
 describe('app title transforms', () => {

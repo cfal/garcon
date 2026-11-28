@@ -1,0 +1,22 @@
+{
+  "module": "server-agents/codex/src/agents/codex/fork-target-path.ts",
+  "tests": [
+    "server-agents/codex/src/agents/codex/__tests__/fork-target-path.test.js"
+  ],
+  "inputs": "rust/garcon-agent-codex/tests/inputs/fork-target-path.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.args[0].createdAt",
+      "type": "an invalid Date",
+      "where": "args",
+      "at": "server-agents/codex/src/agents/codex/__tests__/fork-target-path.test.js:25:7",
+      "fn": "createCodexForkTargetPath",
+      "count": 1
+    }
+  ],
+  "cases": 61,
+  "sha256": "e31e3fd07defb38aeca0044fad826876bc65007b64f2946c2903698864519732"
+}

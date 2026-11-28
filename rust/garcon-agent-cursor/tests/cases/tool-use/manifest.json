@@ -1,0 +1,14 @@
+{
+  "module": "server-agents/cursor/src/agents/cursor/tool-use-converter.ts",
+  "tests": [
+    "server-agents/cursor/src/agents/cursor/__tests__/tool-use-converter.test.js"
+  ],
+  "inputs": "rust/garcon-agent-cursor/tests/inputs/tool-use.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 84,
+  "sha256": "d9d9bba30e1cf86e5155334a103c0695a7668170f1c6089733f2352dced3a27f"
+}

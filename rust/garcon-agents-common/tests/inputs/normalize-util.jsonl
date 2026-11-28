@@ -1,0 +1,67 @@
+{"fn":"normalizeTodoItems","args":[[{"content":"a","status":"pending"},{"content":"b","status":"in_progress"},{"content":"c","status":"completed"}]]}
+{"fn":"normalizeTodoItems","args":[[{"text":"a","completed":false},{"text":"b","completed":true},{"text":"c"}]]}
+{"fn":"normalizeTodoItems","args":[[{"step":"a","status":"in-progress"},{"step":"b","status":"done"},{"step":"c","status":"x"}]]}
+{"fn":"normalizeTodoItems","args":[[{"content":null,"text":"fallback","status":"completed"},{"content":"","status":"pending"},{"text":"","status":"pending"}]]}
+{"fn":"normalizeTodoItems","args":[[null,1,"x",[],{},{"content":5},{"content":null},{"text":true},{"step":{}}]]}
+{"fn":"normalizeTodoItems","args":[[]]}
+{"fn":"normalizeTodoItems","args":[{}]}
+{"fn":"normalizeTodoItems","args":[null]}
+{"fn":"normalizeTodoItems","args":[{"$":"undefined"}]}
+{"fn":"normalizeTodoItems","args":["text"]}
+{"fn":"normalizeTodoItems","args":[[{"content":"a","status":"done","completed":false},{"content":"b","status":"pending","completed":true},{"content":"c","status":"in_progress","completed":"yes"}]]}
+{"fn":"normalizeTodoItems","args":[[{"content":"a","status":true},{"content":"b","status":null},{"content":"c","status":"DONE"},{"content":"d","status":"in-progress"}]]}
+{"fn":"normalizeTodoItems","args":[[{"content":"a","status":"completed","extra":1}]]}
+{"fn":"normalizeTodoItems","args":[[{"content":0,"text":0,"step":"last"}]]}
+{"fn":"normalizeTodoItems","args":[[{"content":"\u212a\u0131\u00a0\u4e2d\ud83d\ude00e\u0301","status":"\u0130N_PROGRESS"}]]}
+{"fn":"normalizeToolInput","args":[null]}
+{"fn":"normalizeToolInput","args":[{"$":"undefined"}]}
+{"fn":"normalizeToolInput","args":[""]}
+{"fn":"normalizeToolInput","args":[5]}
+{"fn":"normalizeToolInput","args":[true]}
+{"fn":"normalizeToolInput","args":[[]]}
+{"fn":"normalizeToolInput","args":[[1,2]]}
+{"fn":"normalizeToolInput","args":[{}]}
+{"fn":"normalizeToolInput","args":[{"a":1,"b":"x","nested":{"c":[1,null]}}]}
+{"fn":"normalizeToolInput","args":["{\"command\":\"ls -la\",\"cwd\":\"/tmp\"}"]}
+{"fn":"normalizeToolInput","args":["{bad}"]}
+{"fn":"normalizeToolInput","args":["[1,2]"]}
+{"fn":"normalizeToolInput","args":["null"]}
+{"fn":"normalizeToolInput","args":["true"]}
+{"fn":"normalizeToolInput","args":["42"]}
+{"fn":"normalizeToolInput","args":["\"text\""]}
+{"fn":"normalizeToolInput","args":["  {\"a\":1}  "]}
+{"fn":"normalizeToolInput","args":["{\"a\":1} trailing"]}
+{"fn":"normalizeToolInput","args":["{\"z\":1,\"a\":2,\"10\":3,\"1\":4}"]}
+{"fn":"normalizeToolInput","args":["{\"a\":{\"b\":[{\"c\":1}]}}"]}
+{"fn":"normalizeToolInput","args":["{\"__proto__\":{\"x\":1}}"]}
+{"fn":"normalizeToolInput","args":["{\"1\":1,\"b\":2}"]}
+{"fn":"normalizeToolInput","args":["{\"a\":1.0,\"b\":1e21,\"c\":9007199254740993}"]}
+{"fn":"normalizeToolInput","args":["{\"a\":\"\\ud800\"}"]}
+{"fn":"normalizeToolInput","args":["{\"n\":1e400}"]}
+{"fn":"normalizeToolInput","args":[{"constructor":1,"toString":2,"hasOwnProperty":3,"__proto__":4}]}
+{"fn":"normalizeToolResultContent","args":[null]}
+{"fn":"normalizeToolResultContent","args":[{"$":"undefined"}]}
+{"fn":"normalizeToolResultContent","args":[{}]}
+{"fn":"normalizeToolResultContent","args":[{"a":1}]}
+{"fn":"normalizeToolResultContent","args":[[]]}
+{"fn":"normalizeToolResultContent","args":[[1,"a",null,{"b":2}]]}
+{"fn":"normalizeToolResultContent","args":[5]}
+{"fn":"normalizeToolResultContent","args":[true]}
+{"fn":"normalizeToolResultContent","args":[""]}
+{"fn":"normalizeToolResultContent","args":["   "]}
+{"fn":"normalizeToolResultContent","args":["\t\n "]}
+{"fn":"normalizeToolResultContent","args":["\u00a0"]}
+{"fn":"normalizeToolResultContent","args":["\ufeff"]}
+{"fn":"normalizeToolResultContent","args":["\u2028"]}
+{"fn":"normalizeToolResultContent","args":["{\"a\":1}"]}
+{"fn":"normalizeToolResultContent","args":["[1,2]"]}
+{"fn":"normalizeToolResultContent","args":["null"]}
+{"fn":"normalizeToolResultContent","args":["42"]}
+{"fn":"normalizeToolResultContent","args":["\"text\""]}
+{"fn":"normalizeToolResultContent","args":["{bad}"]}
+{"fn":"normalizeToolResultContent","args":["plain text"]}
+{"fn":"normalizeToolResultContent","args":["{\"a\":1}x"]}
+{"fn":"normalizeToolResultContent","args":["[{\"content\":\"a\"}]"]}
+{"fn":"normalizeToolResultContent","args":["{\"a\":\"\\ud800\"}"]}
+{"fn":"normalizeToolResultContent","args":["[1e400]"]}
+{"fn":"normalizeToolResultContent","args":["\u212a\u0131\u00a0\u4e2d\ud83d\ude00e\u0301"]}

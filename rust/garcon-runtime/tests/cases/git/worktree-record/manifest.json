@@ -1,0 +1,13 @@
+{
+  "module": "server/runtime/git/worktree-record.ts",
+  "tests": [
+    "rust/parity/fixtures/git/pure.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 63,
+  "sha256": "67d168f83f151fb59edf55548f93421c6ebe751ce7b957a17b999da7b5ae701a"
+}

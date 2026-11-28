@@ -1,0 +1,51 @@
+{
+  "module": "common/input-format.ts",
+  "tests": [
+    "common/__tests__/input-format.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/input-format.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isInputFormatByModel",
+      "argument": 0
+    },
+    {
+      "fn": "literalInputFormat",
+      "argument": 0
+    },
+    {
+      "fn": "isPlainTextInput",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.args[0]",
+      "type": "a UserMessage instance",
+      "where": "args",
+      "at": "common/__tests__/input-format.test.js:11:10",
+      "fn": "isPlainTextInput",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a UserMessage instance",
+      "where": "args",
+      "at": "common/__tests__/input-format.test.js:12:10",
+      "fn": "isPlainTextInput",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a UserMessage instance",
+      "where": "args",
+      "at": "common/__tests__/input-format.test.js:13:10",
+      "fn": "isPlainTextInput",
+      "count": 1
+    }
+  ],
+  "cases": 170,
+  "sha256": "c79418d083f9c2cd9953926978837f8ffa8e470210268d560196221ab7e03291"
+}

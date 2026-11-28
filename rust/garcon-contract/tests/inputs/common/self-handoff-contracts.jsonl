@@ -1,0 +1,13 @@
+{"fn":"parseSelfHandoffRunCommandRequest","args":[{"clientRequestId":" req ","clientMessageId":" msg ","sourceChatId":"1000000000000001","chatId":"1000000000000002","command":"  Continue.  "}]}
+{"fn":"parseSelfHandoffRunCommandRequest","args":[{"clientRequestId":"req","clientMessageId":"msg","sourceChatId":"1000000000000001","chatId":"1000000000000002","command":"Continue.","images":[{"data":"YWJj","name":"example.png","mimeType":"image/png"}],"model":"model","permissionMode":"default","thinkingMode":"medium","allowHandoffFork":true,"agentSettings":{"ownerId":"demo","schemaVersion":1,"values":{"n":1.0}},"apiProviderId":null,"modelEndpointId":null,"apiProtocol":null}]}
+{"fn":"parseSelfHandoffRunCommandRequest","args":[{"clientRequestId":"req","clientMessageId":"msg","sourceChatId":"1000000000000001","chatId":"1000000000000002","images":[{"data":"YWJj"}]}]}
+{"fn":"parseSelfHandoffRunCommandRequest","args":[{"clientRequestId":"req","clientMessageId":"msg","sourceChatId":"1000000000000001","chatId":"1000000000000002","command":"Continue.","model":42}]}
+{"fn":"parseSelfHandoffRunCommandRequest","args":[{"clientRequestId":"req","clientMessageId":"msg","sourceChatId":"1000000000000001","chatId":"1000000000000002","command":"Continue.","agentSettings":{}}]}
+{"fn":"parseSelfHandoffRunCommandRequest","args":[{"clientRequestId":"req","clientMessageId":"msg","sourceChatId":"1000000000000001","chatId":"1000000000000002","command":"Continue.","allowHandoffFork":"yes"}]}
+{"fn":"parseSelfHandoffRunCommandRequest","args":[{"clientRequestId":"req","clientMessageId":"msg","sourceChatId":"1000000000000001","chatId":"1000000000000002","command":"Continue.","images":[{"data":42}]}]}
+{"fn":"parseSelfHandoffRunCommandRequest","args":[{"clientRequestId":"req","clientMessageId":"msg","sourceChatId":"1000000000000001","chatId":"1000000000000002","command":"Continue.","questionReply":null}]}
+{"fn":"parseSelfHandoffRunCommandRequest","args":[{"clientRequestId":"req","clientMessageId":"msg","sourceChatId":"invalid","chatId":"1000000000000002","command":"Continue."}]}
+{"fn":"parseSelfHandoffRunCommandRequest","args":[{"clientRequestId":"req","clientMessageId":"msg","sourceChatId":"1000000000000001","chatId":"1000000000000002","command":" "}]}
+{"fn":"parseSelfHandoffRunCommandRequest","args":[{}]}
+{"fn":"parseSelfHandoffRunCommandRequest","args":[[]]}
+{"fn":"parseSelfHandoffRunCommandRequest","args":[null]}

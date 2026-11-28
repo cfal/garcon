@@ -1,0 +1,16 @@
+{"fn":"isWithinExecutorPath","args":["/work","/work"]}
+{"fn":"isWithinExecutorPath","args":["/work","/work/src/a.ts"]}
+{"fn":"isWithinExecutorPath","args":["/work/","/work/src"]}
+{"fn":"isWithinExecutorPath","args":["/work","/work/"]}
+{"fn":"isWithinExecutorPath","args":["/","/work/src"]}
+{"fn":"isWithinExecutorPath","args":["/","/"]}
+{"fn":"isWithinExecutorPath","args":["/work","/worker"]}
+{"fn":"isWithinExecutorPath","args":["/work","/other/work"]}
+{"fn":"isWithinExecutorPath","args":["/work/src","/work"]}
+{"fn":"isWithinExecutorPath","args":["/work",""]}
+{"fn":"isWithinExecutorPath","args":["","/work"]}
+{"fn":"isWithinExecutorPath","args":["",""]}
+{"fn":"isWithinExecutorPath","args":["C:/work","C:/work/src/a.ts"]}
+{"fn":"isWithinExecutorPath","args":["C:/work","C:/worker"]}
+{"fn":"isWithinExecutorPath","args":["//host/share","//host/share/dir"]}
+{"fn":"isWithinExecutorPath","args":["//host/share","//host/shareholder"]}

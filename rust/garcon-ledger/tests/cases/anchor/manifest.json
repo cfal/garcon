@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-ledger/tests/anchor-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-ledger/tests/inputs/anchor.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 14,
+  "sha256": "032aa421c97115b83e59d2a2660d882206cf052b4b0f8bbcbd6ad68a44bbe850"
+}

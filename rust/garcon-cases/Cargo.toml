@@ -1,0 +1,17 @@
+[package]
+name = "garcon-cases"
+version = "0.0.0"
+description = "Replays unit cases recorded from the TypeScript original (ADR-020); a dev-dependency of the ported crates."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

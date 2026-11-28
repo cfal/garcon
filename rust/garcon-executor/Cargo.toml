@@ -1,0 +1,42 @@
+[package]
+name = "garcon-executor"
+version = "0.0.0"
+description = "The Garcon executor: runtime services, integrations, and the worker that serves them over the executor link."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+base64 = "0.23"
+bytes.workspace = true
+futures.workspace = true
+garcon-agent-direct-anthropic-compatible = { path = "../garcon-agent-direct-anthropic-compatible" }
+garcon-agent-direct-openai-compatible = { path = "../garcon-agent-direct-openai-compatible" }
+garcon-agent-direct-openai-responses-compatible = { path = "../garcon-agent-direct-openai-responses-compatible" }
+garcon-agent-opencode = { path = "../garcon-agent-opencode" }
+garcon-base.workspace = true
+garcon-contract.workspace = true
+garcon-interface.workspace = true
+garcon-js.workspace = true
+garcon-link.workspace = true
+garcon-runtime = { path = "../garcon-runtime" }
+http-body-util = "0.1"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+indexmap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+subtle = "2"
+tokio.workspace = true
+tokio-util.workspace = true
+url.workspace = true
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+garcon-cases.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

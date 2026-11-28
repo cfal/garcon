@@ -1,0 +1,14 @@
+{"fn":"normalizeGarconCommandBody","args":[""]}
+{"fn":"normalizeGarconCommandBody","args":["\r\n"]}
+{"fn":"normalizeGarconCommandBody","args":["\n"]}
+{"fn":"normalizeGarconCommandBody","args":["\n\n"]}
+{"fn":"normalizeGarconCommandBody","args":["\r\n\r\n"]}
+{"fn":"normalizeGarconCommandBody","args":["\r"]}
+{"fn":"normalizeGarconCommandBody","args":["\rbody\r"]}
+{"fn":"normalizeGarconCommandBody","args":["\r\n\nbody\n\r\n"]}
+{"fn":"normalizeGarconCommandBody","args":["\n  body  \n"]}
+{"fn":"normalizeGarconCommandBody","args":["\n🚀\n"]}
+{"fn":"normalizeGarconCommandBody","args":[" body "]}
+{"fn":"normalizeGarconCommandBody","args":[" body "]}
+{"fn":"normalizeGarconCommandBody","args":["\nbody\r"]}
+{"fn":"normalizeGarconCommandBody","args":["\rbody\n"]}

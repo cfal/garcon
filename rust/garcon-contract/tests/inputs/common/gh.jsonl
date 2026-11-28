@@ -1,0 +1,6 @@
+{"fn":"isGhMutation","args":["getStatus"]}
+{"fn":"isGhMutation","args":["listPullRequests"]}
+{"fn":"isGhMutation","args":["getPullRequest"]}
+{"fn":"isGhMutation","args":["getPullRequestReviewTarget"]}
+{"fn":"isGhMutation","args":["createPullRequestComment"]}
+{"fn":"isGhMutation","args":["minimizePullRequestComment"]}

@@ -11,7 +11,7 @@ import {
   withIntegrationFixture,
   type IntegrationFixture,
 } from '../../support/integration-fixture.js';
-import { sacsScriptedDriverFactories } from './drivers.js';
+import { allSacsScriptedDriverFactories, sacsScriptedDriverFactories } from './drivers.js';
 import type { SacsDriverEnvironment } from './driver.js';
 
 const SACS_TIMEOUT_MS = 120_000;
@@ -30,12 +30,12 @@ const EXPECTED_POINT_FORKING_DRIVER_IDS = [
 ];
 
 test('[TLV5-FORK.01-SACS-CAPABILITY-01] registers the native forking facet for every native-fork provider', () => {
-  expect(sacsScriptedDriverFactories
+  expect(allSacsScriptedDriverFactories
     .filter((driver) => driver.forking !== null)
     .map((driver) => driver.id)
     .toSorted())
     .toEqual([...EXPECTED_FORKING_DRIVER_IDS].toSorted());
-  expect(sacsScriptedDriverFactories
+  expect(allSacsScriptedDriverFactories
     .filter((driver) => driver.forking?.pointForks)
     .map((driver) => driver.id)
     .toSorted())

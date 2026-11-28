@@ -1,0 +1,2 @@
+{"fn":"ticketCommandNoticeText","args":[{"type":"ticket-command-outcome","requestViewId":"11111111-1111-4111-8111-111111111111","requestOrdinal":1,"command":"list","context":{"filters":{"project":"Two \"quotes\"","assignee":{"kind":"executor","executorId":"local"},"priority":3,"includeClosed":false,"ready":true}},"status":"ok"}]}
+{"fn":"ticketCommandNoticeParts","args":[{"type":"ticket-command-outcome","requestViewId":"11111111-1111-4111-8111-111111111111","requestOrdinal":1,"command":"create","ref":"new","errorCode":"TICKET_NOT_FOUND","status":"error"}]}

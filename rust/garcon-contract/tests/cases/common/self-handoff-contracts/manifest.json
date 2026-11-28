@@ -1,0 +1,18 @@
+{
+  "module": "common/self-handoff-contracts.ts",
+  "tests": [
+    "common/__tests__/async-user-questions.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/self-handoff-contracts.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseSelfHandoffRunCommandRequest",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 74,
+  "sha256": "67eb6caaf0506c3c3012cea6d0b21a788866f921e1a2cd8d9e55c1adffcfeb4a"
+}

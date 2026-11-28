@@ -1,0 +1,63 @@
+[
+  {
+    "suite": "integration-tests/tests/server/chat-boards.test.ts",
+    "chat": null,
+    "type": "chat-list-refresh-requested",
+    "reason": "The metadata-repaired refresh from server-event-wiring.ts races socket attachment because server.ts starts repairChatMetadata without awaiting it."
+  },
+  {
+    "suite": "integration-tests/tests/server/chat-boards.test.ts",
+    "chat": "{{chatId1}}",
+    "type": "chat-messages",
+    "reason": "The original reordered transcript broadcasts around ordinals 3 and 4; cause not yet identified."
+  },
+  {
+    "suite": "integration-tests/tests/server/chat-boards.test.ts",
+    "test": "Chat Board server integration > persists ordered boards and transitions tags with typed invalidations",
+    "path": "$.http[18].body.value.sessions[0].activityStatus",
+    "reason": "The original session snapshot raced: activityStatus was complete in runs 1, 4 and 6 and null in runs 2, 3 and 5 of six Bun 1.4.3 runs."
+  },
+  {
+    "suite": "integration-tests/tests/server/chat-lifecycle.test.ts",
+    "test": "chat lifecycle > deduplicates identical commands and rejects conflicting identity reuse",
+    "reason": "The start-command response in chat-command-routes.ts snapshots activity before the test waits for the terminal event, so chat-activity-status.ts can project either working or complete."
+  },
+  {
+    "suite": "integration-tests/tests/server/chat-lifecycle.test.ts",
+    "test": "chat lifecycle > uses client message identity rather than content equality for duplicate submission",
+    "reason": "The start-command response in chat-command-routes.ts snapshots activity before the test waits for the terminal event, so chat-activity-status.ts can project either working or complete."
+  },
+  {
+    "suite": "integration-tests/tests/server/queue-lifecycle.test.ts",
+    "test": "queue lifecycle > interrupts and sends without assigning a false failure to the successor",
+    "path": "$.http[8].body.value.control.queue.entries",
+    "reason": "The duplicate interrupt-and-send in session-commands.ts reads control before successor dispatch in runs 1, 2, 3 and 6 (interrupt-b queued) and after dispatch in runs 4 and 5 (empty)."
+  },
+  {
+    "suite": "integration-tests/tests/server/queue-lifecycle.test.ts",
+    "test": "queue lifecycle > interrupts and sends without assigning a false failure to the successor",
+    "path": "$.http[8].body.value.control.queue.recentlyDispatched",
+    "reason": "The duplicate interrupt-and-send in session-commands.ts reads control before successor dispatch in runs 1, 2, 3 and 6 (empty) and after dispatch in runs 4 and 5 (successor present)."
+  },
+  {
+    "suite": "integration-tests/tests/server/queue-lifecycle.test.ts",
+    "test": "queue lifecycle > interrupts and sends without assigning a false failure to the successor",
+    "path": "$.http[8].body.value.control.version",
+    "reason": "The duplicate interrupt-and-send in session-commands.ts reads control before successor dispatch in runs 1, 2, 3 and 6 (version 1) and after dispatch in runs 4 and 5 (version 2)."
+  },
+  {
+    "suite": "integration-tests/tests/server/chat-sort.test.ts",
+    "test": "chat sort presets atomically reorder every persisted group and survive restart",
+    "reason": "The session snapshot alternates between complete and null; cause not yet identified."
+  },
+  {
+    "suite": "integration-tests/tests/server/chat-reorder.test.ts",
+    "test": "chat placements persist across sections and emit only changed invalidations",
+    "reason": "The session snapshot alternates between complete and null; cause not yet identified."
+  },
+  {
+    "suite": "integration-tests/tests/server/chat-reorder.test.ts",
+    "test": "root and child moves persist single-ID priorities without rewriting delegation",
+    "reason": "The session snapshot alternates between complete and null; cause not yet identified."
+  }
+]

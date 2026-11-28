@@ -1,0 +1,82 @@
+{
+  "module": "common/agent-settings.ts",
+  "tests": [
+    "rust/garcon-contract/tests/inputs/common/agent-settings-original.cases.ts"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/agent-settings.jsonl",
+  "guards": [
+    {
+      "fn": "normalizeAgentSettings",
+      "argument": 1,
+      "guard": "common/agent-integration.ts#parseAgentSettingsEnvelope",
+      "dropped": 8,
+      "kept": 14
+    },
+    {
+      "fn": "normalizeAgentSettings",
+      "argument": 2,
+      "guard": "common/agent-integration.ts#parseAgentSettingsEnvelope",
+      "dropped": 8,
+      "kept": 29
+    },
+    {
+      "fn": "cloneAgentSettings",
+      "argument": 0,
+      "guard": "common/agent-integration.ts#parseAgentSettingsEnvelope",
+      "dropped": 8,
+      "kept": 57
+    },
+    {
+      "fn": "withAgentSetting",
+      "argument": 0,
+      "guard": "common/agent-integration.ts#parseAgentSettingsEnvelope",
+      "dropped": 9,
+      "kept": 12
+    },
+    {
+      "fn": "withAgentSetting",
+      "argument": 1,
+      "guard": "rust/garcon-contract/tests/inputs/common/agent-settings-guards.ts#agentSettingDescriptor",
+      "dropped": 7,
+      "kept": 42
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "normalizeAgentSettings",
+      "argument": 1
+    },
+    {
+      "fn": "normalizeAgentSettings",
+      "argument": 2
+    },
+    {
+      "fn": "cloneAgentSettings",
+      "argument": 0
+    },
+    {
+      "fn": "settingValue",
+      "argument": 0
+    },
+    {
+      "fn": "settingValue",
+      "argument": 1
+    },
+    {
+      "fn": "withAgentSetting",
+      "argument": 0
+    },
+    {
+      "fn": "withAgentSetting",
+      "argument": 1
+    },
+    {
+      "fn": "withAgentSetting",
+      "argument": 2
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 230,
+  "sha256": "786f6c18cf07437fa72caaed06ac966de453540b8cd693da648141b156b3c4e7"
+}

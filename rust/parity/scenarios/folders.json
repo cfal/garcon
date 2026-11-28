@@ -1,0 +1,242 @@
+{
+  "name": "folders",
+  "description": "Folder routes on an empty workspace: reads, create validation and filter sanitizing, update and remove for unknown identifiers with their check order, then reads that show what was written.",
+  "steps": [
+    {
+      "name": "folders-empty",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/folders"
+      }
+    },
+    {
+      "name": "folder-missing-name",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "filter": {
+            "tags": [
+              "x"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "folder-blank-name",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "name": "   "
+        }
+      }
+    },
+    {
+      "name": "folder-created-from-numeric-name",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "name": 42
+        }
+      }
+    },
+    {
+      "name": "folder-array-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/folders",
+        "json": [
+          "x"
+        ]
+      }
+    },
+    {
+      "name": "folder-null-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/folders",
+        "json": null
+      }
+    },
+    {
+      "name": "folder-created",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "name": "  Folder A  ",
+          "filter": {
+            "textTokens": [
+              " a ",
+              "b",
+              "",
+              3,
+              " ",
+              "a"
+            ],
+            "tags": [
+              "x"
+            ],
+            "agents": [],
+            "models": [
+              "m1"
+            ],
+            "status": "active"
+          },
+          "extra": "ignored"
+        }
+      }
+    },
+    {
+      "name": "folder-created-with-scalar-filter",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "name": "Folder B",
+          "filter": "not an object"
+        }
+      }
+    },
+    {
+      "name": "folder-created-with-unknown-status",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "name": "Folder C",
+          "filter": {
+            "status": "done",
+            "unknown": [
+              "x"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "folder-created-without-filter",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "name": "Folder D"
+        }
+      }
+    },
+    {
+      "name": "folders-after-create",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/folders"
+      }
+    },
+    {
+      "name": "folder-update-missing-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "name": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "folder-update-blank-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "id": "  ",
+          "name": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "folder-update-id-number",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "id": 42,
+          "name": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "folder-update-array-body",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/folders",
+        "json": [
+          "x"
+        ]
+      }
+    },
+    {
+      "name": "folder-update-blank-name",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "id": "missing-folder",
+          "name": "  "
+        }
+      }
+    },
+    {
+      "name": "folder-update-unknown-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "id": "missing-folder",
+          "name": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "folder-update-unknown-id-no-fields",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/folders",
+        "json": {
+          "id": "missing-folder"
+        }
+      }
+    },
+    {
+      "name": "folder-remove-without-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/app/folders"
+      }
+    },
+    {
+      "name": "folder-remove-empty-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/app/folders?id="
+      }
+    },
+    {
+      "name": "folder-remove-unknown-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/app/folders?id=missing-folder"
+      }
+    },
+    {
+      "name": "folders-wrong-method",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/app/folders",
+        "json": {}
+      }
+    }
+  ],
+  "traps": true
+}

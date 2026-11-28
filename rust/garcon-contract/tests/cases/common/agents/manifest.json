@@ -1,0 +1,20 @@
+{
+  "module": "common/agents.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/agents.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isAgentId",
+      "argument": 0
+    },
+    {
+      "fn": "hasAgentExecutionMetadata",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 99,
+  "sha256": "520a653162e5b1ad64a467434aad059040b3e984d7f73679f98c0c4f2e962276"
+}

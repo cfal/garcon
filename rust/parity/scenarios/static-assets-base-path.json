@@ -1,0 +1,98 @@
+{
+  "name": "static-assets-base-path",
+  "description": "The same assets under a nested base path, including the bare-mount redirect and requests outside the mount.",
+  "server": {
+    "basePath": "/tools/garcon"
+  },
+  "steps": [
+    {
+      "name": "bare-mount-redirect",
+      "http": {
+        "method": "GET",
+        "originPath": "/tools/garcon?next=%2Fchat",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "shell-root",
+      "http": {
+        "method": "GET",
+        "path": "/",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "shell-chat-id",
+      "http": {
+        "method": "GET",
+        "path": "/chat/parity",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "manifest",
+      "http": {
+        "method": "GET",
+        "path": "/site.webmanifest",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "immutable-js",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "icon-svg",
+      "http": {
+        "method": "GET",
+        "path": "/icons/icon.svg",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "missing-asset",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/missing.js",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "outside-mount-root",
+      "http": {
+        "method": "GET",
+        "originPath": "/",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "outside-mount-asset",
+      "http": {
+        "method": "GET",
+        "originPath": "/_app/immutable/entry/start.js",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "mount-prefix-sibling",
+      "http": {
+        "method": "GET",
+        "originPath": "/tools/garconx/_app/version.json",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "outside-mount-api",
+      "http": {
+        "method": "GET",
+        "originPath": "/api/v1/auth/status",
+        "auth": "none"
+      }
+    }
+  ],
+  "traps": true
+}

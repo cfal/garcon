@@ -107,7 +107,7 @@ authenticate with the executor's shared secret over Noise rather than user token
 share token is their only credential. On the JSON and plain-text routes, missing, malformed,
 and unknown tokens receive one identical 404. The three routes share one budget per client of
 `SHARED_CHAT_RATE_LIMIT_MAX_REQUESTS` requests per window before receiving 429 with
-`Retry-After`, keyed by socket address, or by forwarded address when `GARCON_TRUST_PROXY` is
+`Retry-After`, keyed by socket address, or by forwarded address when `GARCON_TRUST_PROXY` or `--trust-proxy` is
 set. A trusted proxy must overwrite `X-Forwarded-For`, because the limiter reads its leftmost
 entry and a client-supplied value would otherwise select a fresh quota.
 

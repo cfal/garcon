@@ -1,0 +1,488 @@
+{
+  "scenario": "tickets-surrogates",
+  "cases": [
+    {
+      "name": "bootstrap",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "collectionRevision": 0,
+            "storeId": "{{uuid}}",
+            "viewerKey": "[\"principal\",\"authenticated\",\"parity\"]"
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/tickets/bootstrap"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "create-lone-title",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "title must be well-formed Unicode text.",
+            "errorCode": "TICKET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/tickets/mutate"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-lone-description",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "body must be well-formed Unicode text.",
+            "errorCode": "TICKET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/tickets/mutate"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-replacement-title-with-lone-description",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "body must be well-formed Unicode text.",
+            "errorCode": "TICKET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/tickets/mutate"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-lone-project",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "project must be well-formed Unicode text.",
+            "errorCode": "TICKET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/tickets/mutate"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-lone-label",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "label must be well-formed Unicode text.",
+            "errorCode": "TICKET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/tickets/mutate"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-replacement-character",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "collectionRevision": 1,
+            "storeId": "{{bootstrap.body.storeId}}",
+            "success": true,
+            "ticket": {
+              "assignee": null,
+              "createdAt": "{{timestamp}}",
+              "createdBy": {
+                "declaredChatId": null,
+                "kind": "user",
+                "principalMode": "authenticated",
+                "username": "parity"
+              },
+              "description": "",
+              "id": "G-1",
+              "labels": [],
+              "number": 1,
+              "parentId": null,
+              "priority": 2,
+              "project": "parity",
+              "resolution": null,
+              "revision": 1,
+              "status": "open",
+              "title": "Genuine �",
+              "updatedAt": "{{timestamp}}"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/tickets/mutate"
+        },
+        "status": 201
+      },
+      "noise": []
+    },
+    {
+      "name": "comment-lone-body",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "body must be well-formed Unicode text.",
+            "errorCode": "TICKET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/tickets/mutate"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "close-lone-comment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "body must be well-formed Unicode text.",
+            "errorCode": "TICKET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/tickets/mutate"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-lone-title",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "title must be well-formed Unicode text.",
+            "errorCode": "TICKET_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/tickets/mutate"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-valid-pair",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "collectionRevision": 2,
+            "storeId": "{{bootstrap.body.storeId}}",
+            "success": true,
+            "ticket": {
+              "assignee": null,
+              "createdAt": "{{timestamp}}",
+              "createdBy": {
+                "declaredChatId": null,
+                "kind": "user",
+                "principalMode": "authenticated",
+                "username": "parity"
+              },
+              "description": "",
+              "id": "G-2",
+              "labels": [],
+              "number": 2,
+              "parentId": null,
+              "priority": 2,
+              "project": "parity",
+              "resolution": null,
+              "revision": 1,
+              "status": "open",
+              "title": "Paired 😃",
+              "updatedAt": "{{timestamp}}"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/tickets/mutate"
+        },
+        "status": 201
+      },
+      "noise": []
+    },
+    {
+      "name": "create-final-replacement-title",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "collectionRevision": 3,
+            "storeId": "{{bootstrap.body.storeId}}",
+            "success": true,
+            "ticket": {
+              "assignee": null,
+              "createdAt": "{{timestamp}}",
+              "createdBy": {
+                "declaredChatId": null,
+                "kind": "user",
+                "principalMode": "authenticated",
+                "username": "parity"
+              },
+              "description": "",
+              "id": "G-3",
+              "labels": [],
+              "number": 3,
+              "parentId": null,
+              "priority": 2,
+              "project": "parity",
+              "resolution": null,
+              "revision": 1,
+              "status": "open",
+              "title": "Genuine �",
+              "updatedAt": "{{timestamp}}"
+            }
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/tickets/mutate"
+        },
+        "status": 201
+      },
+      "noise": []
+    },
+    {
+      "name": "list-only-valid-writes",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "collectionRevision": 3,
+            "items": [
+              {
+                "assignee": null,
+                "blockedByCount": 0,
+                "commentCount": 0,
+                "createdAt": "{{timestamp}}",
+                "createdBy": {
+                  "declaredChatId": null,
+                  "kind": "user",
+                  "principalMode": "authenticated",
+                  "username": "parity"
+                },
+                "id": "G-3",
+                "labels": [],
+                "number": 3,
+                "parentId": null,
+                "priority": 2,
+                "project": "parity",
+                "resolution": null,
+                "revision": 1,
+                "status": "open",
+                "title": "Genuine �",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "assignee": null,
+                "blockedByCount": 0,
+                "commentCount": 0,
+                "createdAt": "{{timestamp}}",
+                "createdBy": {
+                  "declaredChatId": null,
+                  "kind": "user",
+                  "principalMode": "authenticated",
+                  "username": "parity"
+                },
+                "id": "G-2",
+                "labels": [],
+                "number": 2,
+                "parentId": null,
+                "priority": 2,
+                "project": "parity",
+                "resolution": null,
+                "revision": 1,
+                "status": "open",
+                "title": "Paired 😃",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "assignee": null,
+                "blockedByCount": 0,
+                "commentCount": 0,
+                "createdAt": "{{timestamp}}",
+                "createdBy": {
+                  "declaredChatId": null,
+                  "kind": "user",
+                  "principalMode": "authenticated",
+                  "username": "parity"
+                },
+                "id": "G-1",
+                "labels": [],
+                "number": 1,
+                "parentId": null,
+                "priority": 2,
+                "project": "parity",
+                "resolution": null,
+                "revision": 1,
+                "status": "open",
+                "title": "Genuine �",
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "nextBeforeNumber": null,
+            "storeId": "{{bootstrap.body.storeId}}"
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/tickets"
+        },
+        "status": 200
+      },
+      "noise": []
+    }
+  ]
+}

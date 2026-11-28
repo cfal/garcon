@@ -1,0 +1,9 @@
+{"fn":"normalizeStoredTicket","args":[{"assignee":"unassigned","payload":{"n":1.0,"big":9007199254740993,"exp21":1e21,"small":1e-7}}]}
+{"fn":"normalizeStoredTicket","args":[{"assignee":{"kind":"user","username":"person"},"status":"in-review"}]}
+{"fn":"normalizeStoredTicket","args":[{"assignee":null}]}
+{"fn":"normalizeStoredTicketOwner","args":[{"kind":"user","ownerKey":"person"}]}
+{"fn":"normalizeStoredTicketActivity","args":[{"changes":[{"field":"assignee","after":null}]}]}
+{"fn":"normalizeStoredTicketWriteResult","args":[{"ticket":{},"relatedTicket":null}]}
+{"fn":"normalizeStoredTicketRequest","args":[{"payload":{"action":"close","comment":"reason"}}]}
+{"fn":"normalizeStoredTicketOutcome","args":[{"context":null}]}
+{"fn":"normalizeStoredTicketResult","args":[{"status":"error","data":"untouched"}]}

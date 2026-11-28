@@ -1,0 +1,15 @@
+{"fn":"codexMessageSourceIdentity","args":[{"turnId":" turn-1 ","itemId":" item-1 ","fallbackOrdinal":3,"message":{"type":"assistant-message","timestamp":"at","content":"synthetic"}}]}
+{"fn":"codexMessageSourceIdentity","args":[{"turnId":"turn","itemId":"item","fallbackOrdinal":3,"message":{"type":"bash-tool-use","timestamp":"at","toolId":" call ","command":"pwd"}}]}
+{"fn":"codexMessageSourceIdentity","args":[{"turnId":"turn","itemId":"item","fallbackOrdinal":9,"message":{"type":"tool-result","timestamp":"at","toolId":" call ","content":"synthetic","isError":false}}]}
+{"fn":"codexMessageSourceIdentity","args":[{"turnId":"turn","itemId":"item","fallbackOrdinal":9,"message":{"type":"bash-tool-use","timestamp":"at","toolId":"   ","command":"pwd"}}]}
+{"fn":"codexMessageSourceIdentity","args":[{"turnId":"turn","itemId":null,"fallbackOrdinal":2,"message":{"type":"assistant-message","timestamp":"at","content":"synthetic"}}]}
+{"fn":"codexMessageSourceIdentity","args":[{"turnId":"\u00a0","itemId":"item","fallbackOrdinal":2,"message":{"type":"assistant-message","timestamp":"at","content":"synthetic"}}]}
+{"fn":"codexMessageSourceIdentity","args":[{"turnId":"turn","itemId":"item","fallbackOrdinal":-1.5,"message":{"type":"assistant-message","timestamp":"at","content":"synthetic"}}]}
+{"fn":"codexTurnIdFromEntryId","args":["\u00a0turn:turn-id:tool:call \n"]}
+{"fn":"codexTurnIdFromEntryId","args":["turn:turn-id:item:entry"]}
+{"fn":"codexTurnIdFromEntryId","args":["turn:a\nb:item:entry"]}
+{"fn":"codexTurnIdFromEntryId","args":["turn::item:entry"]}
+{"fn":"codexTurnIdFromEntryId","args":["turn:turn-id"]}
+{"fn":"codexTurnIdFromEntryId","args":["item:turn-id:tool"]}
+{"fn":"codexTurnIdFromEntryId","args":[null]}
+{"fn":"codexTurnIdFromEntryId","args":[42]}

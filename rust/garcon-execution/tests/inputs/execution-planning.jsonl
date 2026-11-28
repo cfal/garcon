@@ -1,0 +1,6 @@
+{"fn":"endpointProjectionTrace","args":["native"]}
+{"fn":"endpointProjectionTrace","args":["resolved"]}
+{"fn":"endpointProjectionTrace","args":["metadata-only"]}
+{"fn":"endpointProjectionTrace","args":["missing-protocol"]}
+{"fn":"endpointProjectionTrace","args":["stale"]}
+{"fn":"endpointProjectionTrace","args":["wrong-executor"]}

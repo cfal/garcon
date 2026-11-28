@@ -1,0 +1,16 @@
+{
+  "module": "common/git-error.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/git-error.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isGitServiceErrorCode",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 132,
+  "sha256": "0d32da79cd46762688ba8a30e6119d312fa2ac1a52ae97c0a79289354b080a98"
+}

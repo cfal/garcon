@@ -1,0 +1,28 @@
+{
+  "module": "common/chat-plan.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-plan.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "coerceTodoItems",
+      "argument": 0
+    },
+    {
+      "fn": "coercePlanSteps",
+      "argument": 0
+    },
+    {
+      "fn": "asCursorPlanTodos",
+      "argument": 0
+    },
+    {
+      "fn": "asCursorPlanPhases",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 12,
+  "sha256": "203a17591b0b16f1154a7b6e373f01cdc41f7df1e247f4952a5a839f632a2fdc"
+}

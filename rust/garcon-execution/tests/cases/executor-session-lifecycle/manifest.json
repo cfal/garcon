@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-execution/tests/support/executor-session-lifecycle-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-execution/tests/inputs/executor-session-lifecycle.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 4,
+  "sha256": "bd8df2d735a9efaad1c21ab932f323b969bc781bc2cfb19524883b079b1d9a89"
+}

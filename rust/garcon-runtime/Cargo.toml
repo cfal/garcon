@@ -1,0 +1,46 @@
+[package]
+name = "garcon-runtime"
+version = "0.0.0"
+description = "Executor-local runtime services."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+base64 = "0.23"
+encoding_rs = "0.8"
+futures.workspace = true
+garcon-agents-common.workspace = true
+garcon-base.workspace = true
+garcon-contract.workspace = true
+garcon-interface.workspace = true
+garcon-js.workspace = true
+indexmap.workspace = true
+portable-pty = "0.9"
+regress = "0.12"
+serde.workspace = true
+serde_json.workspace = true
+sha1 = "0.10"
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util = { workspace = true, features = ["io"] }
+url.workspace = true
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+rustix = { version = "1", features = ["event", "fs", "process", "try_close"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+garcon-cases.workspace = true
+tempfile.workspace = true
+time = { version = "0.3", features = ["parsing"] }
+tokio = { workspace = true, features = ["test-util"] }

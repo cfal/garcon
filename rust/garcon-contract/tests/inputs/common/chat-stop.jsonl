@@ -1,0 +1,6 @@
+{"fn":"isStopSatisfied","args":["interrupt-requested"]}
+{"fn":"isStopSatisfied","args":["already-idle"]}
+{"fn":"isStopSatisfied","args":["failed"]}
+{"fn":"isAbortAcknowledged","args":["interrupt-requested"]}
+{"fn":"isAbortAcknowledged","args":["already-idle"]}
+{"fn":"isAbortAcknowledged","args":["failed"]}

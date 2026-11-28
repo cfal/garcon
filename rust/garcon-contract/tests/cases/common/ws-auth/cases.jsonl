@@ -1,0 +1,17 @@
+{"id":"webSocketProtocolsForAuth#0","fn":"webSocketProtocolsForAuth","args":["jwt-token"],"result":["garcon-v1","garcon-auth.jwt-token"],"origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:1"}
+{"id":"webSocketProtocolsForAuth#1","fn":"webSocketProtocolsForAuth","args":["bad token"],"result":["garcon-v1"],"origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:2"}
+{"id":"webSocketProtocolsForAuth#2","fn":"webSocketProtocolsForAuth","args":["  a.b-_\t"],"result":["garcon-v1","garcon-auth.a.b-_"],"origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:3"}
+{"id":"webSocketProtocolsForAuth#3","fn":"webSocketProtocolsForAuth","args":["x/y"],"result":["garcon-v1"],"origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:4"}
+{"id":"webSocketProtocolsForAuth#4","fn":"webSocketProtocolsForAuth","args":[null],"result":["garcon-v1"],"origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:5"}
+{"id":"webSocketProtocolsForAuth#5","fn":"webSocketProtocolsForAuth","args":[],"result":["garcon-v1"],"origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:6"}
+{"id":"parseWebSocketProtocolHeader#0","fn":"parseWebSocketProtocolHeader","args":["  garcon-v1,, garcon-auth.token ,garcon-v1  "],"result":["garcon-v1","garcon-auth.token","garcon-v1"],"origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:7"}
+{"id":"parseWebSocketProtocolHeader#1","fn":"parseWebSocketProtocolHeader","args":[null],"result":[],"origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:8"}
+{"id":"parseWebSocketProtocolHeader#2","fn":"parseWebSocketProtocolHeader","args":[],"result":[],"origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:9"}
+{"id":"webSocketProtocolHeaderContains#0","fn":"webSocketProtocolHeaderContains","args":["other, garcon-v1","garcon-v1"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:10"}
+{"id":"webSocketProtocolHeaderContains#1","fn":"webSocketProtocolHeaderContains","args":["GARCON-V1","garcon-v1"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:11"}
+{"id":"webSocketProtocolHeaderContains#2","fn":"webSocketProtocolHeaderContains","args":[null,"garcon-v1"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:12"}
+{"id":"bearerTokenFromWebSocketProtocolHeader#0","fn":"bearerTokenFromWebSocketProtocolHeader","args":["garcon-v1, garcon-auth.jwt-token"],"result":"jwt-token","origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:13"}
+{"id":"bearerTokenFromWebSocketProtocolHeader#1","fn":"bearerTokenFromWebSocketProtocolHeader","args":["garcon-auth., garcon-auth.second"],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:14"}
+{"id":"bearerTokenFromWebSocketProtocolHeader#2","fn":"bearerTokenFromWebSocketProtocolHeader","args":["garcon-auth.a b, garcon-auth.second"],"result":"a b","origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:15"}
+{"id":"bearerTokenFromWebSocketProtocolHeader#3","fn":"bearerTokenFromWebSocketProtocolHeader","args":["Garcon-auth.first"],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:16"}
+{"id":"bearerTokenFromWebSocketProtocolHeader#4","fn":"bearerTokenFromWebSocketProtocolHeader","args":[],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-auth.jsonl:17"}

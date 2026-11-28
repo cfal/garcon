@@ -1,0 +1,23 @@
+{"id":"str#0","fn":"str","args":[" \tvalue "],"result":" \tvalue ","origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:1"}
+{"id":"str#1","fn":"str","args":[{}],"result":"","origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:2"}
+{"id":"str#2","fn":"str","args":[],"result":"","origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:3"}
+{"id":"requiredStr#0","fn":"requiredStr","args":[" \tvalue "],"result":"value","origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:4"}
+{"id":"requiredStr#1","fn":"requiredStr","args":[false],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:5"}
+{"id":"requiredStr#2","fn":"requiredStr","args":["﻿  "],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:6"}
+{"id":"requiredPath#0","fn":"requiredPath","args":[" \t/path "],"result":" \t/path ","origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:7"}
+{"id":"requiredPath#1","fn":"requiredPath","args":[" "],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:8"}
+{"id":"requiredPath#2","fn":"requiredPath","args":[12],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:9"}
+{"id":"nonNegativeInt#0","fn":"nonNegativeInt","args":[42],"result":42,"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:10"}
+{"id":"nonNegativeInt#1","fn":"nonNegativeInt","args":[{"$":"number","value":"-0"}],"result":{"$":"number","value":"-0"},"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:11"}
+{"id":"nonNegativeInt#2","fn":"nonNegativeInt","args":[-1],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:12"}
+{"id":"nonNegativeInt#3","fn":"nonNegativeInt","args":[0.5],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:13"}
+{"id":"nonNegativeInt#4","fn":"nonNegativeInt","args":[9007199254740991],"result":9007199254740991,"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:14"}
+{"id":"nonNegativeInt#5","fn":"nonNegativeInt","args":[9007199254740992],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:15"}
+{"id":"nonNegativeInt#6","fn":"nonNegativeInt","args":["42"],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:16"}
+{"id":"nonNegativeInt#7","fn":"nonNegativeInt","args":[null],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:17"}
+{"id":"canonicalChatId#0","fn":"canonicalChatId","args":["1783725900000123"],"result":"1783725900000123","origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:18"}
+{"id":"canonicalChatId#1","fn":"canonicalChatId","args":["1783725900000"],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:19"}
+{"id":"canonicalChatId#2","fn":"canonicalChatId","args":[1783725900000123],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:20"}
+{"id":"canonicalChatId#3","fn":"canonicalChatId","args":[[]],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:21"}
+{"id":"canonicalChatId#4","fn":"canonicalChatId","args":["0000000000000000"],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:22"}
+{"id":"canonicalChatId#5","fn":"canonicalChatId","args":[],"result":null,"origin":"rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl:23"}

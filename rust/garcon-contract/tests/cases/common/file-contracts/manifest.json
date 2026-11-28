@@ -1,0 +1,50 @@
+{
+  "module": "common/file-contracts.ts",
+  "tests": [
+    "common/__tests__/file-contracts.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/file-contracts.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isFileRevision",
+      "argument": 0
+    },
+    {
+      "fn": "parseFileRevisionResponse",
+      "argument": 0
+    },
+    {
+      "fn": "parseReadTextResponse",
+      "argument": 0
+    },
+    {
+      "fn": "parseSaveTextRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseCreateDirectoryRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseDirectoryEntry",
+      "argument": 0
+    },
+    {
+      "fn": "parseSaveTextResponse",
+      "argument": 0
+    },
+    {
+      "fn": "parseFileIdentityResponse",
+      "argument": 0
+    },
+    {
+      "fn": "parseFileTreeResponse",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 748,
+  "sha256": "5ac9abdbce42af9aa4378954bc1647e3c5a39dc3f9142712e7d5bdf639659176"
+}

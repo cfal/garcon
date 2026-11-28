@@ -1,0 +1,694 @@
+{
+  "scenario": "websocket-session",
+  "cases": [
+    {
+      "name": "connect",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": true,
+        "protocol": "garcon-v1",
+        "refusal": null,
+        "request": {
+          "auth": "token",
+          "path": "/ws",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "ping",
+      "expected": {
+        "close": null,
+        "frames": [
+          {
+            "clientRequestId": "parity-ping",
+            "processing": {
+              "chats": [],
+              "outcome": "snapshot"
+            },
+            "sentAt": 1700000000000,
+            "serverInstanceId": "{{uuid}}",
+            "serverTime": "{{timestamp}}",
+            "type": "ws-pong"
+          }
+        ],
+        "opened": true,
+        "protocol": "garcon-v1",
+        "refusal": null,
+        "request": {
+          "auth": "token",
+          "path": "/ws",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "reconnect-state-query",
+      "expected": {
+        "close": null,
+        "frames": [
+          {
+            "clientRequestId": "parity-reconnect",
+            "controlResults": [],
+            "processing": {
+              "chats": [],
+              "outcome": "snapshot"
+            },
+            "serverInstanceId": "{{uuid}}",
+            "type": "reconnect-state"
+          }
+        ],
+        "opened": true,
+        "protocol": "garcon-v1",
+        "refusal": null,
+        "request": {
+          "auth": "token",
+          "path": "/ws",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "subscribe-unknown-chat",
+      "expected": {
+        "close": null,
+        "frames": [
+          {
+            "chatId": "parity-missing-chat",
+            "clientRequestId": "parity-subscribe",
+            "code": "SESSION_NOT_FOUND",
+            "message": "Chat not found: parity-missing-chat",
+            "requestType": "chat-subscribe",
+            "retryable": false,
+            "type": "client-request-error"
+          }
+        ],
+        "opened": true,
+        "protocol": "garcon-v1",
+        "refusal": null,
+        "request": {
+          "auth": "token",
+          "path": "/ws",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "malformed-message",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": true,
+        "protocol": "garcon-v1",
+        "refusal": null,
+        "request": {
+          "auth": "token",
+          "path": "/ws",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "auth-only-protocol",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": true,
+        "protocol": "garcon-auth.{{token}}",
+        "refusal": null,
+        "request": {
+          "auth": "token",
+          "path": "/ws",
+          "protocols": [
+            "garcon-auth.{{token}}"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "unknown-socket-path",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Not found",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 404
+        },
+        "request": {
+          "auth": "token",
+          "path": "/ws-unknown",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "executor-link-unknown",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Executor is unavailable",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 404
+        },
+        "request": {
+          "auth": "token",
+          "path": "/executor/{{uuid}}",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "connect~unauthenticated",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "none",
+          "path": "/ws",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "connect~forged-token",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "forged",
+          "path": "/ws",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "connect~no-protocol",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "token",
+          "path": "/ws",
+          "protocols": []
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "ping~unauthenticated",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "none",
+          "path": "/ws",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "ping~forged-token",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "forged",
+          "path": "/ws",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "ping~no-protocol",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "token",
+          "path": "/ws",
+          "protocols": []
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "reconnect-state-query~unauthenticated",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "none",
+          "path": "/ws",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "reconnect-state-query~forged-token",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "forged",
+          "path": "/ws",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "reconnect-state-query~no-protocol",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "token",
+          "path": "/ws",
+          "protocols": []
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "subscribe-unknown-chat~unauthenticated",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "none",
+          "path": "/ws",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "subscribe-unknown-chat~forged-token",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "forged",
+          "path": "/ws",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "subscribe-unknown-chat~no-protocol",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "token",
+          "path": "/ws",
+          "protocols": []
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "malformed-message~unauthenticated",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "none",
+          "path": "/ws",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "malformed-message~forged-token",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "forged",
+          "path": "/ws",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "malformed-message~no-protocol",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "token",
+          "path": "/ws",
+          "protocols": []
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "auth-only-protocol~unauthenticated",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": true,
+        "protocol": "garcon-auth.{{token}}",
+        "refusal": null,
+        "request": {
+          "auth": "none",
+          "path": "/ws",
+          "protocols": [
+            "garcon-auth.{{token}}"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "auth-only-protocol~forged-token",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": true,
+        "protocol": "garcon-auth.{{token}}",
+        "refusal": null,
+        "request": {
+          "auth": "forged",
+          "path": "/ws",
+          "protocols": [
+            "garcon-auth.{{token}}"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "auth-only-protocol~no-protocol",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Unauthorized",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 401
+        },
+        "request": {
+          "auth": "token",
+          "path": "/ws",
+          "protocols": []
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "unknown-socket-path~unauthenticated",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Not found",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 404
+        },
+        "request": {
+          "auth": "none",
+          "path": "/ws-unknown",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "unknown-socket-path~forged-token",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Not found",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 404
+        },
+        "request": {
+          "auth": "forged",
+          "path": "/ws-unknown",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "unknown-socket-path~no-protocol",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Not found",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 404
+        },
+        "request": {
+          "auth": "token",
+          "path": "/ws-unknown",
+          "protocols": []
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "executor-link-unknown~unauthenticated",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Executor is unavailable",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 404
+        },
+        "request": {
+          "auth": "none",
+          "path": "/executor/{{uuid}}",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "executor-link-unknown~forged-token",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Executor is unavailable",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 404
+        },
+        "request": {
+          "auth": "forged",
+          "path": "/executor/{{uuid}}",
+          "protocols": [
+            "(default)"
+          ]
+        }
+      },
+      "noise": []
+    },
+    {
+      "name": "executor-link-unknown~no-protocol",
+      "expected": {
+        "close": null,
+        "frames": [],
+        "opened": false,
+        "protocol": "",
+        "refusal": {
+          "body": "Executor is unavailable",
+          "contentType": "text/plain;charset=utf-8",
+          "status": 404
+        },
+        "request": {
+          "auth": "token",
+          "path": "/executor/{{uuid}}",
+          "protocols": []
+        }
+      },
+      "noise": []
+    }
+  ]
+}

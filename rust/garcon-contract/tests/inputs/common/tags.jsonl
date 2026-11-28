@@ -1,0 +1,16 @@
+{"fn":"normalizeTagSlug","args":[" \ufeffRoad\u00a0Map ! "]}
+{"fn":"normalizeTagSlug","args":["--a---b---"]}
+{"fn":"normalizeTagSlug","args":["a\u0085b"]}
+{"fn":"normalizeTagSlug","args":[" A---!?\u2002B  "]}
+{"fn":"normalizeTagSlug","args":["\u212a \u0130 \u0131 \u00e9 \u4e00 \ud83d\ude00"]}
+{"fn":"normalizeTagSlug","args":["!!!"]}
+{"fn":"normalizeTagSlug","args":[""]}
+{"fn":"appendNormalizedUniqueTag","args":[["OLD"],"Old"]}
+{"fn":"appendNormalizedUniqueTag","args":[["OLD"]," New tag "]}
+{"fn":"appendNormalizedUniqueTag","args":[["OLD"],"!?"]}
+{"fn":"appendNormalizedUniqueTag","args":[["\u212a"],"k"]}
+{"fn":"finalizeNormalizedTags","args":[["OLD"],"?!"]}
+{"fn":"finalizeNormalizedTags","args":[["OLD"]," NEW "]}
+{"fn":"normalizeTags","args":[[" B b ",null,4,false,"a","b-b","?",{"tag":"c"}]]}
+{"fn":"normalizeTags","args":[["Z", "aaa", "b", " Foo\tBar ", "foo--bar", "\u212a", "k", "a5", "a-5"]]}
+{"fn":"normalizeTags","args":[[]]}

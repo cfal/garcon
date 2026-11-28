@@ -1,0 +1,13 @@
+{
+  "module": "server-agents/claude/src/agents/claude/model-context.ts",
+  "tests": [
+    "server-agents/claude/src/agents/claude/__tests__/model-context.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 982,
+  "sha256": "adeb80c721d8e164cf62a67df5c60041e9165a97491312b49bf1feaeb2b93c77"
+}

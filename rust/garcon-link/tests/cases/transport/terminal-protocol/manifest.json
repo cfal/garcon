@@ -1,0 +1,13 @@
+{
+  "module": "server/remote/transport/terminal-protocol.ts",
+  "tests": [
+    "server/remote/transport/__tests__/terminal-protocol.test.js"
+  ],
+  "inputs": "rust/garcon-link/tests/inputs/terminal-protocol.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 112,
+  "sha256": "24af77d17541e47ac961331291c566cc24625b231cf6ae3bfc5feb927e02a5eb"
+}

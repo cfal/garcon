@@ -1,0 +1,4674 @@
+{
+  "scenario": "scheduled-prompts-seeded",
+  "cases": [
+    {
+      "name": "prompts-seeded",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded missed recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 5256000,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "Seeded disabled one-off",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "name": "Future",
+                "prompt": "Seeded future one-off",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded future recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "Seeded disabled recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 21,
+            "runLog": [
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed one-off",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed and ended",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed recurring",
+                "scheduledPromptId": "{{uuid}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded-again",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded missed recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 5256000,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "Seeded disabled one-off",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "name": "Future",
+                "prompt": "Seeded future one-off",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded future recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "Seeded disabled recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 21,
+            "runLog": [
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed one-off",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed and ended",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed recurring",
+                "scheduledPromptId": "{{uuid}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-unknown-id",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Scheduled prompt not found",
+            "errorCode": "SCHEDULED_PROMPT_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-stale-revision-checked-after-run-time",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Choose a future run time before enabling this one-off prompt.",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-ignored-record",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Scheduled prompt not found",
+            "errorCode": "SCHEDULED_PROMPT_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-missed-one-off",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Choose a future run time before enabling this one-off prompt.",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-disabled-recurring",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "snapshot": {
+              "prompts": [
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded missed recurring",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 5256000,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": false,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded disabled one-off",
+                  "schedule": {
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "once"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "name": "Future",
+                  "prompt": "Seeded future one-off",
+                  "schedule": {
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "once"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded future recurring",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 1440,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded disabled recurring",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 1440,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                }
+              ],
+              "revision": 22,
+              "runLog": [
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed one-off",
+                  "scheduledPromptId": "{{uuid}}"
+                },
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed and ended",
+                  "scheduledPromptId": "{{uuid}}"
+                },
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed recurring",
+                  "scheduledPromptId": "{{uuid}}"
+                }
+              ]
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-then-leave-unchanged",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "snapshot": {
+              "prompts": [
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded missed recurring",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 5256000,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": false,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded disabled one-off",
+                  "schedule": {
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "once"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "name": "Future",
+                  "prompt": "Seeded future one-off",
+                  "schedule": {
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "once"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded future recurring",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 1440,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded disabled recurring",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 1440,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                }
+              ],
+              "revision": 23,
+              "runLog": [
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed one-off",
+                  "scheduledPromptId": "{{uuid}}"
+                },
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed and ended",
+                  "scheduledPromptId": "{{uuid}}"
+                },
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed recurring",
+                  "scheduledPromptId": "{{uuid}}"
+                }
+              ]
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-after-enable",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded missed recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 5256000,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": false,
+                "id": "{{uuid}}",
+                "prompt": "Seeded disabled one-off",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "name": "Future",
+                "prompt": "Seeded future one-off",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded future recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded disabled recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 23,
+            "runLog": [
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed one-off",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed and ended",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed recurring",
+                "scheduledPromptId": "{{uuid}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "update-advanced-recurring",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "snapshot": {
+              "prompts": [
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Advanced",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 1440,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "agentId": "claude",
+                    "agentSettingsById": {},
+                    "apiProviderId": null,
+                    "model": "opus",
+                    "modelEndpointId": null,
+                    "modelProtocol": null,
+                    "permissionMode": "default",
+                    "preambleChoice": {
+                      "mode": "defaults"
+                    },
+                    "projectPath": "{{projectDir}}",
+                    "tags": [],
+                    "thinkingMode": "none",
+                    "type": "new-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": false,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded disabled one-off",
+                  "schedule": {
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "once"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "name": "Future",
+                  "prompt": "Seeded future one-off",
+                  "schedule": {
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "once"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded future recurring",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 1440,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded disabled recurring",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 1440,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                }
+              ],
+              "revision": 24,
+              "runLog": [
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed one-off",
+                  "scheduledPromptId": "{{uuid}}"
+                },
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed and ended",
+                  "scheduledPromptId": "{{uuid}}"
+                },
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed recurring",
+                  "scheduledPromptId": "{{uuid}}"
+                }
+              ]
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "update-removed-one-off",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Scheduled prompt not found",
+            "errorCode": "SCHEDULED_PROMPT_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "update-future-to-run-next-year",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "snapshot": {
+              "prompts": [
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Advanced",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 1440,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "agentId": "claude",
+                    "agentSettingsById": {},
+                    "apiProviderId": null,
+                    "model": "opus",
+                    "modelEndpointId": null,
+                    "modelProtocol": null,
+                    "permissionMode": "default",
+                    "preambleChoice": {
+                      "mode": "defaults"
+                    },
+                    "projectPath": "{{projectDir}}",
+                    "tags": [],
+                    "thinkingMode": "none",
+                    "type": "new-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": false,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded disabled one-off",
+                  "schedule": {
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "once"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "name": "Future renamed",
+                  "prompt": "Future edited",
+                  "schedule": {
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "once"
+                  },
+                  "target": {
+                    "agentId": "claude",
+                    "agentSettingsById": {},
+                    "apiProviderId": null,
+                    "model": "opus",
+                    "modelEndpointId": null,
+                    "modelProtocol": null,
+                    "permissionMode": "default",
+                    "preambleChoice": {
+                      "mode": "defaults"
+                    },
+                    "projectPath": "{{projectDir}}",
+                    "tags": [],
+                    "thinkingMode": "none",
+                    "type": "new-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded future recurring",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 1440,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded disabled recurring",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 1440,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                }
+              ],
+              "revision": 25,
+              "runLog": [
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed one-off",
+                  "scheduledPromptId": "{{uuid}}"
+                },
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed and ended",
+                  "scheduledPromptId": "{{uuid}}"
+                },
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed recurring",
+                  "scheduledPromptId": "{{uuid}}"
+                }
+              ]
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-disabled-missed-one-off",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "snapshot": {
+              "prompts": [
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Advanced",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 1440,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "agentId": "claude",
+                    "agentSettingsById": {},
+                    "apiProviderId": null,
+                    "model": "opus",
+                    "modelEndpointId": null,
+                    "modelProtocol": null,
+                    "permissionMode": "default",
+                    "preambleChoice": {
+                      "mode": "defaults"
+                    },
+                    "projectPath": "{{projectDir}}",
+                    "tags": [],
+                    "thinkingMode": "none",
+                    "type": "new-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "name": "Future renamed",
+                  "prompt": "Future edited",
+                  "schedule": {
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "once"
+                  },
+                  "target": {
+                    "agentId": "claude",
+                    "agentSettingsById": {},
+                    "apiProviderId": null,
+                    "model": "opus",
+                    "modelEndpointId": null,
+                    "modelProtocol": null,
+                    "permissionMode": "default",
+                    "preambleChoice": {
+                      "mode": "defaults"
+                    },
+                    "projectPath": "{{projectDir}}",
+                    "tags": [],
+                    "thinkingMode": "none",
+                    "type": "new-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded future recurring",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 1440,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded disabled recurring",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 1440,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                }
+              ],
+              "revision": 26,
+              "runLog": [
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed one-off",
+                  "scheduledPromptId": "{{uuid}}"
+                },
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed and ended",
+                  "scheduledPromptId": "{{uuid}}"
+                },
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed recurring",
+                  "scheduledPromptId": "{{uuid}}"
+                }
+              ]
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "snapshot": {
+              "prompts": [
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded future recurring",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 1440,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "name": "Future renamed",
+                  "prompt": "Future edited",
+                  "schedule": {
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "once"
+                  },
+                  "target": {
+                    "agentId": "claude",
+                    "agentSettingsById": {},
+                    "apiProviderId": null,
+                    "model": "opus",
+                    "modelEndpointId": null,
+                    "modelProtocol": null,
+                    "permissionMode": "default",
+                    "preambleChoice": {
+                      "mode": "defaults"
+                    },
+                    "projectPath": "{{projectDir}}",
+                    "tags": [],
+                    "thinkingMode": "none",
+                    "type": "new-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Advanced",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 1440,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "agentId": "claude",
+                    "agentSettingsById": {},
+                    "apiProviderId": null,
+                    "model": "opus",
+                    "modelEndpointId": null,
+                    "modelProtocol": null,
+                    "permissionMode": "default",
+                    "preambleChoice": {
+                      "mode": "defaults"
+                    },
+                    "projectPath": "{{projectDir}}",
+                    "tags": [],
+                    "thinkingMode": "none",
+                    "type": "new-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                },
+                {
+                  "createdAt": "{{timestamp}}",
+                  "enabled": true,
+                  "id": "{{uuid}}",
+                  "prompt": "Seeded disabled recurring",
+                  "schedule": {
+                    "endAt": null,
+                    "intervalMinutes": 1440,
+                    "nextRunAt": "{{timestamp}}",
+                    "type": "recurring"
+                  },
+                  "target": {
+                    "busyBehavior": "skip",
+                    "chatId": "1000000000000001",
+                    "expectedSelection": {
+                      "agentId": "claude",
+                      "agentOwnershipEpoch": "epoch-a",
+                      "model": ""
+                    },
+                    "type": "existing-chat"
+                  },
+                  "updatedAt": "{{timestamp}}"
+                }
+              ],
+              "revision": 27,
+              "runLog": [
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed one-off",
+                  "scheduledPromptId": "{{uuid}}"
+                },
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed and ended",
+                  "scheduledPromptId": "{{uuid}}"
+                },
+                {
+                  "at": "{{timestamp}}",
+                  "chatId": null,
+                  "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                  "outcome": "missed",
+                  "promptLabel": "Seeded missed recurring",
+                  "scheduledPromptId": "{{uuid}}"
+                }
+              ]
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/reorder"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-at-end",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded future recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "name": "Future renamed",
+                "prompt": "Future edited",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Advanced",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded disabled recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 27,
+            "runLog": [
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed one-off",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed and ended",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed recurring",
+                "scheduledPromptId": "{{uuid}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "2782",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded future recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "name": "Future renamed",
+                "prompt": "Future edited",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Advanced",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded disabled recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 27,
+            "runLog": [
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed one-off",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed and ended",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed recurring",
+                "scheduledPromptId": "{{uuid}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/../scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded future recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "name": "Future renamed",
+                "prompt": "Future edited",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Advanced",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded disabled recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 27,
+            "runLog": [
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed one-off",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed and ended",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed recurring",
+                "scheduledPromptId": "{{uuid}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded-again~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded-again~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded-again~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "2782",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded-again~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded-again~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded future recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "name": "Future renamed",
+                "prompt": "Future edited",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Advanced",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded disabled recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 27,
+            "runLog": [
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed one-off",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed and ended",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed recurring",
+                "scheduledPromptId": "{{uuid}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/../scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded-again~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded-again~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-seeded-again~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded future recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "name": "Future renamed",
+                "prompt": "Future edited",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Advanced",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded disabled recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 27,
+            "runLog": [
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed one-off",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed and ended",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed recurring",
+                "scheduledPromptId": "{{uuid}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-unknown-id~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-unknown-id~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-unknown-id~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-unknown-id~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision, id, and enabled are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-stale-revision-checked-after-run-time~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-stale-revision-checked-after-run-time~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-stale-revision-checked-after-run-time~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-stale-revision-checked-after-run-time~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision, id, and enabled are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-ignored-record~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-ignored-record~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-ignored-record~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-ignored-record~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision, id, and enabled are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-missed-one-off~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-missed-one-off~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-missed-one-off~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-missed-one-off~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision, id, and enabled are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-disabled-recurring~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-disabled-recurring~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-disabled-recurring~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-disabled-recurring~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision, id, and enabled are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-then-leave-unchanged~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-then-leave-unchanged~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-then-leave-unchanged~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "enable-then-leave-unchanged~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision, id, and enabled are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/enabled"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-after-enable~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-after-enable~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-after-enable~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "2782",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-after-enable~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-after-enable~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded future recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "name": "Future renamed",
+                "prompt": "Future edited",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Advanced",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded disabled recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 27,
+            "runLog": [
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed one-off",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed and ended",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed recurring",
+                "scheduledPromptId": "{{uuid}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/../scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-after-enable~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-after-enable~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-after-enable~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded future recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "name": "Future renamed",
+                "prompt": "Future edited",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Advanced",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded disabled recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 27,
+            "runLog": [
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed one-off",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed and ended",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed recurring",
+                "scheduledPromptId": "{{uuid}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "update-advanced-recurring~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-advanced-recurring~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-advanced-recurring~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-advanced-recurring~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision, id, and scheduledPrompt are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-removed-one-off~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-removed-one-off~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-removed-one-off~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-removed-one-off~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision, id, and scheduledPrompt are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-future-to-run-next-year~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-future-to-run-next-year~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-future-to-run-next-year~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-future-to-run-next-year~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision, id, and scheduledPrompt are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-disabled-missed-one-off~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-disabled-missed-one-off~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-disabled-missed-one-off~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-disabled-missed-one-off~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and id are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and orderedPromptIds are required",
+            "errorCode": "SCHEDULED_PROMPT_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/scheduled-prompts/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-at-end~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-at-end~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-at-end~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "2782",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-at-end~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-at-end~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded future recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "name": "Future renamed",
+                "prompt": "Future edited",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Advanced",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded disabled recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 27,
+            "runLog": [
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed one-off",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed and ended",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed recurring",
+                "scheduledPromptId": "{{uuid}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/../scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-at-end~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-at-end~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/scheduled-prompts/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "prompts-at-end~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "prompts": [
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded future recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "name": "Future renamed",
+                "prompt": "Future edited",
+                "schedule": {
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "once"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Advanced",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "agentId": "claude",
+                  "agentSettingsById": {},
+                  "apiProviderId": null,
+                  "model": "opus",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "permissionMode": "default",
+                  "preambleChoice": {
+                    "mode": "defaults"
+                  },
+                  "projectPath": "{{projectDir}}",
+                  "tags": [],
+                  "thinkingMode": "none",
+                  "type": "new-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "enabled": true,
+                "id": "{{uuid}}",
+                "prompt": "Seeded disabled recurring",
+                "schedule": {
+                  "endAt": null,
+                  "intervalMinutes": 1440,
+                  "nextRunAt": "{{timestamp}}",
+                  "type": "recurring"
+                },
+                "target": {
+                  "busyBehavior": "skip",
+                  "chatId": "1000000000000001",
+                  "expectedSelection": {
+                    "agentId": "claude",
+                    "agentOwnershipEpoch": "epoch-a",
+                    "model": ""
+                  },
+                  "type": "existing-chat"
+                },
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "revision": 27,
+            "runLog": [
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed missed one-off prompt scheduled for {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed one-off",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Removed recurring prompt after skipping 1 missed occurrence.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed and ended",
+                "scheduledPromptId": "{{uuid}}"
+              },
+              {
+                "at": "{{timestamp}}",
+                "chatId": null,
+                "message": "Skipped 1 missed occurrence; next run is {{timestamp}}.",
+                "outcome": "missed",
+                "promptLabel": "Seeded missed recurring",
+                "scheduledPromptId": "{{uuid}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/scheduled-prompts"
+        },
+        "status": 200
+      },
+      "noise": []
+    }
+  ]
+}

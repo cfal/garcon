@@ -1,0 +1,43 @@
+{
+  "module": "common/garcon-command-envelope.ts",
+  "tests": [
+    "rust/garcon-contract/tests/inputs/common/garcon-command-envelope.cases.ts",
+    "common/__tests__/garcon-ticket-command.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/garcon-command-envelope.jsonl",
+  "guards": [
+    {
+      "fn": "garconEnvelopeSpanAt",
+      "argument": 1,
+      "guard": "rust/garcon-contract/tests/inputs/common/envelope-offsets.ts#isEnvelopeOffset",
+      "dropped": 30,
+      "kept": 8
+    },
+    {
+      "fn": "garconEnvelopeSpanAt",
+      "argument": 2,
+      "guard": "rust/garcon-contract/tests/inputs/common/envelope-offsets.ts#isEnvelopeOffset",
+      "dropped": 17,
+      "kept": 9
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "parseGarconCommandEnvelope",
+      "argument": 2
+    },
+    {
+      "fn": "parseGarconXmlEnvelope",
+      "argument": 2
+    },
+    {
+      "fn": "parseGarconPromptEnvelope",
+      "argument": 2
+    }
+  ],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 861,
+  "sha256": "ced1f076c44109d67a20ab94b60af6fd548c35ad1ff366935614b4b8106f1792"
+}

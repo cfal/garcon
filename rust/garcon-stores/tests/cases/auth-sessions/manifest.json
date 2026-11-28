@@ -1,0 +1,16 @@
+{
+  "module": "server/controller/auth/sessions.ts",
+  "tests": [],
+  "inputs": "rust/garcon-stores/tests/inputs/auth-sessions.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseStoredSessions",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 18,
+  "sha256": "d5f33d84984c2b9c27b4f9e6b719494d713041be803a7376a60cce7bbb8f36f0"
+}

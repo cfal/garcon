@@ -1,0 +1,512 @@
+{
+  "name": "static-assets",
+  "description": "SPA shell and static asset serving at the root mount: routing, content types, cache headers, compression negotiation, byte ranges, and 404s.",
+  "steps": [
+    {
+      "name": "shell-root",
+      "http": {
+        "method": "GET",
+        "path": "/",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "shell-index",
+      "http": {
+        "method": "GET",
+        "path": "/index.html",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "shell-chat",
+      "http": {
+        "method": "GET",
+        "path": "/chat",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "shell-chat-slash",
+      "http": {
+        "method": "GET",
+        "path": "/chat/",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "shell-chat-id",
+      "http": {
+        "method": "GET",
+        "path": "/chat/0f6c2a4e-parity",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "shell-setup",
+      "http": {
+        "method": "GET",
+        "path": "/setup",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "shell-login",
+      "http": {
+        "method": "GET",
+        "path": "/login",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "manifest",
+      "http": {
+        "method": "GET",
+        "path": "/site.webmanifest",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "service-worker",
+      "http": {
+        "method": "GET",
+        "path": "/service-worker.js",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "immutable-js",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "immutable-css",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/assets/app.css",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "small-css",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/assets/small.css",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "woff2",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/assets/font.woff2",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "ttf",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/assets/font.ttf",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "wasm",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/assets/data.wasm",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "source-map",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/chunks/app.js.map",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "version-json",
+      "http": {
+        "method": "GET",
+        "path": "/_app/version.json",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "env-js",
+      "http": {
+        "method": "GET",
+        "path": "/_app/env.js",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "no-extension",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/assets/no-extension",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "non-ascii-name",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/assets/unicode-%C3%BC%20%E9%9B%AA.txt",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "icon-svg",
+      "http": {
+        "method": "GET",
+        "path": "/icons/icon.svg",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "icon-png",
+      "http": {
+        "method": "GET",
+        "path": "/icons/icon-192.png",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "favicon",
+      "http": {
+        "method": "GET",
+        "path": "/icons/favicon.ico",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "missing-asset",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/missing.js",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "missing-icon",
+      "http": {
+        "method": "GET",
+        "path": "/icons/missing.png",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "asset-directory",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "app-root",
+      "http": {
+        "method": "GET",
+        "path": "/_app",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "robots-unrouted",
+      "http": {
+        "method": "GET",
+        "path": "/robots.txt",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "build-hash-unrouted",
+      "http": {
+        "method": "GET",
+        "path": "/garcon-build-input-hash",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "unknown-route",
+      "http": {
+        "method": "GET",
+        "path": "/tickets",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "query-string",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js?v=1&x=%20",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "encoding-zstd",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Accept-Encoding": "zstd"
+        }
+      }
+    },
+    {
+      "name": "encoding-deflate",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Accept-Encoding": "deflate"
+        }
+      }
+    },
+    {
+      "name": "encoding-brotli-only",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Accept-Encoding": "br"
+        }
+      }
+    },
+    {
+      "name": "encoding-none",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Accept-Encoding": ""
+        }
+      }
+    },
+    {
+      "name": "encoding-identity",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Accept-Encoding": "identity"
+        }
+      }
+    },
+    {
+      "name": "encoding-wildcard",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Accept-Encoding": "*"
+        }
+      }
+    },
+    {
+      "name": "encoding-gzip-refused",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Accept-Encoding": "gzip;q=0, zstd;q=0.5, deflate;q=0.4"
+        }
+      }
+    },
+    {
+      "name": "encoding-weighted",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Accept-Encoding": "gzip;q=0.2, zstd;q=0.9"
+        }
+      }
+    },
+    {
+      "name": "encoding-case",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Accept-Encoding": "GZIP"
+        }
+      }
+    },
+    {
+      "name": "encoding-svg",
+      "http": {
+        "method": "GET",
+        "path": "/icons/icon.svg",
+        "auth": "none",
+        "headers": {
+          "Accept-Encoding": "gzip"
+        }
+      }
+    },
+    {
+      "name": "range-prefix",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Range": "bytes=0-99"
+        }
+      }
+    },
+    {
+      "name": "range-suffix",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Range": "bytes=-50"
+        }
+      }
+    },
+    {
+      "name": "range-open",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Range": "bytes=2000-"
+        }
+      }
+    },
+    {
+      "name": "range-unsatisfiable",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Range": "bytes=999999-"
+        }
+      }
+    },
+    {
+      "name": "range-zero-suffix",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Range": "bytes=-0"
+        }
+      }
+    },
+    {
+      "name": "range-reversed",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Range": "bytes=50-10"
+        }
+      }
+    },
+    {
+      "name": "range-multiple",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Range": "bytes=0-9,20-29"
+        }
+      }
+    },
+    {
+      "name": "range-malformed",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Range": "items=0-9"
+        }
+      }
+    },
+    {
+      "name": "range-if-range-mismatch",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "Range": "bytes=0-9",
+          "If-Range": "\"not-the-etag\""
+        }
+      }
+    },
+    {
+      "name": "range-shell",
+      "http": {
+        "method": "GET",
+        "path": "/",
+        "auth": "none",
+        "headers": {
+          "Range": "bytes=0-15"
+        }
+      }
+    },
+    {
+      "name": "conditional-none-match",
+      "http": {
+        "method": "GET",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "headers": {
+          "If-None-Match": "*"
+        }
+      }
+    },
+    {
+      "name": "post-asset",
+      "http": {
+        "method": "POST",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none",
+        "body": "x"
+      }
+    },
+    {
+      "name": "options-asset",
+      "http": {
+        "method": "OPTIONS",
+        "path": "/_app/immutable/entry/start.js",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "delete-shell",
+      "http": {
+        "method": "DELETE",
+        "path": "/",
+        "auth": "none"
+      }
+    }
+  ],
+  "traps": true
+}

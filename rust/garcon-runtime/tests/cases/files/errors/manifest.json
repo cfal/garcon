@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-runtime/tests/oracles/file-errors.ts",
+  "tests": [],
+  "inputs": "rust/garcon-runtime/tests/inputs/file-errors.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 12,
+  "sha256": "8b54a03497d0acd250aed8cd76a1fe2510c4a3fc1567e4853146b0fe6b67115b"
+}

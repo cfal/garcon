@@ -1,0 +1,47 @@
+{
+  "name": "models",
+  "description": "Full and per-agent model catalogs without provider CLIs, cache validation, executor instance fences, and catalog changes after assigning and unassigning a seeded provider.",
+  "server": {
+    "files": {
+      "config/api-providers.json": "{\n  \"version\": 2,\n  \"legacyProviderIds\": [],\n  \"apiProviders\": [\n    {\n      \"id\": \"parity_catalog\",\n      \"revision\": 1,\n      \"label\": \"Parity Catalog\",\n      \"templateId\": \"custom\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-02T00:00:00.000Z\",\n      \"endpoints\": [\n        {\n          \"id\": \"parity_catalog_openai\",\n          \"protocol\": \"openai-compatible\",\n          \"baseUrl\": \"https://catalog.example.invalid/v1\",\n          \"apiKey\": \"sk-synthetic-catalog\",\n          \"defaultModel\": \"parity-model\",\n          \"models\": [\n            {\n              \"value\": \"parity-model\",\n              \"label\": \"Parity model\"\n            }\n          ],\n          \"modelDiscovery\": \"none\",\n          \"supportsImages\": false,\n          \"capabilities\": {\n            \"chatCompletions\": true,\n            \"responses\": false\n          }\n        }\n      ]\n    }\n  ]\n}"
+    }
+  },
+  "traps": true,
+  "steps": [
+    { "name": "catalog-empty-provider-list", "http": { "method": "GET", "path": "/api/v1/models" } },
+    { "name": "catalog-local", "http": { "method": "GET", "path": "/api/v1/models?executorId=local" } },
+    { "name": "catalog-executor-invalid", "http": { "method": "GET", "path": "/api/v1/models?executorId=remote" } },
+    { "name": "catalog-executor-empty", "http": { "method": "GET", "path": "/api/v1/models?executorId=" } },
+    { "name": "catalog-executor-duplicated", "http": { "method": "GET", "path": "/api/v1/models?executorId=local&executorId=local" } },
+    { "name": "catalog-executor-unavailable", "http": { "method": "GET", "path": "/api/v1/models?executorId=33333333-3333-4333-8333-333333333333" } },
+    { "name": "catalog-agent-claude", "http": { "method": "GET", "path": "/api/v1/models?agent=claude" } },
+    { "name": "catalog-agent-codex", "http": { "method": "GET", "path": "/api/v1/models?agent=codex" } },
+    { "name": "catalog-agent-shell", "http": { "method": "GET", "path": "/api/v1/models?agent=shell" } },
+    { "name": "catalog-agent-opencode", "http": { "method": "GET", "path": "/api/v1/models?agent=opencode" } },
+    { "name": "catalog-agent-amp", "http": { "method": "GET", "path": "/api/v1/models?agent=amp" } },
+    { "name": "catalog-agent-direct", "http": { "method": "GET", "path": "/api/v1/models?agent=direct-openai-compatible" } },
+    { "name": "catalog-agent-unknown", "http": { "method": "GET", "path": "/api/v1/models?agent=nobody" } },
+    { "name": "catalog-agent-empty-uses-full-catalog", "http": { "method": "GET", "path": "/api/v1/models?agent=" } },
+    { "name": "catalog-agent-first-of-repeated", "http": { "method": "GET", "path": "/api/v1/models?agent=claude&agent=codex" } },
+    { "name": "catalog-if-none-match-star", "http": { "method": "GET", "path": "/api/v1/models", "headers": { "If-None-Match": "*" } } },
+    { "name": "catalog-if-none-match-miss", "http": { "method": "GET", "path": "/api/v1/models", "headers": { "If-None-Match": "\"other\", W/\"model-catalog:wrong\"" } } },
+    { "name": "catalog-if-none-match-hit-in-list", "http": { "method": "GET", "path": "/api/v1/models", "headers": { "If-None-Match": "\"other\", {{catalog-empty-provider-list.headers.etag}}" } } },
+    { "name": "catalog-agent-ignores-if-none-match", "http": { "method": "GET", "path": "/api/v1/models?agent=claude", "headers": { "If-None-Match": "*" } } },
+    { "name": "catalog-login-instance-stale", "http": { "method": "GET", "path": "/api/v1/models?loginInstance=retired-instance" } },
+    { "name": "catalog-agent-login-instance-stale", "http": { "method": "GET", "path": "/api/v1/models?agent=claude&loginInstance=retired-instance" } },
+    { "name": "list-executors", "http": { "method": "GET", "path": "/api/v1/executors" } },
+    { "name": "catalog-refresh-current-instance", "http": { "method": "GET", "path": "/api/v1/models?loginInstance={{list-executors.body.executors[0].instanceId}}" } },
+    { "name": "catalog-confirm-current-instance", "http": { "method": "GET", "path": "/api/v1/models?loginInstance={{list-executors.body.executors[0].instanceId}}&loginAgent=claude&loginAgent=codex" } },
+    { "name": "auth-agent-current-instance", "http": { "method": "GET", "path": "/api/v1/agents/auth?agent=claude&loginInstance={{list-executors.body.executors[0].instanceId}}" } },
+    { "name": "prime-catalog-cache", "http": { "method": "GET", "path": "/api/v1/models" } },
+    { "name": "assign-catalog-provider", "http": { "method": "PUT", "path": "/api/v1/api-provider-assignments?apiProviderId=parity_catalog&executorId=local" } },
+    { "name": "catalog-after-assignment", "http": { "method": "GET", "path": "/api/v1/models" } },
+    { "name": "catalog-agent-after-assignment", "http": { "method": "GET", "path": "/api/v1/models?agent=direct-openai-compatible" } },
+    { "name": "agent-catalog-after-assignment", "http": { "method": "GET", "path": "/api/v1/agents" } },
+    { "name": "agent-readiness-after-assignment", "http": { "method": "GET", "path": "/api/v1/agents/readiness" } },
+    { "name": "unassign-catalog-provider", "http": { "method": "DELETE", "path": "/api/v1/api-provider-assignments?apiProviderId=parity_catalog&executorId=local" } },
+    { "name": "catalog-after-unassignment", "http": { "method": "GET", "path": "/api/v1/models" } },
+    { "name": "agent-catalog-after-unassignment", "http": { "method": "GET", "path": "/api/v1/agents" } },
+    { "name": "catalog-wrong-method", "http": { "method": "POST", "path": "/api/v1/models", "json": {} } }
+  ]
+}

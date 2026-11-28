@@ -1,0 +1,13 @@
+{
+  "module": "server/common/stored-json.ts",
+  "tests": [
+    "server/common/__tests__/stored-json.test.ts"
+  ],
+  "inputs": "rust/garcon-base/tests/inputs/server-common/stored-json.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 97,
+  "sha256": "0a84995cedcec4c68ef6a8bf087cd03e4170efc37377b7921b1485f7b09a029f"
+}

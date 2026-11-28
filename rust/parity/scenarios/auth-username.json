@@ -1,0 +1,154 @@
+{
+  "name": "auth-username",
+  "description": "Changing the username: field validation in check order, the unchanged and wrong-password errors, and the request refused without a token or with a forged one.",
+  "steps": [
+    {
+      "name": "username-extra-field",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {
+          "currentPassword": "{{password}}",
+          "username": "renamed",
+          "remember": true
+        }
+      }
+    },
+    {
+      "name": "username-empty-object",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {}
+      }
+    },
+    {
+      "name": "username-current-password-not-string",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {
+          "currentPassword": 42,
+          "username": "renamed"
+        }
+      }
+    },
+    {
+      "name": "username-current-password-129-characters",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {
+          "currentPassword": "ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+          "username": "renamed"
+        }
+      }
+    },
+    {
+      "name": "username-new-username-missing",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {
+          "currentPassword": "{{password}}"
+        }
+      }
+    },
+    {
+      "name": "username-new-username-blank",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "body": "{\"currentPassword\":\"{{password}}\",\"username\":\" \\ufeff\"}",
+        "headers": {
+          "Content-Type": "application/json"
+        }
+      }
+    },
+    {
+      "name": "username-new-username-65-characters",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {
+          "currentPassword": "{{password}}",
+          "username": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu"
+        }
+      }
+    },
+    {
+      "name": "username-new-username-lone-surrogate",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {
+          "currentPassword": "{{password}}",
+          "username": "\ud800"
+        }
+      }
+    },
+    {
+      "name": "username-wrong-password",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {
+          "currentPassword": "wrong-password",
+          "username": "renamed"
+        }
+      }
+    },
+    {
+      "name": "username-unchanged",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {
+          "currentPassword": "{{password}}",
+          "username": " parity "
+        }
+      }
+    },
+    {
+      "name": "username-without-token",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {
+          "currentPassword": "{{password}}",
+          "username": "renamed"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "username-with-forged-token",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/auth/username",
+        "json": {
+          "currentPassword": "{{password}}",
+          "username": "renamed"
+        },
+        "auth": "forged"
+      }
+    },
+    {
+      "name": "username-wrong-method",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/username",
+        "json": {},
+        "auth": "none"
+      }
+    },
+    {
+      "name": "user-after-failed-changes",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/user"
+      }
+    }
+  ],
+  "traps": false
+}

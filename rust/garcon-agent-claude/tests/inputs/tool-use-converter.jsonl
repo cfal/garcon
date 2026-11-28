@@ -1,0 +1,9 @@
+{"fn":"convertClaudeToolUse","args":["2026-10-01T00:00:00.000Z",{"id":"synthetic-tool","name":"ToolSearch","input":{"query":"select:Monitor","max_results":1}}]}
+{"fn":"convertClaudeToolUse","args":["2026-10-01T00:00:00.000Z",{"id":"synthetic-tool","name":"Monitor","input":{"description":"Synthetic command watch","timeout_ms":123.5,"command":"printf synthetic"}}]}
+{"fn":"convertClaudeToolUse","args":["2026-10-01T00:00:00.000Z",{"id":"synthetic-tool","name":"Monitor","input":{"description":"Synthetic socket watch","timeout_ms":300000,"ws":{"url":"ws://synthetic.invalid/events","protocols":["synthetic-events"]}}}]}
+{"fn":"convertClaudeToolUse","args":["2026-10-01T00:00:00.000Z",{"id":"synthetic-tool","name":"Monitor","input":{"description":"Synthetic session watch","timeout_ms":"0x10","persistent":false,"command":"printf synthetic","allowed_domains":[""," ","synthetic.invalid",7],"ws":{"protocols":[]}}}]}
+{"fn":"convertClaudeToolUse","args":["2026-10-01T00:00:00.000Z",{"id":"synthetic-tool","name":"Monitor","input":{"description":[],"timeout_ms":null}}]}
+{"fn":"convertClaudeToolUse","args":["2026-10-01T00:00:00.000Z",{"id":"synthetic-tool","name":"ToolSearch","input":"invalid"}]}
+{"fn":"convertClaudeToolUse","args":["2026-10-01T00:00:00.000Z",{"id":"synthetic-tool","name":"Read","input":{"file_path":"/repo/a","offset":"0o10","limit":"0b10","end_line":"0x10"}}]}
+{"fn":"convertClaudeToolUse","args":["2026-10-01T00:00:00.000Z",{"id":"synthetic-tool","name":"Edit","input":{"changes":[{"kind":"update","path":"/repo/a","extra":true},null]}}]}
+{"fn":"convertClaudeToolUse","args":["2026-10-01T00:00:00.000Z",{"id":"synthetic-tool","name":"ExitPlanMode","input":{"plan":"Synthetic plan","allowedPrompts":[{"prompt":"Read a synthetic document","tool":"Bash","extra":"value"},null]}}]}

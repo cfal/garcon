@@ -1,0 +1,3322 @@
+{
+  "scenario": "chat-boards-count-limit",
+  "cases": [
+    {
+      "name": "boards-full",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 1"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 2"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 3"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 4"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 5"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 6"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 7"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 8"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 9"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 10"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 11"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 12"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 13"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 14"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 15"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 16"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 17"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 18"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 19"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 20"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 21"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 22"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 23"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 24"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 25"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 26"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 27"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 28"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 29"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 30"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 31"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 32"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 33"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 34"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 35"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 36"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 37"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 38"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 39"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 40"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 41"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 42"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 43"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 44"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 45"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 46"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 47"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 48"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 49"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 50"
+              }
+            ],
+            "revision": 3
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "A maximum of 50 chat boards is allowed",
+            "errorCode": "CHAT_BOARD_LIMIT_REACHED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit-invalid-name",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "A maximum of 50 chat boards is allowed",
+            "errorCode": "CHAT_BOARD_LIMIT_REACHED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit-stale-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "catalog": {
+              "boards": [
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 1"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 2"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 3"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 4"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 5"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 6"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 7"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 8"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 9"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 10"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 11"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 12"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 13"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 14"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 15"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 16"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 17"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 18"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 19"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 20"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 21"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 22"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 23"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 24"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 25"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 26"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 27"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 28"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 29"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 30"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 31"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 32"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 33"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 34"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 35"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 36"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 37"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 38"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 39"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 40"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 41"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 42"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 43"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 44"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 45"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 46"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 47"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 48"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 49"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 50"
+                }
+              ],
+              "revision": 3
+            },
+            "error": "Chat boards changed in another client; review the latest catalog",
+            "errorCode": "CHAT_BOARD_REVISION_CONFLICT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-at-limit",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "catalog": {
+              "boards": [
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 2"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 3"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 4"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 5"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 6"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 7"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 8"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 9"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 10"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 11"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 12"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 13"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 14"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 15"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 16"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 17"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 18"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 19"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 20"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 21"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 22"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 23"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 24"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 25"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 26"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 27"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 28"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 29"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 30"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 31"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 32"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 33"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 34"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 35"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 36"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 37"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 38"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 39"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 40"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 41"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 42"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 43"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 44"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 45"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 46"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 47"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 48"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 49"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 50"
+                }
+              ],
+              "revision": 4
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "create-after-remove",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boardId": "{{uuid}}",
+            "catalog": {
+              "boards": [
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 2"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 3"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 4"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 5"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 6"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 7"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 8"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 9"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 10"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 11"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 12"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 13"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 14"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 15"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 16"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 17"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 18"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 19"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 20"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 21"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 22"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 23"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 24"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 25"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 26"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 27"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 28"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 29"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 30"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 31"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 32"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 33"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 34"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 35"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 36"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 37"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 38"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 39"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 40"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 41"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 42"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 43"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 44"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 45"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 46"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 47"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 48"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 49"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Board 50"
+                },
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "Overflow"
+                }
+              ],
+              "revision": 5
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 201
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-create",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 2"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 3"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 4"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 5"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 6"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 7"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 8"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 9"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 10"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 11"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 12"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 13"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 14"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 15"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 16"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 17"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 18"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 19"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 20"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 21"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 22"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 23"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 24"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 25"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 26"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 27"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 28"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 29"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 30"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 31"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 32"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 33"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 34"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 35"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 36"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 37"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 38"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 39"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 40"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 41"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 42"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 43"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 44"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 45"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 46"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 47"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 48"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 49"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 50"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Overflow"
+              }
+            ],
+            "revision": 5
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-full~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-full~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-full~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "3867",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-full~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-full~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 2"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 3"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 4"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 5"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 6"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 7"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 8"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 9"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 10"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 11"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 12"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 13"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 14"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 15"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 16"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 17"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 18"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 19"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 20"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 21"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 22"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 23"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 24"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 25"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 26"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 27"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 28"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 29"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 30"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 31"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 32"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 33"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 34"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 35"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 36"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 37"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 38"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 39"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 40"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 41"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 42"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 43"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 44"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 45"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 46"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 47"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 48"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 49"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 50"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Overflow"
+              }
+            ],
+            "revision": 5
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/../chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-full~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-full~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-full~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 2"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 3"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 4"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 5"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 6"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 7"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 8"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 9"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 10"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 11"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 12"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 13"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 14"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 15"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 16"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 17"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 18"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 19"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 20"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 21"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 22"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 23"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 24"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 25"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 26"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 27"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 28"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 29"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 30"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 31"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 32"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 33"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 34"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 35"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 36"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 37"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 38"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 39"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 40"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 41"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 42"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 43"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 44"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 45"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 46"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 47"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 48"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 49"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 50"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Overflow"
+              }
+            ],
+            "revision": 5
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and name are required",
+            "errorCode": "CHAT_BOARD_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit-invalid-name~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit-invalid-name~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit-invalid-name~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit-invalid-name~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and name are required",
+            "errorCode": "CHAT_BOARD_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit-stale-revision~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit-stale-revision~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit-stale-revision~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-at-limit-stale-revision~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and name are required",
+            "errorCode": "CHAT_BOARD_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-at-limit~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-at-limit~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-at-limit~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-at-limit~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and boardId are required",
+            "errorCode": "CHAT_BOARD_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-after-remove~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-after-remove~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-after-remove~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-after-remove~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and name are required",
+            "errorCode": "CHAT_BOARD_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-create~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-create~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-create~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "3867",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-create~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-create~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 2"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 3"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 4"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 5"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 6"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 7"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 8"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 9"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 10"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 11"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 12"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 13"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 14"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 15"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 16"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 17"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 18"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 19"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 20"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 21"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 22"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 23"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 24"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 25"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 26"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 27"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 28"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 29"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 30"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 31"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 32"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 33"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 34"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 35"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 36"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 37"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 38"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 39"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 40"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 41"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 42"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 43"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 44"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 45"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 46"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 47"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 48"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 49"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 50"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Overflow"
+              }
+            ],
+            "revision": 5
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/../chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-create~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-create~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-create~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 2"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 3"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 4"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 5"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 6"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 7"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 8"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 9"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 10"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 11"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 12"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 13"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 14"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 15"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 16"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 17"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 18"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 19"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 20"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 21"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 22"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 23"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 24"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 25"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 26"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 27"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 28"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 29"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 30"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 31"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 32"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 33"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 34"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 35"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 36"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 37"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 38"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 39"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 40"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 41"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 42"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 43"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 44"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 45"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 46"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 47"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 48"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 49"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Board 50"
+              },
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "Overflow"
+              }
+            ],
+            "revision": 5
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    }
+  ]
+}

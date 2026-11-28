@@ -1,0 +1,139 @@
+{
+  "name": "workspace-seeded",
+  "description": "The chat session name over a seeded chat registry: renaming an existing chat, an unchanged rename, trimming, unknown chats, and the list read that shows the stored names.",
+  "server": {
+    "files": {
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":0,\"assignments\":{}}",
+      "workspace/workspace-version.json": "{\n  \"version\": 10\n}\n",
+      "workspace/chats.json": "{\n  \"version\": 6,\n  \"sessions\": {\n    \"1000000000000001\": {\n      \"agentId\": \"claude\",\n      \"agentSessionId\": null,\n      \"nativeSession\": null,\n      \"agentOwnershipEpoch\": \"epoch-a\",\n      \"agentSettingsById\": {},\n      \"projectPath\": \"/srv/seeded-project\",\n      \"tags\": [],\n      \"model\": \"\",\n      \"apiProviderId\": null,\n      \"modelEndpointId\": null,\n      \"modelProtocol\": null,\n      \"lastReadAt\": null,\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"carryOverSegments\": [],\n      \"nativeSeedReceipt\": null,\n      \"carryOverMigrationQuarantine\": null,\n      \"pendingPreambleBoundary\": null,\n      \"preambleSelection\": {\n        \"revision\": 0,\n        \"orderedPreambleIds\": []\n      },\n      \"parentChatId\": null,\n      \"lineage\": null\n    },\n    \"1000000000000002\": {\n      \"agentId\": \"codex\",\n      \"agentSessionId\": null,\n      \"nativeSession\": null,\n      \"agentOwnershipEpoch\": \"epoch-b\",\n      \"agentSettingsById\": {},\n      \"projectPath\": \"/srv/seeded-project\",\n      \"tags\": [\n        \"seeded\"\n      ],\n      \"model\": \"\",\n      \"apiProviderId\": null,\n      \"modelEndpointId\": null,\n      \"modelProtocol\": null,\n      \"lastReadAt\": null,\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"carryOverSegments\": [],\n      \"nativeSeedReceipt\": null,\n      \"carryOverMigrationQuarantine\": null,\n      \"pendingPreambleBoundary\": null,\n      \"preambleSelection\": {\n        \"revision\": 0,\n        \"orderedPreambleIds\": []\n      },\n      \"parentChatId\": null,\n      \"lineage\": null\n    }\n  }\n}"
+    }
+  },
+  "steps": [
+    {
+      "name": "session-name-missing-chat",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/session-name",
+        "json": {
+          "chatId": "1999999999999999",
+          "title": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "session-name-missing-body",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/session-name",
+        "json": {}
+      }
+    },
+    {
+      "name": "session-name-set",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/session-name",
+        "json": {
+          "chatId": "1000000000000001",
+          "title": "  Renamed ü 雪 😀  "
+        }
+      }
+    },
+    {
+      "name": "session-name-set-again",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/session-name",
+        "json": {
+          "chatId": "1000000000000001",
+          "title": "Renamed ü 雪 😀"
+        }
+      }
+    },
+    {
+      "name": "session-name-again-with-padded-title",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/session-name",
+        "json": {
+          "chatId": "1000000000000001",
+          "title": "   Renamed ü 雪 😀   "
+        }
+      }
+    },
+    {
+      "name": "session-name-rename",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/session-name",
+        "json": {
+          "chatId": "1000000000000001",
+          "title": "Second name"
+        }
+      }
+    },
+    {
+      "name": "session-name-whitespace-only",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/session-name",
+        "json": {
+          "chatId": "1000000000000001",
+          "title": " "
+        }
+      }
+    },
+    {
+      "name": "session-name-clear-with-dash",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/session-name",
+        "json": {
+          "chatId": "1000000000000001",
+          "title": "-"
+        }
+      }
+    },
+    {
+      "name": "session-name-second-chat",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/session-name",
+        "json": {
+          "chatId": "1000000000000002",
+          "title": "Chat B"
+        }
+      }
+    },
+    {
+      "name": "session-name-control-characters-kept",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/session-name",
+        "json": {
+          "chatId": "1000000000000002",
+          "title": "a\tb"
+        }
+      }
+    },
+    {
+      "name": "session-name-non-ascii-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/session-name",
+        "json": {
+          "chatId": "parity-chat",
+          "title": "Named"
+        }
+      }
+    },
+    {
+      "name": "chats-after-rename",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats"
+      }
+    }
+  ],
+  "traps": true
+}

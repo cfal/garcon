@@ -1,0 +1,14 @@
+{
+  "module": "server-agents/codex/src/agents/codex/async-questions.ts",
+  "tests": [
+    "server-agents/codex/src/agents/codex/__tests__/async-questions.test.js"
+  ],
+  "inputs": "rust/garcon-agent-codex/tests/inputs/async-questions.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 324,
+  "sha256": "f4a6bd8354aeade21123d036510422e320a1af69eacf6531ee7f5e3ffd81f02f"
+}

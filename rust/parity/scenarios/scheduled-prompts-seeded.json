@@ -1,0 +1,247 @@
+{
+  "name": "scheduled-prompts-seeded",
+  "description": "Scheduled prompt routes over a seeded file: missed occurrences reconciled when the store opens and their run log entries, an invalid record ignored on load, disabled and future prompts left alone, then enable, update, remove and reorder of known identifiers.",
+  "server": {
+    "files": {
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":0,\"assignments\":{}}",
+      "workspace/workspace-version.json": "{\n  \"version\": 10\n}\n",
+      "workspace/chats.json": "{\n  \"version\": 6,\n  \"sessions\": {\n    \"1000000000000001\": {\n      \"agentId\": \"claude\",\n      \"agentSessionId\": null,\n      \"nativeSession\": null,\n      \"agentOwnershipEpoch\": \"epoch-a\",\n      \"agentSettingsById\": {},\n      \"projectPath\": \"/srv/seeded-project\",\n      \"tags\": [],\n      \"model\": \"\",\n      \"apiProviderId\": null,\n      \"modelEndpointId\": null,\n      \"modelProtocol\": null,\n      \"lastReadAt\": null,\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"carryOverSegments\": [],\n      \"nativeSeedReceipt\": null,\n      \"carryOverMigrationQuarantine\": null,\n      \"pendingPreambleBoundary\": null,\n      \"preambleSelection\": {\n        \"revision\": 0,\n        \"orderedPreambleIds\": []\n      },\n      \"parentChatId\": null,\n      \"lineage\": null\n    },\n    \"1000000000000002\": {\n      \"agentId\": \"codex\",\n      \"agentSessionId\": null,\n      \"nativeSession\": null,\n      \"agentOwnershipEpoch\": \"epoch-b\",\n      \"agentSettingsById\": {},\n      \"projectPath\": \"/srv/seeded-project\",\n      \"tags\": [],\n      \"model\": \"gpt\",\n      \"apiProviderId\": null,\n      \"modelEndpointId\": null,\n      \"modelProtocol\": null,\n      \"lastReadAt\": null,\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"carryOverSegments\": [],\n      \"nativeSeedReceipt\": null,\n      \"carryOverMigrationQuarantine\": null,\n      \"pendingPreambleBoundary\": null,\n      \"preambleSelection\": {\n        \"revision\": 0,\n        \"orderedPreambleIds\": []\n      },\n      \"parentChatId\": null,\n      \"lineage\": null\n    }\n  }\n}",
+      "workspace/scheduled-prompts.json": "{\n  \"version\": 4,\n  \"revision\": 20,\n  \"prompts\": [\n    {\n      \"id\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\n      \"enabled\": true,\n      \"schedule\": {\n        \"type\": \"once\",\n        \"nextRunAt\": \"2020-01-01T00:00:00.000Z\"\n      },\n      \"target\": {\n        \"type\": \"existing-chat\",\n        \"chatId\": \"1000000000000001\",\n        \"busyBehavior\": \"skip\",\n        \"expectedSelection\": {\n          \"agentId\": \"claude\",\n          \"agentOwnershipEpoch\": \"epoch-a\",\n          \"model\": \"\"\n        }\n      },\n      \"prompt\": \"Seeded missed one-off\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\n      \"enabled\": true,\n      \"schedule\": {\n        \"type\": \"recurring\",\n        \"intervalMinutes\": 5256000,\n        \"nextRunAt\": \"2020-01-01T00:00:00.000Z\",\n        \"endAt\": \"2021-01-01T00:00:00.000Z\"\n      },\n      \"target\": {\n        \"type\": \"existing-chat\",\n        \"chatId\": \"1000000000000001\",\n        \"busyBehavior\": \"skip\",\n        \"expectedSelection\": {\n          \"agentId\": \"claude\",\n          \"agentOwnershipEpoch\": \"epoch-a\",\n          \"model\": \"\"\n        }\n      },\n      \"prompt\": \"Seeded missed and ended\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\n      \"enabled\": true,\n      \"schedule\": {\n        \"type\": \"recurring\",\n        \"intervalMinutes\": 5256000,\n        \"nextRunAt\": \"2020-01-01T00:00:00.000Z\",\n        \"endAt\": null\n      },\n      \"target\": {\n        \"type\": \"existing-chat\",\n        \"chatId\": \"1000000000000001\",\n        \"busyBehavior\": \"skip\",\n        \"expectedSelection\": {\n          \"agentId\": \"claude\",\n          \"agentOwnershipEpoch\": \"epoch-a\",\n          \"model\": \"\"\n        }\n      },\n      \"prompt\": \"Seeded missed recurring\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"dddddddd-dddd-4ddd-8ddd-dddddddddddd\",\n      \"enabled\": false,\n      \"schedule\": {\n        \"type\": \"once\",\n        \"nextRunAt\": \"2020-06-01T00:00:00.000Z\"\n      },\n      \"target\": {\n        \"type\": \"existing-chat\",\n        \"chatId\": \"1000000000000001\",\n        \"busyBehavior\": \"skip\",\n        \"expectedSelection\": {\n          \"agentId\": \"claude\",\n          \"agentOwnershipEpoch\": \"epoch-a\",\n          \"model\": \"\"\n        }\n      },\n      \"prompt\": \"Seeded disabled one-off\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee\",\n      \"enabled\": true,\n      \"schedule\": {\n        \"type\": \"once\",\n        \"nextRunAt\": \"2999-01-01T00:00:00.000Z\"\n      },\n      \"target\": {\n        \"type\": \"existing-chat\",\n        \"chatId\": \"1000000000000001\",\n        \"busyBehavior\": \"skip\",\n        \"expectedSelection\": {\n          \"agentId\": \"claude\",\n          \"agentOwnershipEpoch\": \"epoch-a\",\n          \"model\": \"\"\n        }\n      },\n      \"prompt\": \"Seeded future one-off\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\",\n      \"name\": \"Future\"\n    },\n    {\n      \"id\": \"f000f000-f00f-4f0f-8f0f-f000f000f000\",\n      \"enabled\": true,\n      \"schedule\": {\n        \"type\": \"recurring\",\n        \"intervalMinutes\": 1440,\n        \"nextRunAt\": \"2999-01-01T00:00:00.000Z\",\n        \"endAt\": null\n      },\n      \"target\": {\n        \"type\": \"existing-chat\",\n        \"chatId\": \"1000000000000001\",\n        \"busyBehavior\": \"skip\",\n        \"expectedSelection\": {\n          \"agentId\": \"claude\",\n          \"agentOwnershipEpoch\": \"epoch-a\",\n          \"model\": \"\"\n        }\n      },\n      \"prompt\": \"Seeded future recurring\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"abababab-abab-4bab-8bab-abababababab\",\n      \"enabled\": true,\n      \"schedule\": {\n        \"type\": \"once\",\n        \"runAtUtc\": \"2999-01-01T00:00:00.000Z\"\n      },\n      \"target\": {\n        \"type\": \"existing-chat\",\n        \"chatId\": \"1000000000000001\",\n        \"busyBehavior\": \"skip\",\n        \"expectedSelection\": {\n          \"agentId\": \"claude\",\n          \"agentOwnershipEpoch\": \"epoch-a\",\n          \"model\": \"\"\n        }\n      },\n      \"prompt\": \"Seeded invalid record\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    },\n    {\n      \"id\": \"acacacac-acac-4cac-8cac-acacacacacac\",\n      \"enabled\": false,\n      \"schedule\": {\n        \"type\": \"recurring\",\n        \"intervalMinutes\": 1440,\n        \"nextRunAt\": \"2020-06-01T00:00:00.000Z\",\n        \"endAt\": null\n      },\n      \"target\": {\n        \"type\": \"existing-chat\",\n        \"chatId\": \"1000000000000001\",\n        \"busyBehavior\": \"skip\",\n        \"expectedSelection\": {\n          \"agentId\": \"claude\",\n          \"agentOwnershipEpoch\": \"epoch-a\",\n          \"model\": \"\"\n        }\n      },\n      \"prompt\": \"Seeded disabled recurring\",\n      \"createdAt\": \"2020-01-01T00:00:00.000Z\",\n      \"updatedAt\": \"2020-01-01T00:00:00.000Z\"\n    }\n  ]\n}"
+    }
+  },
+  "steps": [
+    {
+      "name": "prompts-seeded",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/scheduled-prompts"
+      }
+    },
+    {
+      "name": "prompts-seeded-again",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/scheduled-prompts"
+      }
+    },
+    {
+      "name": "enable-unknown-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/scheduled-prompts/enabled",
+        "json": {
+          "expectedRevision": 21,
+          "id": "33333333-3333-4333-8333-333333333333",
+          "enabled": true
+        }
+      }
+    },
+    {
+      "name": "enable-stale-revision-checked-after-run-time",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/scheduled-prompts/enabled",
+        "json": {
+          "expectedRevision": 20,
+          "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          "enabled": true
+        }
+      }
+    },
+    {
+      "name": "enable-ignored-record",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/scheduled-prompts/enabled",
+        "json": {
+          "expectedRevision": 21,
+          "id": "abababab-abab-4bab-8bab-abababababab",
+          "enabled": true
+        }
+      }
+    },
+    {
+      "name": "enable-missed-one-off",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/scheduled-prompts/enabled",
+        "json": {
+          "expectedRevision": 21,
+          "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          "enabled": true
+        }
+      }
+    },
+    {
+      "name": "enable-disabled-recurring",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/scheduled-prompts/enabled",
+        "json": {
+          "expectedRevision": 21,
+          "id": "acacacac-acac-4cac-8cac-acacacacacac",
+          "enabled": true
+        }
+      }
+    },
+    {
+      "name": "enable-then-leave-unchanged",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/scheduled-prompts/enabled",
+        "json": {
+          "expectedRevision": 22,
+          "id": "acacacac-acac-4cac-8cac-acacacacacac",
+          "enabled": true
+        }
+      }
+    },
+    {
+      "name": "prompts-after-enable",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/scheduled-prompts"
+      }
+    },
+    {
+      "name": "update-advanced-recurring",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/scheduled-prompts",
+        "json": {
+          "expectedRevision": 23,
+          "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "scheduledPrompt": {
+            "schedule": {
+              "type": "recurring",
+              "firstRunAtUtc": "2999-06-01T00:00:00.000Z",
+              "intervalMinutes": 1440,
+              "endAtUtc": null
+            },
+            "target": {
+              "type": "new-chat",
+              "agentId": "claude",
+              "projectPath": "{{projectDir}}",
+              "model": "opus",
+              "apiProviderId": null,
+              "modelEndpointId": null,
+              "modelProtocol": null,
+              "permissionMode": "default",
+              "thinkingMode": "none",
+              "agentSettingsById": {},
+              "tags": [],
+              "preambleChoice": {
+                "mode": "defaults"
+              }
+            },
+            "prompt": "Advanced"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-removed-one-off",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/scheduled-prompts",
+        "json": {
+          "expectedRevision": 24,
+          "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "scheduledPrompt": {
+            "schedule": {
+              "type": "once",
+              "runAtUtc": "2999-01-01T00:00:00.000Z"
+            },
+            "target": {
+              "type": "new-chat",
+              "agentId": "claude",
+              "projectPath": "{{projectDir}}",
+              "model": "opus",
+              "apiProviderId": null,
+              "modelEndpointId": null,
+              "modelProtocol": null,
+              "permissionMode": "default",
+              "thinkingMode": "none",
+              "agentSettingsById": {},
+              "tags": [],
+              "preambleChoice": {
+                "mode": "defaults"
+              }
+            },
+            "prompt": "Say hello {{chat_id}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-future-to-run-next-year",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/scheduled-prompts",
+        "json": {
+          "expectedRevision": 24,
+          "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+          "scheduledPrompt": {
+            "schedule": {
+              "type": "once",
+              "runAtUtc": "2999-01-01T00:00:00.000Z"
+            },
+            "target": {
+              "type": "new-chat",
+              "agentId": "claude",
+              "projectPath": "{{projectDir}}",
+              "model": "opus",
+              "apiProviderId": null,
+              "modelEndpointId": null,
+              "modelProtocol": null,
+              "permissionMode": "default",
+              "thinkingMode": "none",
+              "agentSettingsById": {},
+              "tags": [],
+              "preambleChoice": {
+                "mode": "defaults"
+              }
+            },
+            "prompt": "Future edited",
+            "name": "Future renamed"
+          }
+        }
+      }
+    },
+    {
+      "name": "remove-disabled-missed-one-off",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/scheduled-prompts",
+        "json": {
+          "expectedRevision": 25,
+          "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        }
+      }
+    },
+    {
+      "name": "reorder",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/scheduled-prompts/reorder",
+        "json": {
+          "expectedRevision": 26,
+          "orderedPromptIds": [
+            "f000f000-f00f-4f0f-8f0f-f000f000f000",
+            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+            "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+            "acacacac-acac-4cac-8cac-acacacacacac"
+          ]
+        }
+      }
+    },
+    {
+      "name": "prompts-at-end",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/scheduled-prompts"
+      }
+    }
+  ],
+  "traps": true
+}

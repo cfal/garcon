@@ -1,8 +1,9 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { BoundedLog } from './bounded-log.js';
 import { Deferred, withTimeout } from './deferred.js';
 import { fixtureAuthToken, prepareFixtureAuth } from './fixture-auth.js';
+import { SERVER_RUNTIME_FILENAME } from '../../common/server-runtime.js';
 
 const SERVER_READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const LOG_CAPACITY = 2_000;
@@ -88,6 +89,49 @@ export async function pumpLines(
   }
 }
 
+// The environment a test harness gives the Rust front door: the Bun that runs
+// the tests starts the original behind it, and front-door settings
+// (GARCON_RS_*), such as the shadow log and unit kill switches, pass through.
+// Empty values are unset, as the front door treats them.
+export function frontDoorEnvironment(): Record<string, string> {
+  return {
+    GARCON_RS_BUN: process.execPath,
+    ...Object.fromEntries(Object.entries(process.env)
+      .filter((entry): entry is [string, string] => entry[0].startsWith('GARCON_RS_') && Boolean(entry[1]))),
+  };
+}
+
+export function controllerLaunch(repoRoot: string) {
+  const controller = process.env.GARCON_TEST_CONTROLLER ?? 'original';
+  if (controller === 'original') return { controller, command: [process.execPath, 'server/main.ts'], environment: {} };
+  const releaseBinary = join(repoRoot, 'rust/target/release/garcon-server');
+  if (controller === 'rust') {
+    return {
+      controller,
+      command: [process.env.GARCON_TEST_RUST_CONTROLLER_BINARY ?? releaseBinary],
+      environment: { ...frontDoorEnvironment(), GARCON_RS_CONTROLLER: 'native' },
+    };
+  }
+  if (controller !== 'front-door') throw new Error(`Unknown controller: ${controller}`);
+  return {
+    controller,
+    // GARCON_TEST_FRONT_DOOR_BINARY selects a build other than the local release build.
+    command: [process.env.GARCON_TEST_FRONT_DOOR_BINARY ?? releaseBinary],
+    environment: frontDoorEnvironment(),
+  };
+}
+
+// Reads the controller pid from the runtime descriptor it publishes before it
+// reports readiness; absent when publication was suppressed or failed.
+async function publishedControllerPid(configDir: string): Promise<number | null> {
+  try {
+    const descriptor = JSON.parse(await readFile(join(configDir, SERVER_RUNTIME_FILENAME), 'utf8')) as { pid?: unknown };
+    return typeof descriptor.pid === 'number' ? descriptor.pid : null;
+  } catch {
+    return null;
+  }
+}
+
 export class GarconProcess {
   readonly #child: GarconChild;
   readonly #logs = new BoundedLog<string>(LOG_CAPACITY);
@@ -95,6 +139,7 @@ export class GarconProcess {
   readonly #stderrPump: Promise<void>;
   #baseUrl = '';
   #authToken: string | null = null;
+  #controllerPid = 0;
   #credentials: { username: string; password: string } | null = null;
   #expectedExit = false;
   #unexpectedExit: string | null = null;
@@ -132,7 +177,12 @@ export class GarconProcess {
 
   static async start(options: GarconProcessOptions): Promise<GarconProcess> {
     const ready = new Deferred<string>();
-    const environment = isolatedEnvironment(options.homeDir, options.environment);
+    const launch = controllerLaunch(options.repoRoot);
+    const environment = isolatedEnvironment(options.homeDir, {
+      ...launch.environment,
+      ...options.environment,
+      ...(launch.controller === 'rust' ? { GARCON_RS_CONTROLLER: 'native' } : {}),
+    });
     await mkdir(environment.TMPDIR, { recursive: true });
     const credentials = options.authentication === 'existing' ? null : await prepareFixtureAuth(options.configDir);
     const workspaceArguments = options.workspaceName
@@ -140,8 +190,7 @@ export class GarconProcess {
       : ['--workspace-dir', options.workspaceDir];
     const child = Bun.spawn({
       cmd: [
-        process.execPath,
-        'server/main.ts',
+        ...launch.command,
         '--port',
         String(options.port ?? 0),
         '--bind-address',
@@ -172,6 +221,11 @@ export class GarconProcess {
       );
       if (credentials) instance.#authToken = await fixtureAuthToken(instance.#baseUrl, credentials);
       instance.#credentials = credentials;
+      // Behind the front door the spawned process is not the controller, so
+      // its pid must come from the descriptor the controller publishes.
+      const published = launch.controller === 'rust' ? null : await publishedControllerPid(options.configDir);
+      if (published === null && launch.controller === 'front-door') throw new Error(`The controller behind the front door published no runtime descriptor.\n${instance.describeLogs()}`);
+      instance.#controllerPid = published ?? child.pid;
       return instance;
     } catch (error) {
       await instance.#terminateAfterStartupFailure();
@@ -189,8 +243,11 @@ export class GarconProcess {
 
   get credentials(): { username: string; password: string } | null { return this.#credentials; }
 
+  // The controller process, which spawns providers and executes work. Behind
+  // the front door it is the front door's child; lifecycle signals still go to
+  // the spawned process, whose exit ends the controller.
   get pid(): number | null {
-    return this.#exitCode === null ? this.#child.pid : null;
+    return this.#exitCode === null ? this.#controllerPid : null;
   }
 
   get logs(): readonly string[] {

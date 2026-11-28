@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-contract/tests/support/chat_message_oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-messages.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 42,
+  "sha256": "082efa22f6dc5a84f1167c687d847a10bfb0715688a9d75df4ddc2c4cfbae8ca"
+}

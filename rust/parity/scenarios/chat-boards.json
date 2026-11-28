@@ -1,0 +1,994 @@
+{
+  "name": "chat-boards",
+  "description": "Chat board routes on an empty workspace: reads, create validation field by field, name normalization at the length limit, revision conflicts with the returned catalog, unknown board identifiers, every reorder rejection, and an update, a reorder, and a remove of the created boards by the identifiers their creates answered with.",
+  "steps": [
+    {
+      "name": "boards-empty",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-boards"
+      }
+    },
+    {
+      "name": "create-missing-revision",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "name": "Board"
+        }
+      }
+    },
+    {
+      "name": "create-missing-name",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 0
+        }
+      }
+    },
+    {
+      "name": "create-extra-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 0,
+          "name": "Board",
+          "extra": true
+        }
+      }
+    },
+    {
+      "name": "create-revision-negative",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": -1,
+          "name": "Board"
+        }
+      }
+    },
+    {
+      "name": "create-revision-fractional",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 0.5,
+          "name": "Board"
+        }
+      }
+    },
+    {
+      "name": "create-revision-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": "0",
+          "name": "Board"
+        }
+      }
+    },
+    {
+      "name": "create-revision-null",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": null,
+          "name": "Board"
+        }
+      }
+    },
+    {
+      "name": "create-name-not-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 0,
+          "name": 42
+        }
+      }
+    },
+    {
+      "name": "create-array-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": [
+          "Board"
+        ]
+      }
+    },
+    {
+      "name": "create-scalar-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": "Board"
+      }
+    },
+    {
+      "name": "create-name-blank",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 0,
+          "name": "   "
+        }
+      }
+    },
+    {
+      "name": "create-name-81-code-points",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 0,
+          "name": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+        }
+      }
+    },
+    {
+      "name": "create-name-80-code-points",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 0,
+          "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+        }
+      }
+    },
+    {
+      "name": "create-second",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 1,
+          "name": "  Board two  "
+        }
+      }
+    },
+    {
+      "name": "boards-after-create",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-boards"
+      }
+    },
+    {
+      "name": "create-stale-revision",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 1,
+          "name": "Board three"
+        }
+      }
+    },
+    {
+      "name": "create-future-revision",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 3,
+          "name": "Board three"
+        }
+      }
+    },
+    {
+      "name": "update-missing-revision",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": []
+          }
+        }
+      }
+    },
+    {
+      "name": "update-missing-board",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2
+        }
+      }
+    },
+    {
+      "name": "update-extra-key",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": []
+          },
+          "extra": true
+        }
+      }
+    },
+    {
+      "name": "update-board-scalar",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": "Board"
+        }
+      }
+    },
+    {
+      "name": "update-board-array",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": []
+        }
+      }
+    },
+    {
+      "name": "update-board-id-not-a-uuid",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "board-a",
+            "name": "Board",
+            "columns": []
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-id-uppercase",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0BADF00D-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": []
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-name-missing",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "columns": []
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-name-blank",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": " ",
+            "columns": []
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-columns-missing",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board"
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-columns-not-array",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": [
+              {
+                "id": "x"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-column-id-not-a-uuid",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": [
+              {
+                "id": "column-a",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  "todo"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-column-name-blank",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": [
+              {
+                "id": "0badf00d-1111-4111-8111-000000000001",
+                "name": " ",
+                "match": "all",
+                "tags": [
+                  "todo"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-column-name-too-long",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": [
+              {
+                "id": "0badf00d-1111-4111-8111-000000000001",
+                "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "match": "all",
+                "tags": [
+                  "todo"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-column-match-unknown",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": [
+              {
+                "id": "0badf00d-1111-4111-8111-000000000001",
+                "name": "To do",
+                "match": "some",
+                "tags": [
+                  "todo"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-column-tags-missing",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": [
+              {
+                "id": "0badf00d-1111-4111-8111-000000000001",
+                "name": "To do",
+                "match": "all"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-column-tags-empty",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": [
+              {
+                "id": "0badf00d-1111-4111-8111-000000000001",
+                "name": "To do",
+                "match": "all",
+                "tags": []
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-column-tags-not-canonical",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": [
+              {
+                "id": "0badf00d-1111-4111-8111-000000000001",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  "To Do"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-column-tag-not-a-string",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": [
+              {
+                "id": "0badf00d-1111-4111-8111-000000000001",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  7
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-column-tag-too-long",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": [
+              {
+                "id": "0badf00d-1111-4111-8111-000000000001",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-column-tags-duplicate",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": [
+              {
+                "id": "0badf00d-1111-4111-8111-000000000001",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  "todo",
+                  "todo"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-column-extra-key",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": [
+              {
+                "0": "0badf00d-1111-4111-8111-000000000001",
+                "1": "To do",
+                "2": "all",
+                "3": [
+                  "todo"
+                ],
+                "extra": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-column-ids-duplicate",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": [
+              {
+                "id": "0badf00d-1111-4111-8111-000000000001",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  "todo"
+                ]
+              },
+              {
+                "id": "0badf00d-1111-4111-8111-000000000001",
+                "name": "Done",
+                "match": "any",
+                "tags": [
+                  "done"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-board-column-names-duplicate",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": [
+              {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  "todo"
+                ]
+              },
+              {
+                "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "name": "TO DO",
+                "match": "any",
+                "tags": [
+                  "done"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "update-unknown-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": []
+          }
+        }
+      }
+    },
+    {
+      "name": "update-stale-revision-unknown-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 1,
+          "board": {
+            "id": "0badf00d-0000-4000-8000-000000000000",
+            "name": "Board",
+            "columns": []
+          }
+        }
+      }
+    },
+    {
+      "name": "remove-missing-revision",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "boardId": "0badf00d-0000-4000-8000-000000000000"
+        }
+      }
+    },
+    {
+      "name": "remove-missing-board-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2
+        }
+      }
+    },
+    {
+      "name": "remove-extra-key",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "boardId": "0badf00d-0000-4000-8000-000000000000",
+          "extra": 1
+        }
+      }
+    },
+    {
+      "name": "remove-board-id-not-a-uuid",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "boardId": "board-a"
+        }
+      }
+    },
+    {
+      "name": "remove-unknown-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "boardId": "0badf00d-0000-4000-8000-000000000000"
+        }
+      }
+    },
+    {
+      "name": "remove-stale-revision-unknown-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 1,
+          "boardId": "0badf00d-0000-4000-8000-000000000000"
+        }
+      }
+    },
+    {
+      "name": "order-missing-revision",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards/order",
+        "json": {
+          "orderedBoardIds": [
+            "0badf00d-0000-4000-8000-000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "name": "order-missing-ids",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards/order",
+        "json": {
+          "expectedRevision": 2
+        }
+      }
+    },
+    {
+      "name": "order-ids-not-array",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards/order",
+        "json": {
+          "expectedRevision": 2,
+          "orderedBoardIds": "0badf00d-0000-4000-8000-000000000000"
+        }
+      }
+    },
+    {
+      "name": "order-id-not-a-uuid",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards/order",
+        "json": {
+          "expectedRevision": 2,
+          "orderedBoardIds": [
+            "board-a"
+          ]
+        }
+      }
+    },
+    {
+      "name": "order-extra-key",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards/order",
+        "json": {
+          "expectedRevision": 2,
+          "orderedBoardIds": [
+            "0badf00d-0000-4000-8000-000000000000"
+          ],
+          "extra": true
+        }
+      }
+    },
+    {
+      "name": "order-duplicate-ids",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards/order",
+        "json": {
+          "expectedRevision": 2,
+          "orderedBoardIds": [
+            "0badf00d-0000-4000-8000-000000000000",
+            "0badf00d-0000-4000-8000-000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "name": "order-unknown-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards/order",
+        "json": {
+          "expectedRevision": 2,
+          "orderedBoardIds": [
+            "0badf00d-0000-4000-8000-000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "name": "order-wrong-length",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards/order",
+        "json": {
+          "expectedRevision": 2,
+          "orderedBoardIds": []
+        }
+      }
+    },
+    {
+      "name": "order-stale-revision",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards/order",
+        "json": {
+          "expectedRevision": 1,
+          "orderedBoardIds": []
+        }
+      }
+    },
+    {
+      "name": "update-created-board",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "{{create-second.body.boardId}}",
+            "name": "Board two",
+            "columns": [
+              {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "name": "To do",
+                "match": "all",
+                "tags": [
+                  "todo"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "boards-after-update",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-boards"
+      }
+    },
+    {
+      "name": "update-created-board-with-stale-revision",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "board": {
+            "id": "{{create-second.body.boardId}}",
+            "name": "Board two again",
+            "columns": []
+          }
+        }
+      }
+    },
+    {
+      "name": "order-created-boards",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards/order",
+        "json": {
+          "expectedRevision": 3,
+          "orderedBoardIds": [
+            "{{create-second.body.boardId}}",
+            "{{create-name-80-code-points.body.boardId}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "boards-after-order",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-boards"
+      }
+    },
+    {
+      "name": "remove-created-board",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 4,
+          "boardId": "{{create-second.body.boardId}}"
+        }
+      }
+    },
+    {
+      "name": "boards-after-remove",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-boards"
+      }
+    },
+    {
+      "name": "update-removed-board",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 5,
+          "board": {
+            "id": "{{create-second.body.boardId}}",
+            "name": "Board two",
+            "columns": []
+          }
+        }
+      }
+    },
+    {
+      "name": "order-wrong-method",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards/order",
+        "json": {
+          "expectedRevision": 2,
+          "orderedBoardIds": []
+        }
+      }
+    },
+    {
+      "name": "boards-wrong-method",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chat-boards",
+        "json": {}
+      }
+    }
+  ],
+  "traps": true
+}

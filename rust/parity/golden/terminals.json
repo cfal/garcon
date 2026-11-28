@@ -1,0 +1,6226 @@
+{
+  "scenario": "terminals",
+  "cases": [
+    {
+      "name": "list-empty",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "attachmentEpoch": "{{uuid}}",
+            "success": true,
+            "terminalRuntimeId": "{{uuid}}",
+            "terminals": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-local",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "attachmentEpoch": "{{uuid}}",
+            "success": true,
+            "terminalRuntimeId": "{{uuid}}",
+            "terminals": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-invalid",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=remote"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-empty",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId="
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-first-of-repeated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "attachmentEpoch": "{{uuid}}",
+            "success": true,
+            "terminalRuntimeId": "{{uuid}}",
+            "terminals": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local&executorId=remote"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-unavailable",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Terminal executor is unavailable.",
+            "errorCode": "terminal-unavailable",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId={{uuid}}"
+        },
+        "status": 503
+      },
+      "noise": []
+    },
+    {
+      "name": "create-body-not-object",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-missing",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-blank",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-not-string",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-too-long",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-project-path-missing",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-project-path-not-string",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-executor-invalid",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-executor-null",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-executor-unavailable",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Terminal executor is unavailable.",
+            "errorCode": "terminal-unavailable",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 503
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-missing",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "List terminals before creating a shell.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-blank",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-not-string",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-too-long",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-stale-runtime-with-max-request-id",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Terminal executor restarted. Refresh its terminal list before creating a new shell.",
+            "errorCode": "terminal-runtime-changed",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-id-missing",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-id-not-string",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-id-too-long",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-reference-invalid",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal reference.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-missing",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-not-string",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-control-character",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-too-long",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-executor-unavailable",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Terminal executor is unavailable.",
+            "errorCode": "terminal-unavailable",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 503
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-runtime-stale",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Terminal executor restarted.",
+            "errorCode": "terminal-runtime-changed",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-not-found-in-current-runtime",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Terminal not found.",
+            "errorCode": "terminal-not-found",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-id-missing",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal terminate request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-id-blank",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal terminate request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-id-too-long",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal terminate request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-reference-invalid",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal reference.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-request-id-missing",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal terminate request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-request-id-not-string",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal terminate request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-request-id-too-long",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal terminate request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-executor-unavailable",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Terminal executor is unavailable.",
+            "errorCode": "terminal-unavailable",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 503
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-runtime-stale",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Terminal executor restarted.",
+            "errorCode": "terminal-runtime-changed",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "list-after-rejected-operations",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "attachmentEpoch": "{{uuid}}",
+            "success": true,
+            "terminalRuntimeId": "{{list-empty.body.terminalRuntimeId}}",
+            "terminals": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "wrong-method",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/terminals"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "list-empty~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "list-empty~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "list-empty~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "147",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/terminals"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-empty~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "list-empty~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "attachmentEpoch": "{{uuid}}",
+            "success": true,
+            "terminalRuntimeId": "{{list-empty.body.terminalRuntimeId}}",
+            "terminals": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals/../terminals"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-empty~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "list-empty~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "list-empty~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "attachmentEpoch": "{{uuid}}",
+            "success": true,
+            "terminalRuntimeId": "{{list-empty.body.terminalRuntimeId}}",
+            "terminals": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/terminals"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-local~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "list-local~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "list-local~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "147",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/terminals?executorId=local"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-local~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-local~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local/../terminals?executorId=local"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-local~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-local~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-local~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "attachmentEpoch": "{{uuid}}",
+            "success": true,
+            "terminalRuntimeId": "{{list-empty.body.terminalRuntimeId}}",
+            "terminals": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/terminals?executorId=local"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-invalid~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=remote"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-invalid~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=remote"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-invalid~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "106",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/terminals?executorId=remote"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-invalid~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=remote/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-invalid~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=remote/../terminals?executorId=remote"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-invalid~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=remote/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-invalid~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=remote/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-invalid~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/terminals?executorId=remote"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-empty~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId="
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-empty~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId="
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-empty~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "106",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/terminals?executorId="
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-empty~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-empty~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=/../terminals?executorId="
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-empty~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-empty~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-empty~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/terminals?executorId="
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-first-of-repeated~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local&executorId=remote"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-first-of-repeated~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local&executorId=remote"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-first-of-repeated~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "147",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/terminals?executorId=local&executorId=remote"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-first-of-repeated~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "attachmentEpoch": "{{uuid}}",
+            "success": true,
+            "terminalRuntimeId": "{{list-empty.body.terminalRuntimeId}}",
+            "terminals": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local&executorId=remote/"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-first-of-repeated~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "attachmentEpoch": "{{uuid}}",
+            "success": true,
+            "terminalRuntimeId": "{{list-empty.body.terminalRuntimeId}}",
+            "terminals": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local&executorId=remote/../terminals?executorId=local&executorId=remote"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-first-of-repeated~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "attachmentEpoch": "{{uuid}}",
+            "success": true,
+            "terminalRuntimeId": "{{list-empty.body.terminalRuntimeId}}",
+            "terminals": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local&executorId=remote/%2e%2e%2fauth.json"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-first-of-repeated~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "attachmentEpoch": "{{uuid}}",
+            "success": true,
+            "terminalRuntimeId": "{{list-empty.body.terminalRuntimeId}}",
+            "terminals": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local&executorId=remote/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-first-of-repeated~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "attachmentEpoch": "{{uuid}}",
+            "success": true,
+            "terminalRuntimeId": "{{list-empty.body.terminalRuntimeId}}",
+            "terminals": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/terminals?executorId=local&executorId=remote"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-unavailable~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId={{uuid}}"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-unavailable~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId={{uuid}}"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-unavailable~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "113",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/terminals?executorId={{uuid}}"
+        },
+        "status": 503
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-unavailable~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId={{uuid}}/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-unavailable~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId={{uuid}}/../terminals?executorId={{uuid}}"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-unavailable~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId={{uuid}}/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-unavailable~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId={{uuid}}/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-executor-unavailable~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Terminal executor is unavailable.",
+            "errorCode": "terminal-unavailable",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/terminals?executorId={{uuid}}"
+        },
+        "status": 503
+      },
+      "noise": []
+    },
+    {
+      "name": "create-body-not-object~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-body-not-object~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-body-not-object~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-body-not-object~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-missing~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-missing~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-missing~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-missing~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-blank~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-blank~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-blank~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-blank~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-not-string~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-not-string~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-not-string~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-not-string~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-too-long~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-too-long~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-too-long~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-request-id-too-long~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-project-path-missing~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-project-path-missing~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-project-path-missing~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-project-path-missing~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-project-path-not-string~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-project-path-not-string~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-project-path-not-string~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-project-path-not-string~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-executor-invalid~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-executor-invalid~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-executor-invalid~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-executor-invalid~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-executor-null~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-executor-null~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-executor-null~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-executor-null~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-executor-unavailable~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-executor-unavailable~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-executor-unavailable~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-executor-unavailable~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-missing~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-missing~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-missing~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-missing~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-blank~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-blank~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-blank~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-blank~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-not-string~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-not-string~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-not-string~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-not-string~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-too-long~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-too-long~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-too-long~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-runtime-id-too-long~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-stale-runtime-with-max-request-id~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-stale-runtime-with-max-request-id~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "create-stale-runtime-with-max-request-id~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "create-stale-runtime-with-max-request-id~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal create request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-id-missing~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-id-missing~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-id-missing~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-id-missing~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-id-not-string~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-id-not-string~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-id-not-string~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-id-not-string~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-id-too-long~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-id-too-long~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-id-too-long~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-id-too-long~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-reference-invalid~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-reference-invalid~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-reference-invalid~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-reference-invalid~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-missing~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-missing~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-missing~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-missing~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-not-string~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-not-string~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-not-string~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-not-string~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-control-character~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-control-character~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-control-character~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-control-character~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-too-long~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-too-long~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-too-long~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-title-too-long~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-executor-unavailable~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-executor-unavailable~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-executor-unavailable~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-executor-unavailable~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-runtime-stale~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-runtime-stale~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-runtime-stale~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-runtime-stale~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-not-found-in-current-runtime~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-not-found-in-current-runtime~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-not-found-in-current-runtime~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "rename-terminal-not-found-in-current-runtime~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal rename request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-id-missing~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-id-missing~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-id-missing~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-id-missing~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal terminate request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-id-blank~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-id-blank~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-id-blank~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-id-blank~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal terminate request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-id-too-long~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-id-too-long~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-id-too-long~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-id-too-long~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal terminate request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-reference-invalid~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-reference-invalid~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-reference-invalid~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-terminal-reference-invalid~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal terminate request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-request-id-missing~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-request-id-missing~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-request-id-missing~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-request-id-missing~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal terminate request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-request-id-not-string~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-request-id-not-string~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-request-id-not-string~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-request-id-not-string~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal terminate request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-request-id-too-long~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-request-id-too-long~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-request-id-too-long~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-request-id-too-long~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal terminate request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-executor-unavailable~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-executor-unavailable~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-executor-unavailable~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-executor-unavailable~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal terminate request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-runtime-stale~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-runtime-stale~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-runtime-stale~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "terminate-runtime-stale~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal terminate request.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/terminals"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-after-rejected-operations~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "list-after-rejected-operations~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "list-after-rejected-operations~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "147",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/terminals?executorId=local"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "list-after-rejected-operations~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-after-rejected-operations~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local/../terminals?executorId=local"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-after-rejected-operations~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-after-rejected-operations~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid terminal executor.",
+            "errorCode": "terminal-validation",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/terminals?executorId=local/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "list-after-rejected-operations~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "attachmentEpoch": "{{uuid}}",
+            "success": true,
+            "terminalRuntimeId": "{{list-empty.body.terminalRuntimeId}}",
+            "terminals": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/terminals?executorId=local"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "wrong-method~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/terminals"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "wrong-method~forged-token",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/terminals"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "wrong-method~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/terminals"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "wrong-method~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/terminals"
+        },
+        "status": 404
+      },
+      "noise": []
+    }
+  ]
+}

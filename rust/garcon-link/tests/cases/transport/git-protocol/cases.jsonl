@@ -1,0 +1,6 @@
+{"id":"isGitRpcMethod#0","fn":"isGitRpcMethod","args":["git.getQuickSummary"],"result":true,"origin":"rust/garcon-link/tests/inputs/git-protocol.jsonl:1"}
+{"id":"isGitRpcMethod#1","fn":"isGitRpcMethod","args":["git.getStatus"],"result":true,"origin":"rust/garcon-link/tests/inputs/git-protocol.jsonl:2"}
+{"id":"isGitRpcMethod#2","fn":"isGitRpcMethod","args":["gh.getPullRequestReviewTarget"],"result":true,"origin":"rust/garcon-link/tests/inputs/git-protocol.jsonl:3"}
+{"id":"isGitRpcMethod#3","fn":"isGitRpcMethod","args":["git.unknown"],"result":false,"origin":"rust/garcon-link/tests/inputs/git-protocol.jsonl:4"}
+{"id":"isGitRpcMethod#4","fn":"isGitRpcMethod","args":["gh.unknown"],"result":false,"origin":"rust/garcon-link/tests/inputs/git-protocol.jsonl:5"}
+{"id":"isGitRpcMethod#5","fn":"isGitRpcMethod","args":["files.list"],"result":false,"origin":"rust/garcon-link/tests/inputs/git-protocol.jsonl:6"}

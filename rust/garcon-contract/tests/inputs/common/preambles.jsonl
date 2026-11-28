@@ -1,0 +1,22 @@
+{"fn":"isPreambleId","args":["3502b645-222b-49d2-ac39-1c91f9fb1174"]}
+{"fn":"normalizeOrderedPreambleIds","args":[["3502b645-222b-49d2-ac39-1c91f9fb1174","80becfa6-c9c7-4b31-9190-fd23c0bedf9c"]]}
+{"fn":"normalizeOrderedPreambleIds","args":[["3502b645-222b-49d2-ac39-1c91f9fb1174","3502b645-222b-49d2-ac39-1c91f9fb1174"]]}
+{"fn":"normalizePreambleSelectionChoice","args":[{"mode":"defaults"}]}
+{"fn":"normalizePreambleSelectionChoice","args":[{"mode":"explicit","orderedPreambleIds":[]}]}
+{"fn":"normalizePreambleSelectionChoice","args":[{"mode":"defaults","orderedPreambleIds":[]}]}
+{"fn":"isPreambleSelectionUnavailableReason","args":["out-of-scope"]}
+{"fn":"isPreambleBoundaryKind","args":["selection-change"]}
+{"fn":"normalizeChatPreambleSelection","args":[{"revision":1,"orderedPreambleIds":["3502b645-222b-49d2-ac39-1c91f9fb1174"]}]}
+{"fn":"normalizePreambleSelectionReference","args":[{"id":"3502b645-222b-49d2-ac39-1c91f9fb1174","title":"  Synthetic  "}]}
+{"fn":"normalizeUnavailablePreambleSelectionReference","args":[{"id":"3502b645-222b-49d2-ac39-1c91f9fb1174","reason":"missing"}]}
+{"fn":"normalizePreambleSelectionProjection","args":[{"catalogRevision":1,"eligiblePreambles":[{"id":"3502b645-222b-49d2-ac39-1c91f9fb1174","title":"Synthetic"}],"unavailable":[{"id":"80becfa6-c9c7-4b31-9190-fd23c0bedf9c","reason":"out-of-scope"}]}]}
+{"fn":"normalizePreambleSelectionProjection","args":[{"catalogRevision":1,"eligiblePreambles":[{"id":"3502b645-222b-49d2-ac39-1c91f9fb1174","title":"Synthetic"}],"unavailable":[{"id":"3502b645-222b-49d2-ac39-1c91f9fb1174","reason":"missing"}]}]}
+{"fn":"isPreamblesInvalidationReason","args":["reordered"]}
+{"fn":"normalizePreambleTitle","args":["  Synthetic  "]}
+{"fn":"normalizePreambleTitle","args":["line one\nline two"]}
+{"fn":"normalizePreambleScope","args":[{"type":"project-paths","rules":[{"projectPath":"/synthetic","includeNested":true,"executorId":"local"},{"projectPath":"/synthetic","includeNested":false,"executorId":"3502b645-222b-49d2-ac39-1c91f9fb1174"}]}]}
+{"fn":"normalizePreambleScope","args":[{"type":"project-paths","rules":[{"projectPath":"/synthetic","includeNested":true},{"projectPath":"/synthetic","includeNested":false,"executorId":"local"}]}]}
+{"fn":"normalizePreamble","args":[{"id":"3502b645-222b-49d2-ac39-1c91f9fb1174","enabled":true,"title":"Synthetic","content":"Synthetic text.","scope":{"type":"global"},"createdAt":"2026-11-28T04:30:00+02:30","updatedAt":"2026-11-28"}]}
+{"fn":"samePreambleBoundary","args":[{"kind":"selection-change","ownershipEpoch":"synthetic","selectionRevision":2},{"kind":"selection-change","ownershipEpoch":"synthetic","selectionRevision":3}]}
+{"fn":"samePreambleBoundary","args":[{"kind":"selection-change","ownershipEpoch":"synthetic","selectionRevision":2},{"kind":"selection-change","ownershipEpoch":"synthetic","selectionRevision":2}]}
+{"fn":"samePreambleBoundary","args":[{"kind":"fork","ownershipEpoch":"synthetic"},{"kind":"fork","ownershipEpoch":"synthetic"}]}

@@ -1,0 +1,24 @@
+[package]
+name = "garcon-interface"
+version = "0.0.0"
+description = "The agent integration and execution runtime contracts; ports server-agents/interface."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+futures.workspace = true
+garcon-contract.workspace = true
+garcon-js.workspace = true
+indexmap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+garcon-cases.workspace = true
+tokio.workspace = true

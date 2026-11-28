@@ -1,0 +1,28 @@
+{
+  "module": "server-agents/interface/src/contracts/resources.ts",
+  "tests": [],
+  "inputs": "rust/garcon-interface/tests/inputs/interface/resources.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isAgentResourceRef",
+      "argument": 0
+    },
+    {
+      "fn": "isAgentResourceRef",
+      "argument": 2
+    },
+    {
+      "fn": "assertAgentResourceScope",
+      "argument": 0
+    },
+    {
+      "fn": "assertAgentResourceScope",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 13,
+  "sha256": "9cde4b7296f9bccd8e0dd97c5756eb1dbac5dd7af9f1892f18cbed0996b23331"
+}

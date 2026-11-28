@@ -4,7 +4,7 @@
 import path from 'path';
 import { rm } from 'node:fs/promises';
 import { cliRuntimeFile } from '@garcon/common/cli-runtime-paths';
-import { getConfigDir, initializeServerConfig } from './config.js';
+import { getConfigDir, getRuntimeOrigin, initializeServerConfig } from './config.js';
 import { wrapRoutes, unhandledRouteErrorResponse } from './lib/http-route.js';
 import { ControllerCliDispatcher } from './executors/cli-dispatcher.js';
 import { createWebSocketUpgradeHandler } from './ws/upgrade.js';
@@ -857,7 +857,7 @@ export async function startServer(): Promise<void> {
 
     const server = Bun.serve<WsConnectionData>(serveOptions);
     const actualPort = server.port ?? listenPort;
-    const runtimeBaseUrl = advertisedServerUrl(bindAddress, actualPort) + config.basePath;
+    const runtimeBaseUrl = (getRuntimeOrigin() ?? advertisedServerUrl(bindAddress, actualPort)) + config.basePath;
     let runtimeFilePath: string;
     try {
       const publishedRuntime = await publishServerRuntime(runtimeState, runtimeBaseUrl, config.configDir);

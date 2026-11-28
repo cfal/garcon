@@ -1,0 +1,54 @@
+{
+  "module": "common/settings.ts",
+  "tests": [
+    "common/__tests__/settings.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/settings.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseExecutorProjectPreferencesPatch",
+      "argument": 0
+    },
+    {
+      "fn": "parseExecutorProjectPreferences",
+      "argument": 0
+    },
+    {
+      "fn": "generationSelectionExecutorError",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeRemoteFeatureSettings",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeChatTitleUiSettings",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeAgentSwitchCompactionUiSettings",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeCommitMessageUiSettings",
+      "argument": 0
+    },
+    {
+      "fn": "normalizePromptRefinementUiSettings",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeTicketChatUiSettings",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeRemoteSettingsSnapshot",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 406,
+  "sha256": "43db6ebcde71d66bac56fd36874b2ff504e46c9bf1c835178a14ac1820051276"
+}

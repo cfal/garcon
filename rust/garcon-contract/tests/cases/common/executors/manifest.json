@@ -1,0 +1,50 @@
+{
+  "module": "common/executors.ts",
+  "tests": [
+    "common/__tests__/executors.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/executors.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isRemoteExecutorId",
+      "argument": 0
+    },
+    {
+      "fn": "isExecutorSecret",
+      "argument": 0
+    },
+    {
+      "fn": "isExecutorId",
+      "argument": 0
+    },
+    {
+      "fn": "parseExecutorId",
+      "argument": 0
+    },
+    {
+      "fn": "parseCreateExecutorRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseUpdateExecutorRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseExecutorSnapshot",
+      "argument": 0
+    },
+    {
+      "fn": "parseExecutors",
+      "argument": 0
+    },
+    {
+      "fn": "parseExecutorConnection",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 1064,
+  "sha256": "5b9af548c930195b10aa7334fef44396550bb7dc6d0d26110f6c9afe58b029dc"
+}

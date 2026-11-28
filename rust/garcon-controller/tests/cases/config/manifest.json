@@ -1,0 +1,22 @@
+{
+  "module": "rust/garcon-controller/tests/oracles/config.ts",
+  "tests": [
+    "rust/garcon-controller/tests/oracles/config.cases.ts"
+  ],
+  "inputs": "rust/garcon-controller/tests/inputs/config.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "configFor",
+      "argument": 0
+    },
+    {
+      "fn": "configFor",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 176,
+  "sha256": "ec0ad46dc8a91cfd319cc6959b39c4a7218e39cfb997b1d8ecfdbf822b037dbb"
+}

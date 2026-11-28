@@ -1,0 +1,7 @@
+{"fn":"metadataFor","args":[null]}
+{"fn":"metadataFor","args":[{}]}
+{"fn":"metadataFor","args":[{"entryId":"  entry  ","lineNumber":7,"byteOffset":0,"withinSourceOrdinal":2}]}
+{"fn":"metadataFor","args":[{"entryId":"","lineNumber":0,"byteOffset":-1,"withinSourceOrdinal":1.5}]}
+{"fn":"metadataFor","args":[{"lineNumber":9007199254740992,"byteOffset":9007199254740992}]}
+{"fn":"rowsFor","args":[null,"bare row"]}
+{"fn":"rowsFor","args":[{"entryId":"entry","lineNumber":1,"byteOffset":0,"withinSourceOrdinal":0},"first row"]}

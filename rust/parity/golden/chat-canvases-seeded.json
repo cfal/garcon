@@ -1,0 +1,3386 @@
+{
+  "scenario": "chat-canvases-seeded",
+  "cases": [
+    {
+      "name": "canvases-seeded",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [
+              {
+                "id": "seeded-canvas",
+                "revision": 5,
+                "title": "Seeded canvas",
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "unavailableIds": [
+              "broken",
+              "misnamed",
+              "zero-revision"
+            ]
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-seeded",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "content": {
+              "connections": [
+                {
+                  "id": "e1",
+                  "label": "leads to",
+                  "source": "box-1",
+                  "sourceSide": "right",
+                  "target": "n1",
+                  "targetSide": "left"
+                }
+              ],
+              "nodes": [
+                {
+                  "id": "box-1",
+                  "position": {
+                    "x": 1,
+                    "y": 2
+                  },
+                  "title": "Box",
+                  "type": "box"
+                },
+                {
+                  "boxId": "box-1",
+                  "chatId": "1000000000000001",
+                  "id": "n1",
+                  "position": {
+                    "x": 3,
+                    "y": 4
+                  },
+                  "type": "chat"
+                }
+              ],
+              "title": "Seeded canvas"
+            },
+            "id": "seeded-canvas",
+            "revision": 5,
+            "updatedAt": "{{timestamp}}",
+            "version": 1
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=seeded-canvas"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-corrupt",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas data could not be read. Restore it from a backup.",
+            "errorCode": "CANVAS_CORRUPT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=broken"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-misnamed",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas data could not be read. Restore it from a backup.",
+            "errorCode": "CANVAS_CORRUPT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=misnamed"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-zero-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas data could not be read. Restore it from a backup.",
+            "errorCode": "CANVAS_CORRUPT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=zero-revision"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "update-seeded-stale-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "This canvas changed in another client. Load the latest version or save your work as a copy.",
+            "errorCode": "CANVAS_CONFLICT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "update-seeded-invalid-content",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas content",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-seeded",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "content": {
+              "connections": [],
+              "nodes": [
+                {
+                  "id": "box-1",
+                  "position": {
+                    "x": 1,
+                    "y": 2
+                  },
+                  "title": "Box",
+                  "type": "box"
+                }
+              ],
+              "title": "Seeded canvas renamed"
+            },
+            "id": "seeded-canvas",
+            "revision": 6,
+            "updatedAt": "{{timestamp}}",
+            "version": 1
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "update-corrupt",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas data could not be read. Restore it from a backup.",
+            "errorCode": "CANVAS_CORRUPT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "update-misnamed",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas data could not be read. Restore it from a backup.",
+            "errorCode": "CANVAS_CORRUPT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "update-file-that-is-not-a-canvas",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas not found",
+            "errorCode": "CANVAS_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-update",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [
+              {
+                "id": "seeded-canvas",
+                "revision": 6,
+                "title": "Seeded canvas renamed",
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "unavailableIds": [
+              "broken",
+              "misnamed",
+              "zero-revision"
+            ]
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-corrupt",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas data could not be read. Restore it from a backup.",
+            "errorCode": "CANVAS_CORRUPT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-misnamed",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas data could not be read. Restore it from a backup.",
+            "errorCode": "CANVAS_CORRUPT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-failed-deletes",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [
+              {
+                "id": "seeded-canvas",
+                "revision": 6,
+                "title": "Seeded canvas renamed",
+                "updatedAt": "{{timestamp}}"
+              }
+            ],
+            "unavailableIds": [
+              "broken",
+              "misnamed",
+              "zero-revision"
+            ]
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-seeded-stale-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "This canvas changed in another client. Load the latest version or save your work as a copy.",
+            "errorCode": "CANVAS_CONFLICT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-seeded",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "success": true
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-seeded-delete",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [],
+            "unavailableIds": [
+              "broken",
+              "misnamed",
+              "zero-revision"
+            ]
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-delete",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas not found",
+            "errorCode": "CANVAS_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=seeded-canvas"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-seeded~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-seeded~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-seeded~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "70",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-seeded~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-seeded~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [],
+            "unavailableIds": [
+              "broken",
+              "misnamed",
+              "zero-revision"
+            ]
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/../chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-seeded~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-seeded~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-seeded~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [],
+            "unavailableIds": [
+              "broken",
+              "misnamed",
+              "zero-revision"
+            ]
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-seeded~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=seeded-canvas"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-seeded~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=seeded-canvas"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-seeded~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "93",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-canvases?id=seeded-canvas"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-seeded~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=seeded-canvas/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-seeded~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=seeded-canvas/../chat-canvases?id=seeded-canvas"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-seeded~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=seeded-canvas/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-seeded~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=seeded-canvas/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-seeded~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas not found",
+            "errorCode": "CANVAS_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-canvases?id=seeded-canvas"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-corrupt~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=broken"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-corrupt~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=broken"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-corrupt~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "130",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-canvases?id=broken"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-corrupt~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=broken/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-corrupt~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=broken/../chat-canvases?id=broken"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-corrupt~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=broken/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-corrupt~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=broken/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-corrupt~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas data could not be read. Restore it from a backup.",
+            "errorCode": "CANVAS_CORRUPT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-canvases?id=broken"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-misnamed~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=misnamed"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-misnamed~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=misnamed"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-misnamed~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "130",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-canvases?id=misnamed"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-misnamed~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=misnamed/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-misnamed~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=misnamed/../chat-canvases?id=misnamed"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-misnamed~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=misnamed/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-misnamed~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=misnamed/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-misnamed~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas data could not be read. Restore it from a backup.",
+            "errorCode": "CANVAS_CORRUPT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-canvases?id=misnamed"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-zero-revision~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=zero-revision"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-zero-revision~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=zero-revision"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-zero-revision~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "130",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-canvases?id=zero-revision"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-zero-revision~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=zero-revision/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-zero-revision~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=zero-revision/../chat-canvases?id=zero-revision"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-zero-revision~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=zero-revision/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-zero-revision~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=zero-revision/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-zero-revision~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas data could not be read. Restore it from a backup.",
+            "errorCode": "CANVAS_CORRUPT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-canvases?id=zero-revision"
+        },
+        "status": 500
+      },
+      "noise": []
+    },
+    {
+      "name": "update-seeded-stale-revision~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-seeded-stale-revision~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-seeded-stale-revision~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-seeded-stale-revision~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID and revision are required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-seeded-invalid-content~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-seeded-invalid-content~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-seeded-invalid-content~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-seeded-invalid-content~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID and revision are required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-seeded~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-seeded~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-seeded~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-seeded~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID and revision are required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-corrupt~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-corrupt~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-corrupt~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-corrupt~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID and revision are required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-misnamed~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-misnamed~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-misnamed~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-misnamed~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID and revision are required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-file-that-is-not-a-canvas~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-file-that-is-not-a-canvas~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-file-that-is-not-a-canvas~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-file-that-is-not-a-canvas~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID and revision are required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-update~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-update~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-update~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "70",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-update~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-update~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [],
+            "unavailableIds": [
+              "broken",
+              "misnamed",
+              "zero-revision"
+            ]
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/../chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-update~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-update~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-update~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [],
+            "unavailableIds": [
+              "broken",
+              "misnamed",
+              "zero-revision"
+            ]
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-corrupt~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-corrupt~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-corrupt~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-corrupt~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID and revision are required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-misnamed~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-misnamed~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-misnamed~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-misnamed~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID and revision are required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-failed-deletes~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-failed-deletes~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-failed-deletes~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "70",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-failed-deletes~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-failed-deletes~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [],
+            "unavailableIds": [
+              "broken",
+              "misnamed",
+              "zero-revision"
+            ]
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/../chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-failed-deletes~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-failed-deletes~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-failed-deletes~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [],
+            "unavailableIds": [
+              "broken",
+              "misnamed",
+              "zero-revision"
+            ]
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-seeded-stale-revision~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-seeded-stale-revision~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-seeded-stale-revision~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-seeded-stale-revision~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID and revision are required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-seeded~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-seeded~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-seeded~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "delete-seeded~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas ID and revision are required",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-seeded-delete~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-seeded-delete~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-seeded-delete~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-length": "70",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-seeded-delete~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-seeded-delete~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [],
+            "unavailableIds": [
+              "broken",
+              "misnamed",
+              "zero-revision"
+            ]
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/../chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-seeded-delete~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-seeded-delete~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvases-after-seeded-delete~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "canvases": [],
+            "unavailableIds": [
+              "broken",
+              "misnamed",
+              "zero-revision"
+            ]
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-canvases"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-delete~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=seeded-canvas"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-delete~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=seeded-canvas"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-delete~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "93",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-canvases?id=seeded-canvas"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-delete~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=seeded-canvas/"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-delete~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=seeded-canvas/../chat-canvases?id=seeded-canvas"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-delete~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=seeded-canvas/%2e%2e%2fauth.json"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-delete~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid canvas ID",
+            "errorCode": "CANVAS_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-canvases?id=seeded-canvas/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "canvas-after-delete~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Canvas not found",
+            "errorCode": "CANVAS_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-canvases?id=seeded-canvas"
+        },
+        "status": 404
+      },
+      "noise": []
+    }
+  ]
+}

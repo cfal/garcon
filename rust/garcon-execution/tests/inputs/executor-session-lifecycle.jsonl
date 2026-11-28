@@ -1,0 +1,4 @@
+{"fn":"executorSessionTrace","args":["setup"]}
+{"fn":"executorSessionTrace","args":["dispatched"]}
+{"fn":"executorSessionTrace","args":["unrelated"]}
+{"fn":"executorSessionTrace","args":["reopened"]}

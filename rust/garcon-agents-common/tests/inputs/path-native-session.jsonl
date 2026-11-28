@@ -1,0 +1,11 @@
+{"fn":"encodePathNativeSession","args":[{"path":null,"agentSessionId":null,"modelEndpointId":null}]}
+{"fn":"encodePathNativeSession","args":[{"path":"","agentSessionId":"","modelEndpointId":""}]}
+{"fn":"encodePathNativeSession","args":[{"path":"/synthetic/session.jsonl","agentSessionId":"synthetic-session","modelEndpointId":"synthetic-endpoint"}]}
+{"fn":"encodePathNativeSession","args":[{"path":"","agentSessionId":null,"modelEndpointId":"synthetic-endpoint"}]}
+{"fn":"decodePathNativeSession","args":[null]}
+{"fn":"decodePathNativeSession","args":[{"ownerId":"synthetic-provider","schemaVersion":1,"value":{}}]}
+{"fn":"decodePathNativeSession","args":[{"ownerId":"synthetic-provider","schemaVersion":1,"value":{"modelEndpointId":"synthetic-endpoint","agentSessionId":null,"path":""}}]}
+{"fn":"decodePathNativeSession","args":[{"ownerId":"synthetic-provider","schemaVersion":1,"value":{"path":"/synthetic/session.jsonl","agentSessionId":"synthetic-session","modelEndpointId":"synthetic-endpoint"}}]}
+{"fn":"decodePathNativeSession","args":[{"ownerId":"other-provider","schemaVersion":1,"value":{}}]}
+{"fn":"decodePathNativeSession","args":[{"ownerId":"synthetic-provider","schemaVersion":2,"value":{}}]}
+{"fn":"decodePathNativeSession","args":[{"ownerId":"synthetic-provider","schemaVersion":1,"value":{"agentSessionId":42}}]}

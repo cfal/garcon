@@ -1,0 +1,70 @@
+{
+  "module": "common/terminal.ts",
+  "tests": [
+    "server/runtime/terminals/__tests__/terminal-contracts.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/terminal.jsonl",
+  "guards": [
+    {
+      "fn": "terminalIdForMessage",
+      "argument": 0,
+      "guard": "parseTerminalStreamServerMessage",
+      "dropped": 82,
+      "kept": 60
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "terminalIdForMessage",
+      "argument": 0
+    },
+    {
+      "fn": "cloneTerminalMetadata",
+      "argument": 0
+    },
+    {
+      "fn": "parseTerminalCreateRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseTerminalTerminateRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseTerminalRenameRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseTerminalListResponse",
+      "argument": 0
+    },
+    {
+      "fn": "parseTerminalMetadata",
+      "argument": 0
+    },
+    {
+      "fn": "parseTerminalCreateResponse",
+      "argument": 0
+    },
+    {
+      "fn": "parseTerminalTerminateResponse",
+      "argument": 0
+    },
+    {
+      "fn": "parseTerminalRenameResponse",
+      "argument": 0
+    },
+    {
+      "fn": "parseTerminalStreamClientMessage",
+      "argument": 0
+    },
+    {
+      "fn": "parseTerminalStreamServerMessage",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 912,
+  "sha256": "47fe13dbd4f49d3f064385ce8c804f3723b07ae2327d43d0a9c687811d1cf100"
+}

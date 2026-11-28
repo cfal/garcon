@@ -1,0 +1,21 @@
+{
+  "module": "server/remote/transport/rpc-routing.ts",
+  "tests": [
+    "server/remote/transport/__tests__/rpc-routing.test.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "rpcLane",
+      "argument": 2,
+      "guard": "rust/garcon-link/tests/oracles/recording-guards.ts#isRpcLane",
+      "dropped": 13,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 88,
+  "sha256": "bf7ef4d6c4b814660568fc320008c1d685158f1059433a60db8d4c83048102b3"
+}

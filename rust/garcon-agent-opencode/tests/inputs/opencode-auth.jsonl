@@ -1,0 +1,19 @@
+{"fn":"authStatus","args":[null]}
+{"fn":"authStatus","args":[{"isAvailable":true}]}
+{"fn":"authStatus","args":[{"isAvailable":false}]}
+{"fn":"authStatus","args":[{}]}
+{"fn":"authStatus","args":[{"isAvailable":true,"isTemporarilyUnavailable":true,"getUnavailableReason":"OpenCode startup timed out after 5000ms","getUnavailableRetryAfterMs":42000}]}
+{"fn":"authStatus","args":[{"isAvailable":true,"isTemporarilyUnavailable":true,"getUnavailableReason":"reason","getUnavailableRetryAfterMs":1}]}
+{"fn":"authStatus","args":[{"isAvailable":true,"isTemporarilyUnavailable":true,"getUnavailableReason":"reason","getUnavailableRetryAfterMs":0}]}
+{"fn":"authStatus","args":[{"isAvailable":true,"isTemporarilyUnavailable":true,"getUnavailableReason":"","getUnavailableRetryAfterMs":999.5}]}
+{"fn":"authStatus","args":[{"isAvailable":true,"isTemporarilyUnavailable":true}]}
+{"fn":"authStatus","args":[{"isAvailable":true,"isTemporarilyUnavailable":true,"getUnavailableReason":null,"getUnavailableRetryAfterMs":100000}]}
+{"fn":"authStatus","args":[{"isAvailable":true,"isTemporarilyUnavailable":false,"getUnavailableReason":"ignored","getUnavailableRetryAfterMs":42000}]}
+{"fn":"authStatus","args":[{"isAvailable":true,"isTemporarilyUnavailable":true,"getUnavailableRetryAfterMs":null,"getUnavailableReason":"OpenCode did not answer"}]}
+{"fn":"authStatus","args":[{"isAvailable":true,"isTemporarilyUnavailable":true,"getUnavailableReason":"  ","getUnavailableRetryAfterMs":42000}]}
+{"fn":"authStatus","args":[{"isAvailable":true,"isTemporarilyUnavailable":true,"getUnavailableReason":"é 😀","getUnavailableRetryAfterMs":-5000}]}
+{"fn":"authStatus","args":[{"isAvailable":true,"isTemporarilyUnavailable":true,"getUnavailableReason":"x","getUnavailableRetryAfterMs":0.001}]}
+{"fn":"authStatus","args":[{"isAvailable":true,"isTemporarilyUnavailable":true,"getUnavailableReason":"x","getUnavailableRetryAfterMs":1e21}]}
+{"fn":"authStatus","args":[{"isAvailable":true,"isTemporarilyUnavailable":true,"getUnavailableReason":"x","getUnavailableRetryAfterMs":1000.5}]}
+{"fn":"authStatus","args":[{"isAvailable":true,"isTemporarilyUnavailable":true,"getUnavailableRetryAfterMs":999,"getUnavailableReason":"x"}]}
+{"fn":"authStatus","args":[{"isAvailable":true,"isTemporarilyUnavailable":0,"getUnavailableRetryAfterMs":999,"getUnavailableReason":"x"}]}

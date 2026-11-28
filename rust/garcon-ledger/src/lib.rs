@@ -1,0 +1,38 @@
+//! Controller-owned transcript storage.
+
+pub mod adoption;
+pub mod anchor_page;
+pub mod clear;
+pub mod codec;
+pub mod connection_entry;
+pub mod connection_setup;
+pub mod contracts;
+pub mod directories;
+pub mod errors;
+pub mod export_fold;
+pub mod failure_fences;
+pub mod file_stat;
+pub mod garcon_command_publication;
+mod garcon_command_request;
+pub mod imported_drafts;
+pub mod input_composition;
+pub mod input_submission;
+pub mod native_activity_query;
+pub mod native_history_seed;
+pub mod preamble_application;
+pub mod preamble_history;
+pub mod preamble_sanitation;
+pub mod presentation;
+pub mod producer_lease;
+pub mod projection;
+pub mod raw_page;
+pub mod reload;
+pub mod service;
+pub mod session_query;
+pub mod sqlite_operations;
+pub mod staging_views;
+pub mod store;
+pub mod ticket_outcome_query;
+pub mod view_mutation;
+pub mod view_reader;
+pub mod write_timings;

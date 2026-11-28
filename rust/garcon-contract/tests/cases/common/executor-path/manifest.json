@@ -1,0 +1,11 @@
+{
+  "module": "common/executor-path.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/executor-path.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 16,
+  "sha256": "da6b999c4564c42d51f35da1bdf834a6c9908129255c2e3f0a21afab2542a1e7"
+}

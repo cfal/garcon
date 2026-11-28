@@ -1,0 +1,12 @@
+{
+  "module": "server-agents/pi/src/agents/pi/pi-rpc-protocol.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-pi/tests/inputs/pi-rpc-protocol.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 21,
+  "sha256": "db9969d7749e05399ac563d3fc8435056f4a869f2d6801a9c30873857738d215"
+}

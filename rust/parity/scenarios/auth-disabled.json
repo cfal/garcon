@@ -1,0 +1,18 @@
+{
+  "name": "auth-disabled",
+  "description": "Authentication disabled without a provisioned account: public status, the local principal, and refused credential mutations.",
+  "server": { "account": "none", "auth": "disabled" },
+  "traps": true,
+  "steps": [
+    { "name": "status", "http": { "method": "GET", "path": "/api/v1/auth/status", "auth": "none" } },
+    { "name": "user", "http": { "method": "GET", "path": "/api/v1/auth/user", "auth": "none" } },
+    { "name": "list-chats-without-token", "http": { "method": "GET", "path": "/api/v1/chats", "auth": "none" } },
+    { "name": "list-chats-with-forged-token", "http": { "method": "GET", "path": "/api/v1/chats", "auth": "forged" } },
+    { "name": "register-forbidden", "http": { "method": "POST", "path": "/api/v1/auth/register", "auth": "none", "json": { "username": "new-account", "password": "new-account-password-123" } } },
+    { "name": "login-forbidden", "http": { "method": "POST", "path": "/api/v1/auth/login", "auth": "none", "json": { "username": "parity", "password": "synthetic-password-123" } } },
+    { "name": "username-change-forbidden", "http": { "method": "PATCH", "path": "/api/v1/auth/username", "auth": "none", "json": { "currentPassword": "synthetic-password-123", "username": "renamed" } } },
+    { "name": "password-change-forbidden", "http": { "method": "PATCH", "path": "/api/v1/auth/password", "auth": "none", "json": { "currentPassword": "synthetic-password-123", "newPassword": "changed-password-123" } } },
+    { "name": "logout-forbidden", "http": { "method": "POST", "path": "/api/v1/auth/logout", "auth": "none" } },
+    { "name": "user-after-refused-changes", "http": { "method": "GET", "path": "/api/v1/auth/user", "auth": "none" } }
+  ]
+}

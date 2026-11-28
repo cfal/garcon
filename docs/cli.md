@@ -17,6 +17,8 @@ Common options and environment variables:
 - `GARCON_BIND_ADDRESS` / `--bind-address`: server bind address.
 - `GARCON_BASE_PATH` / `--base-path`: URL mount for the webapp, API, and WebSockets. Defaults to the origin root; requires a restart, not a rebuild.
 - `GARCON_PUBLIC_URL` / `--public-url`: external HTTP(S) base URL for executor onboarding and shared-page metadata. Its pathname must match the configured base path.
+- `GARCON_TRUST_PROXY` / `--trust-proxy`: use `X-Forwarded-For` and `X-Real-IP` for client addresses in rate limits. Set it only behind a proxy that overwrites those headers.
+- `--runtime-origin`: the origin the controller publishes in `runtime.json` for CLI discovery, instead of its own listener. The Rust front door (`rust/README.md`) sets it to its own address, so `garcon-cli` reaches the front door and keeps recognizing the same address across restarts of the controller behind it.
 - `GARCON_CONFIG_DIR` / `--config-dir`: base config directory. Defaults to `~/.garcon` from `HOME`; Windows uses `%USERPROFILE%\.garcon` and ignores `HOME`.
 - `GARCON_WORKSPACE` / `--workspace`: named workspace under the config directory.
 - `GARCON_WORKSPACE_DIR` / `--workspace-dir`: explicit workspace directory.

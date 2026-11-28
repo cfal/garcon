@@ -1,0 +1,7 @@
+{"fn":"codexQuestionReplyInput","args":["synthetic message"]}
+{"fn":"codexQuestionReplyInput","args":["synthetic message",null]}
+{"fn":"codexQuestionReplyInput","args":["first\n> Which?\n\nAnswer.\nsecond\n> Which?\n\nAnswer.",{"questionId":"synthetic-id","question":"Which?","answer":"Answer."}]}
+{"fn":"codexHistoricalUserMessage","args":["2026-01-01T00:00:00Z","synthetic message"]}
+{"fn":"codexHistoricalUserMessage","args":["2026-01-01T00:00:00Z","synthetic message","client"]}
+{"fn":"codexHistoricalQuestionReply","args":["2026-01-01T00:00:00Z","<send_user_message_question_reply>{\"questionItemId\":\"q\",\"question\":\"Title?\",\"answer\":\"  answer  \"}</send_user_message_question_reply>","id"]}
+{"fn":"codexHistoricalQuestionReply","args":["2026-01-01T00:00:00Z","<send_user_message_question_reply>{\"questionItemId\":\"q\",\"question\":\"Title?\",\"answer\":{}}</send_user_message_question_reply>"]}

@@ -1,0 +1,38 @@
+{
+  "module": "common/server-runtime.ts",
+  "tests": [
+    "common/__tests__/server-runtime.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/server-runtime.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseCliContext",
+      "argument": 0
+    },
+    {
+      "fn": "parseServerRuntimeProbe",
+      "argument": 0
+    },
+    {
+      "fn": "parseServerRuntimeDescriptor",
+      "argument": 0
+    },
+    {
+      "fn": "parseCliRuntimeDescriptor",
+      "argument": 0
+    },
+    {
+      "fn": "isLocalCapability",
+      "argument": 0
+    },
+    {
+      "fn": "isRuntimeProbeChallenge",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 308,
+  "sha256": "106ce80ccb390ea0621b27d87d943719d0ccfbeefefdd137f516403345bc6d7d"
+}

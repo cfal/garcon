@@ -1,0 +1,28 @@
+{
+  "module": "server/runtime/git/working-path-token.ts",
+  "tests": [
+    "rust/parity/fixtures/git/pure.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "changedWorkingPathTokens",
+      "argument": 0,
+      "guard": "rust/parity/fixtures/git/guards.ts#pathTokens",
+      "dropped": 6,
+      "kept": 36
+    },
+    {
+      "fn": "changedWorkingPathTokens",
+      "argument": 1,
+      "guard": "rust/parity/fixtures/git/guards.ts#pathTokens",
+      "dropped": 4,
+      "kept": 24
+    }
+  ],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 63,
+  "sha256": "61936e279aad472f63dfed7c5917b15ba18d9b66b203e01bae3e0eb6998a2cbe"
+}

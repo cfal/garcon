@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-base/tests/ticket_error_oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-base/tests/inputs/server-common/ticket-error.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 27,
+  "sha256": "f3b6a4358ad3ba707021499275d74bd4ef0cfe585d888b112265f925cf42a9bd"
+}

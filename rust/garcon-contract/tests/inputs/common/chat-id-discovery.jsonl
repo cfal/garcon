@@ -1,0 +1,6 @@
+{"fn":"parseChatIdDisclosure","args":["\ufeff<garcon-chat-id>1787836573296800</garcon-chat-id>\u00a0"]}
+{"fn":"parseChatIdDisclosure","args":["<garcon-chat-id> 1787836573296800</garcon-chat-id>"]}
+{"fn":"parseChatIdDisclosure","args":["<garcon-chat-id>1787836573296800</garcon-chat-id><garcon-chat-id>1787836573296800</garcon-chat-id>"]}
+{"fn":"chatIdDisclosureNoticeContent","args":["1787836573296800"]}
+{"fn":"chatIdDiscoveryFailureContent","args":["disabled"]}
+{"fn":"chatIdDiscoveryFailureContent","args":["delivery-failed"]}

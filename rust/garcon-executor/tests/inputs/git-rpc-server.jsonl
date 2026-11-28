@@ -1,0 +1,15 @@
+{"fn":"rejectedGitRpc","args":["git.getStatus",null]}
+{"fn":"rejectedGitRpc","args":["git.getStatus",{"input":[] ,"budgetMs":42}]}
+{"fn":"rejectedGitRpc","args":["git.getStatus",{"input":{},"budgetMs":0}]}
+{"fn":"rejectedGitRpc","args":["git.getStatus",{"input":{},"budgetMs":"42"}]}
+{"fn":"rejectedGitRpc","args":["git.getStatus",{"input":{},"budgetMs":1.5}]}
+{"fn":"rejectedGitRpc","args":["git.getStatus",{"input":{},"budgetMs":30001}]}
+{"fn":"rejectedGitRpc","args":["git.getStatus",{"input":{},"budgetMs":42,"extra":true}]}
+{"fn":"rejectedGitRpc","args":["git.getStatus",{"input":{},"budgetMs":42}]}
+{"fn":"rejectedGitRpc","args":["git.commit",{"input":{"projectPath":"/fixture"},"budgetMs":42}]}
+{"fn":"rejectedGitRpc","args":["git.future",{"input":{},"budgetMs":42}]}
+{"fn":"rejectedGitRpc","args":["gh.future",{"input":{},"budgetMs":42}]}
+{"fn":"rejectedGitRpc","args":["gh.getStatus",{"input":{"extra":true},"budgetMs":30000}]}
+{"fn":"rejectedGitRpc","args":["gh.getPullRequest",{"input":{},"budgetMs":60000}]}
+{"fn":"rejectedGitRpc","args":["gh.getPullRequest",{"input":{},"budgetMs":60001}]}
+{"fn":"rejectedGitRpc","args":["gh.getPullRequest",{"input":{},"budgetMs":9007199254740992}]}

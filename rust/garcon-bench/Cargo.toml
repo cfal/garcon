@@ -1,0 +1,18 @@
+[package]
+name = "garcon-bench"
+version = "0.0.0"
+description = "Load generator for comparing the Garcon front door with the TypeScript original."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+hdrhistogram = { version = "7", default-features = false }
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "time"] }
+tokio-tungstenite = { version = "0.27", default-features = false, features = ["connect", "handshake"] }

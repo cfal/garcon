@@ -1,0 +1,29 @@
+{
+  "module": "common/git-result-validation.ts",
+  "tests": [
+    "common/__tests__/git-result-validation.test.js",
+    "rust/garcon-contract/tests/inputs/common/git-result-validation.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "validateGitResult",
+      "argument": 0,
+      "guard": "common/git-request-validation.ts#isGitMethod",
+      "dropped": 1,
+      "kept": 0
+    },
+    {
+      "fn": "validateGhResult",
+      "argument": 0,
+      "guard": "common/git-request-validation.ts#isGhMethod",
+      "dropped": 2,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 423,
+  "sha256": "d38e77544ee28c87448b4dc2cddd1f053e942b1867d26ad95a2e1b564e188d4c"
+}

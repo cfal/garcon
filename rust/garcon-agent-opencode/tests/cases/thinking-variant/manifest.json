@@ -1,0 +1,13 @@
+{
+  "module": "server-agents/opencode/src/agents/opencode/thinking-variant.ts",
+  "tests": [
+    "server-agents/opencode/src/agents/opencode/__tests__/thinking-variant.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 104,
+  "sha256": "d8e2b70f6e81682be1427cb71e7131f21360d64a70600a0a9fd22810f8b78f78"
+}

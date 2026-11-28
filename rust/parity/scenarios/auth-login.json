@@ -1,0 +1,213 @@
+{
+  "name": "auth-login",
+  "description": "Sign-in: the body a sign-in needs, field validation, unknown names and wrong passwords, and a content type with parameters or in upper case; a session token from a sign-in identifies its user and is revoked by its logout.",
+  "steps": [
+    {
+      "name": "login-no-content-type",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "body": "{\"username\":\"{{username}}\",\"password\":\"{{password}}\"}",
+        "headers": {},
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-empty-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "body": "",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-null-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": null,
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-missing-username",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "password": "{{password}}"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-missing-password",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "{{username}}"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-password-129-characters",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "{{username}}",
+          "password": "ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-unknown-username",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "nobody",
+          "password": "whatever-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-content-type-with-charset",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "{{username}}",
+          "password": "{{password}}"
+        },
+        "auth": "none",
+        "headers": {
+          "Content-Type": "application/json; charset=utf-8"
+        }
+      }
+    },
+    {
+      "name": "login-content-type-uppercase",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "json": {
+          "username": "{{username}}",
+          "password": "{{password}}"
+        },
+        "auth": "none",
+        "headers": {
+          "Content-Type": "Application/JSON"
+        }
+      }
+    },
+    {
+      "name": "user-with-login-token",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/user",
+        "auth": "none",
+        "headers": {
+          "Authorization": "Bearer {{login-content-type-with-charset.body.token}}"
+        }
+      }
+    },
+    {
+      "name": "user-with-second-login-token",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/user",
+        "auth": "none",
+        "headers": {
+          "Authorization": "Bearer {{login-content-type-uppercase.body.token}}"
+        }
+      }
+    },
+    {
+      "name": "logout",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none",
+        "headers": {
+          "Authorization": "Bearer {{login-content-type-with-charset.body.token}}"
+        }
+      }
+    },
+    {
+      "name": "user-after-logout",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/user",
+        "auth": "none",
+        "headers": {
+          "Authorization": "Bearer {{login-content-type-with-charset.body.token}}"
+        }
+      }
+    },
+    {
+      "name": "user-with-second-session-after-logout",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/user",
+        "auth": "none",
+        "headers": {
+          "Authorization": "Bearer {{login-content-type-uppercase.body.token}}"
+        }
+      }
+    },
+    {
+      "name": "logout-revoked-token",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none",
+        "headers": {
+          "Authorization": "Bearer {{login-content-type-with-charset.body.token}}"
+        }
+      }
+    },
+    {
+      "name": "logout-without-token",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "none"
+      }
+    },
+    {
+      "name": "logout-with-forged-token",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "auth": "forged"
+      }
+    },
+    {
+      "name": "logout-empty-object",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "json": {},
+        "auth": "none"
+      }
+    },
+    {
+      "name": "login-wrong-method",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/auth/login",
+        "auth": "none"
+      }
+    }
+  ],
+  "traps": false
+}

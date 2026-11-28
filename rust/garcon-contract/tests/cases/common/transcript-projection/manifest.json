@@ -1,0 +1,46 @@
+{
+  "module": "common/transcript-projection.ts",
+  "tests": [
+    "common/__tests__/transcript-projection.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/transcript-projection.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.args[0].entries[0].refit",
+      "type": "a function",
+      "where": "args",
+      "at": "common/__tests__/transcript-projection.test.js:27:20",
+      "fn": "selectPrioritizedProjection",
+      "count": 1
+    },
+    {
+      "path": "$.args[0].entries[0].refit",
+      "type": "a function",
+      "where": "args",
+      "at": "common/__tests__/transcript-projection.test.js:44:20",
+      "fn": "selectPrioritizedProjection",
+      "count": 1
+    },
+    {
+      "path": "$.args[0].entries[0].refit",
+      "type": "a function",
+      "where": "args",
+      "at": "common/__tests__/transcript-projection.test.js:63:20",
+      "fn": "selectPrioritizedProjection",
+      "count": 1
+    },
+    {
+      "path": "$.args[0].entries[0].refit",
+      "type": "a function",
+      "where": "args",
+      "at": "common/__tests__/transcript-projection.test.js:77:20",
+      "fn": "selectPrioritizedProjection",
+      "count": 1
+    }
+  ],
+  "cases": 14,
+  "sha256": "5d4ef028e5da128f2966313151d93140c4408634a6fa92dad83c9ad9714f7a52"
+}

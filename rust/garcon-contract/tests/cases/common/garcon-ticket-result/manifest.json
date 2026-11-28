@@ -1,0 +1,54 @@
+{
+  "module": "common/garcon-ticket-result.ts",
+  "tests": [
+    "common/__tests__/garcon-ticket-result.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/garcon-ticket-result.jsonl",
+  "guards": [
+    {
+      "fn": "ticketMutationReceipt",
+      "argument": 0,
+      "guard": "common/ticket-records.ts#parseTicketWriteResult",
+      "dropped": 261,
+      "kept": 60
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "parseTicketErrorCode",
+      "argument": 0
+    },
+    {
+      "fn": "parseTicketCommandResult",
+      "argument": 0
+    },
+    {
+      "fn": "ticketMutationReceipt",
+      "argument": 0
+    },
+    {
+      "fn": "ticketCommandContext",
+      "argument": 0
+    },
+    {
+      "fn": "garconTicketResultContent",
+      "argument": 0
+    },
+    {
+      "fn": "ticketCommandOutcome",
+      "argument": 0
+    },
+    {
+      "fn": "parseTicketCommandOutcome",
+      "argument": 0
+    },
+    {
+      "fn": "parseStoredTicketCommandOutcome",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 1031,
+  "sha256": "b03a8d5b23df9c05992f9cd6701a4fdf445c1c88be6a8cefe3dfed6f10144246"
+}

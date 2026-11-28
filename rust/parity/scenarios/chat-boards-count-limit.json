@@ -1,0 +1,83 @@
+{
+  "name": "chat-boards-count-limit",
+  "description": "Chat board routes over a seeded catalog of 50 boards: create refuses at the limit and frees a slot after a remove.",
+  "server": {
+    "files": {
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":0,\"assignments\":{}}",
+      "workspace/workspace-version.json": "{\n  \"version\": 10\n}\n",
+      "workspace/chat-boards.json": "{\n  \"version\": 1,\n  \"revision\": 3,\n  \"boards\": [\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000001\",\n      \"name\": \"Board 1\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000002\",\n      \"name\": \"Board 2\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000003\",\n      \"name\": \"Board 3\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000004\",\n      \"name\": \"Board 4\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000005\",\n      \"name\": \"Board 5\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000006\",\n      \"name\": \"Board 6\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000007\",\n      \"name\": \"Board 7\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000008\",\n      \"name\": \"Board 8\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000009\",\n      \"name\": \"Board 9\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000000a\",\n      \"name\": \"Board 10\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000000b\",\n      \"name\": \"Board 11\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000000c\",\n      \"name\": \"Board 12\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000000d\",\n      \"name\": \"Board 13\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000000e\",\n      \"name\": \"Board 14\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000000f\",\n      \"name\": \"Board 15\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000010\",\n      \"name\": \"Board 16\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000011\",\n      \"name\": \"Board 17\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000012\",\n      \"name\": \"Board 18\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000013\",\n      \"name\": \"Board 19\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000014\",\n      \"name\": \"Board 20\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000015\",\n      \"name\": \"Board 21\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000016\",\n      \"name\": \"Board 22\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000017\",\n      \"name\": \"Board 23\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000018\",\n      \"name\": \"Board 24\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000019\",\n      \"name\": \"Board 25\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000001a\",\n      \"name\": \"Board 26\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000001b\",\n      \"name\": \"Board 27\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000001c\",\n      \"name\": \"Board 28\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000001d\",\n      \"name\": \"Board 29\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000001e\",\n      \"name\": \"Board 30\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000001f\",\n      \"name\": \"Board 31\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000020\",\n      \"name\": \"Board 32\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000021\",\n      \"name\": \"Board 33\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000022\",\n      \"name\": \"Board 34\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000023\",\n      \"name\": \"Board 35\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000024\",\n      \"name\": \"Board 36\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000025\",\n      \"name\": \"Board 37\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000026\",\n      \"name\": \"Board 38\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000027\",\n      \"name\": \"Board 39\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000028\",\n      \"name\": \"Board 40\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000029\",\n      \"name\": \"Board 41\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000002a\",\n      \"name\": \"Board 42\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000002b\",\n      \"name\": \"Board 43\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000002c\",\n      \"name\": \"Board 44\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000002d\",\n      \"name\": \"Board 45\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000002e\",\n      \"name\": \"Board 46\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-00000000002f\",\n      \"name\": \"Board 47\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000030\",\n      \"name\": \"Board 48\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000031\",\n      \"name\": \"Board 49\",\n      \"columns\": []\n    },\n    {\n      \"id\": \"ba000000-0000-4000-8000-000000000032\",\n      \"name\": \"Board 50\",\n      \"columns\": []\n    }\n  ]\n}\n"
+    }
+  },
+  "steps": [
+    {
+      "name": "boards-full",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-boards"
+      }
+    },
+    {
+      "name": "create-at-limit",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 3,
+          "name": "Overflow"
+        }
+      }
+    },
+    {
+      "name": "create-at-limit-invalid-name",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 3,
+          "name": " "
+        }
+      }
+    },
+    {
+      "name": "create-at-limit-stale-revision",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 2,
+          "name": "Overflow"
+        }
+      }
+    },
+    {
+      "name": "remove-at-limit",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 3,
+          "boardId": "ba000000-0000-4000-8000-000000000001"
+        }
+      }
+    },
+    {
+      "name": "create-after-remove",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chat-boards",
+        "json": {
+          "expectedRevision": 4,
+          "name": "Overflow"
+        }
+      }
+    },
+    {
+      "name": "boards-after-create",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chat-boards"
+      }
+    }
+  ],
+  "traps": true
+}

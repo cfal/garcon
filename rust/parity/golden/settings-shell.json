@@ -1,0 +1,268 @@
+{
+  "scenario": "settings-shell",
+  "cases": [
+    {
+      "name": "shell-default-title",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "<!doctype html>\n<html lang=\"en\">\n\t<head>\n\t\t<meta charset=\"utf-8\" />\n\t\t<meta name=\"apple-mobile-web-app-title\" content=\"Garcon\" />\n\t\t<link rel=\"manifest\" href=\"/site.webmanifest\" />\n\t\t<link rel=\"icon\" href=\"/icons/icon.svg\" type=\"image/svg+xml\" />\n\t\t<title>Garcon</title>\n\t\t<script>globalThis.__GARCON_BASE__ = \"\";</script>\n\t\t\t<script>globalThis.__GARCON_APP_TITLE__={\"title\":\"Garcon\",\"version\":0}</script>\n\t</head>\n\t<body>\n\t\t<div id=\"app\">Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. </div>\n\t\t<script type=\"module\" src=\"/_app/immutable/entry/start.js\"></script>\n\t</body>\n</html>\n"
+        },
+        "headers": {
+          "cache-control": "no-cache, no-store, must-revalidate",
+          "content-encoding": "gzip",
+          "content-type": "text/html; charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "set-title",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "settings": {
+              "executionDefaults": {
+                "byAgent": {},
+                "global": {
+                  "agentSettingsById": {},
+                  "permissionMode": "default",
+                  "thinkingMode": "none"
+                }
+              },
+              "features": {
+                "agentCommands": {
+                  "chatIdDiscovery": true,
+                  "enabled": true,
+                  "resumeAgent": true,
+                  "schedule": true,
+                  "sendMessage": true,
+                  "startAgent": true,
+                  "tickets": true
+                },
+                "transcriptSearch": {
+                  "enabled": false
+                }
+              },
+              "paths": {
+                "browseStartPath": "",
+                "pinnedProjectPaths": [],
+                "recentProjectPaths": []
+              },
+              "pinnedChatIds": [],
+              "projectBasePath": "{{projectDir}}",
+              "recentAgentSettings": [],
+              "telegram": {
+                "botFirstName": null,
+                "botTokenAvailable": false,
+                "botUsername": null,
+                "linkUrl": null,
+                "pendingLink": false,
+                "recipientDisplayName": null,
+                "recipientLinked": false,
+                "recipientUsername": null
+              },
+              "ui": {
+                "appIdentity": {
+                  "title": "Parity <b>&\"ü 雪"
+                }
+              },
+              "uiEffective": {
+                "agentSwitchCompaction": {
+                  "agentId": "amp",
+                  "apiProviderId": null,
+                  "contextWindowTokens": 500000,
+                  "enabled": false,
+                  "executorId": "local",
+                  "model": "medium",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "source": "auto",
+                  "thinkingMode": "none"
+                },
+                "chatTitle": {
+                  "agentId": "amp",
+                  "apiProviderId": null,
+                  "enabled": false,
+                  "executorId": "local",
+                  "model": "medium",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "source": "auto",
+                  "thinkingMode": "none"
+                },
+                "commitMessage": {
+                  "agentId": "amp",
+                  "apiProviderId": null,
+                  "executorId": "local",
+                  "model": "medium",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "source": "auto",
+                  "thinkingMode": "none"
+                },
+                "promptRefinement": {
+                  "agentId": "amp",
+                  "apiProviderId": null,
+                  "executorId": "local",
+                  "model": "medium",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "source": "auto",
+                  "thinkingMode": "none"
+                }
+              },
+              "version": 1
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/settings"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "shell-custom-title",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "<!doctype html>\n<html lang=\"en\">\n\t<head>\n\t\t<meta charset=\"utf-8\" />\n\t\t<meta name=\"apple-mobile-web-app-title\" content=\"Parity &lt;b&gt;&amp;&quot;ü 雪\" />\n\t\t<link rel=\"manifest\" href=\"/site.webmanifest\" />\n\t\t<link rel=\"icon\" href=\"/icons/icon.svg\" type=\"image/svg+xml\" />\n\t\t<title>Parity &lt;b&gt;&amp;&quot;ü 雪</title>\n\t\t<script>globalThis.__GARCON_BASE__ = \"\";</script>\n\t\t\t<script>globalThis.__GARCON_APP_TITLE__={\"title\":\"Parity \\u003cb>&\\\"ü 雪\",\"version\":1}</script>\n\t</head>\n\t<body>\n\t\t<div id=\"app\">Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. </div>\n\t\t<script type=\"module\" src=\"/_app/immutable/entry/start.js\"></script>\n\t</body>\n</html>\n"
+        },
+        "headers": {
+          "cache-control": "no-cache, no-store, must-revalidate",
+          "content-encoding": "gzip",
+          "content-type": "text/html; charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "manifest-custom-title",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "display": "standalone",
+            "icons": [
+              {
+                "sizes": "192x192",
+                "src": "icons/icon-192.png",
+                "type": "image/png"
+              }
+            ],
+            "name": "Parity <b>&\"ü 雪",
+            "short_name": "Parity <b>&\"ü 雪",
+            "start_url": "."
+          }
+        },
+        "headers": {
+          "cache-control": "no-cache, no-store, must-revalidate",
+          "content-length": "219",
+          "content-type": "application/manifest+json; charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/site.webmanifest"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "chat-shell-custom-title",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "<!doctype html>\n<html lang=\"en\">\n\t<head>\n\t\t<meta charset=\"utf-8\" />\n\t\t<meta name=\"apple-mobile-web-app-title\" content=\"Parity &lt;b&gt;&amp;&quot;ü 雪\" />\n\t\t<link rel=\"manifest\" href=\"/site.webmanifest\" />\n\t\t<link rel=\"icon\" href=\"/icons/icon.svg\" type=\"image/svg+xml\" />\n\t\t<title>Parity &lt;b&gt;&amp;&quot;ü 雪</title>\n\t\t<script>globalThis.__GARCON_BASE__ = \"\";</script>\n\t\t\t<script>globalThis.__GARCON_APP_TITLE__={\"title\":\"Parity \\u003cb>&\\\"ü 雪\",\"version\":1}</script>\n\t</head>\n\t<body>\n\t\t<div id=\"app\">Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. </div>\n\t\t<script type=\"module\" src=\"/_app/immutable/entry/start.js\"></script>\n\t</body>\n</html>\n"
+        },
+        "headers": {
+          "cache-control": "no-cache, no-store, must-revalidate",
+          "content-encoding": "gzip",
+          "content-type": "text/html; charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/chat/parity"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "clear-title",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Title is required.",
+            "errorCode": "title_required",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/settings"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "shell-cleared-title",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "<!doctype html>\n<html lang=\"en\">\n\t<head>\n\t\t<meta charset=\"utf-8\" />\n\t\t<meta name=\"apple-mobile-web-app-title\" content=\"Parity &lt;b&gt;&amp;&quot;ü 雪\" />\n\t\t<link rel=\"manifest\" href=\"/site.webmanifest\" />\n\t\t<link rel=\"icon\" href=\"/icons/icon.svg\" type=\"image/svg+xml\" />\n\t\t<title>Parity &lt;b&gt;&amp;&quot;ü 雪</title>\n\t\t<script>globalThis.__GARCON_BASE__ = \"\";</script>\n\t\t\t<script>globalThis.__GARCON_APP_TITLE__={\"title\":\"Parity \\u003cb>&\\\"ü 雪\",\"version\":1}</script>\n\t</head>\n\t<body>\n\t\t<div id=\"app\">Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. Parity fixture shell. </div>\n\t\t<script type=\"module\" src=\"/_app/immutable/entry/start.js\"></script>\n\t</body>\n</html>\n"
+        },
+        "headers": {
+          "cache-control": "no-cache, no-store, must-revalidate",
+          "content-encoding": "gzip",
+          "content-type": "text/html; charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/"
+        },
+        "status": 200
+      },
+      "noise": []
+    }
+  ]
+}

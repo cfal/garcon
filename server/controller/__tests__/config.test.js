@@ -22,6 +22,7 @@ const configEnvironment = Object.fromEntries([
   'GARCON_MAX_WS_CLIENTS',
   'GARCON_HTTP_COMPRESSION',
   'GARCON_DISABLE_AUTH',
+  'GARCON_TRUST_PROXY',
   'HOME',
 ].map((key) => [key, process.env[key]]));
 
@@ -35,6 +36,27 @@ afterEach(() => {
 });
 
 describe('server configuration', () => {
+  it('accepts only an http origin for the published runtime URL', () => {
+    expect(initializeServerConfig().runtimeOrigin).toBeNull();
+    process.argv = [...originalArgv, '--runtime-origin', 'http://127.0.0.1:8080'];
+    expect(initializeServerConfig().runtimeOrigin).toBe('http://127.0.0.1:8080');
+    process.argv = [...originalArgv, '--runtime-origin=http://127.0.0.1:80'];
+    expect(initializeServerConfig().runtimeOrigin).toBe('http://127.0.0.1');
+    for (const invalid of ['http://127.0.0.1:8080/base', 'https://garcon.test', 'not a url']) {
+      process.argv = [...originalArgv, '--runtime-origin', invalid];
+      expect(() => initializeServerConfig()).toThrow('--runtime-origin');
+    }
+  });
+
+  it('trusts forwarded addresses with the flag or the environment variable', () => {
+    expect(initializeServerConfig().trustProxyEnabled).toBe(false);
+    process.argv = [...originalArgv, '--trust-proxy'];
+    expect(initializeServerConfig().trustProxyEnabled).toBe(true);
+    process.argv = [...originalArgv];
+    process.env.GARCON_TRUST_PROXY = '1';
+    expect(initializeServerConfig().trustProxyEnabled).toBe(true);
+  });
+
   it('public URL flags override environment, preserve base paths, and reject invalid configuration', () => {
     process.env.GARCON_PUBLIC_URL = 'https://public.test/base';
     process.env.GARCON_BASE_PATH = '/base';

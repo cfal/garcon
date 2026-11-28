@@ -1,0 +1,49 @@
+{
+  "module": "common/gh-identity.ts",
+  "tests": [
+    "common/__tests__/gh-identity.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/gh-identity.jsonl",
+  "guards": [
+    {
+      "fn": "sameGhRepository",
+      "argument": 0,
+      "guard": "isGhRepositoryIdentity",
+      "dropped": 110,
+      "kept": 6
+    },
+    {
+      "fn": "sameGhRepository",
+      "argument": 1,
+      "guard": "isGhRepositoryIdentity",
+      "dropped": 110,
+      "kept": 6
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "isGhRepositoryIdentity",
+      "argument": 0
+    },
+    {
+      "fn": "isGhActorIdentity",
+      "argument": 0
+    },
+    {
+      "fn": "ghRepositoryIdentity",
+      "argument": 0
+    },
+    {
+      "fn": "sameGhRepository",
+      "argument": 0
+    },
+    {
+      "fn": "sameGhRepository",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 474,
+  "sha256": "093e53f784ce8c55efacf14b5f553f5919724a5e24ff671ff8b7af1919e2c100"
+}
