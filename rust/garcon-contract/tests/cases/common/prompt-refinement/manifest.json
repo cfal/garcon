@@ -1,0 +1,48 @@
+{
+  "module": "common/prompt-refinement.ts",
+  "tests": [
+    "common/__tests__/prompt-refinement.test.js"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "normalizeRefinePromptResponse",
+      "argument": 1,
+      "guard": "isPromptRefinementTarget",
+      "dropped": 105,
+      "kept": 0
+    },
+    {
+      "fn": "promptRefinementTargetMaxLength",
+      "argument": 0,
+      "guard": "isPromptRefinementTarget",
+      "dropped": 77,
+      "kept": 0
+    },
+    {
+      "fn": "promptRefinementTargetOutputMaxLength",
+      "argument": 0,
+      "guard": "isPromptRefinementTarget",
+      "dropped": 77,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "isPromptRefinementTarget",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeRefinePromptRequest",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeRefinePromptResponse",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 222,
+  "sha256": "c2fda2838cd07b524fce0cee5f31ea960abf7f729b95163e5396c51efdc1830a"
+}

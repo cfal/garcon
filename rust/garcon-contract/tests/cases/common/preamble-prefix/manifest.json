@@ -1,0 +1,26 @@
+{
+  "module": "common/preamble-prefix.ts",
+  "tests": [
+    "common/__tests__/preambles.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "createPreamblePrefix",
+      "argument": 0
+    },
+    {
+      "fn": "renderPreamblePrefix",
+      "argument": 0
+    },
+    {
+      "fn": "parsePreamblePrefixReceipt",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 240,
+  "sha256": "e98d7cf7ee33f583573b357083cc389e39ba1c2511ca659a9f007b24e1fb80a0"
+}

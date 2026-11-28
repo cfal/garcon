@@ -67,6 +67,86 @@ fn typed_argument<T: DeserializeOwned>(
 }
 
 #[test]
+fn start_selection_recordings() {
+    use garcon_contract::settings::RemoteExecutionDefaults;
+    use garcon_contract::start_selection::*;
+    use garcon_js::json::Opaque;
+
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Settings {
+        execution_defaults: Option<RemoteExecutionDefaults>,
+    }
+
+    assert_recording("start-selection", |function, args| {
+        let error = |error: StartSelectionError| {
+            CaseError::new("StartSelectionError", error.message)
+                .with_property("code", json!(error.code))
+        };
+        let argument = |index| unknown(function, args.get(index));
+        let text_argument = |index| required_text(function, args.get(index));
+        Ok(match function {
+            "new StartSelectionError" => {
+                let code = typed_argument(function, args.first())?;
+                let error = StartSelectionError::new(code, text_argument(1)?);
+                json!({"$": "error", "name": "StartSelectionError", "message": error.message, "properties": {"code": error.code}})
+            }
+            "requireCatalogAgent" => serialized_record(
+                require_catalog_agent(argument(0)?.as_ref(), text_argument(1)?).map_err(error)?,
+            ),
+            "requireCatalogModels" => serialized_record(Opaque::from_value(Value::Array(
+                require_catalog_models(argument(0)?.as_ref())
+                    .map_err(error)?
+                    .to_vec(),
+            ))),
+            "requireCatalogProvider" => {
+                let input = argument(0)?;
+                let providers = input
+                    .as_array()
+                    .ok_or_else(|| CaseError::undeliverable("expected a provider list"))?;
+                let provider =
+                    require_catalog_provider(providers, text_argument(1)?).map_err(error)?;
+                serialized_record(Opaque::from_value(provider.clone()))
+            }
+            "resolveCatalogModelSelection" => serialized_record(
+                resolve_catalog_model_selection(
+                    argument(0)?.as_ref(),
+                    argument(1)?.as_ref(),
+                    argument(2)?.as_ref(),
+                )
+                .map_err(error)?,
+            ),
+            "resolveModelSelection" => {
+                let request = typed_argument(function, args.get(2))?;
+                serialized_record(
+                    resolve_model_selection(argument(0)?.as_ref(), text_argument(1)?, &request)
+                        .map_err(error)?,
+                )
+            }
+            "validateExplicitModes" => {
+                let request = typed_argument(function, args.get(2))?;
+                validate_explicit_modes(argument(0)?.as_ref(), text_argument(1)?, &request)
+                    .map_err(error)?;
+                markers::undefined()
+            }
+            "resolveStartSelection" => {
+                let settings: Settings = typed_argument(function, args.get(1))?;
+                let request = typed_argument(function, args.get(2))?;
+                serialized_record(
+                    resolve_start_selection(
+                        argument(0)?.as_ref(),
+                        settings.execution_defaults.as_ref(),
+                        &request,
+                    )
+                    .map_err(error)?,
+                )
+            }
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+#[test]
 fn execution_defaults_recordings() {
     use garcon_contract::execution_defaults::*;
     use garcon_contract::settings::RemoteExecutionDefaults;
@@ -450,6 +530,38 @@ fn agent_auth_dtos_round_trip_bun_json() {
 fn serialized_record(value: impl Serialize) -> Value {
     let encoded = serde_json::to_string(&value).expect("contract is serializable");
     garcon_js::json::from_str(&encoded).expect("contract serializes to JSON")
+}
+
+#[test]
+fn api_provider_template_recordings() {
+    use garcon_contract::api_provider_templates::*;
+
+    assert_recording("api-provider-templates", |function, args| {
+        let protocol = typed_argument(function, args.first())?;
+        Ok(match function {
+            "templatesForProtocol" => json!(templates_for_protocol(protocol)),
+            "apiProviderTemplate" => json!(api_provider_template(
+                protocol,
+                typed_argument(function, args.get(1))?
+            )),
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+#[test]
+fn provider_template_constants_match_bun() {
+    use garcon_contract::api_provider_templates::API_PROVIDER_TEMPLATES;
+
+    let original = pinned_bun_stdout(
+        r#"import { API_PROVIDER_TEMPLATES } from "./common/api-provider-templates.ts";
+           console.log(JSON.stringify(API_PROVIDER_TEMPLATES));"#,
+        &[],
+    );
+    assert_eq!(
+        serde_json::to_string(&*API_PROVIDER_TEMPLATES).unwrap(),
+        original.trim_end()
+    );
 }
 
 #[test]
