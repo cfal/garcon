@@ -19,6 +19,7 @@ use garcon_http::http_request::HttpAuthentication;
 use garcon_http::http_route::{HttpRouteOptions, HttpRouter};
 use garcon_http::listener::Listener;
 use garcon_http::routes::{auth::AuthRoutes, create_edge_routes, r#static::StaticRoutes};
+use garcon_http::ws::{BrowserSocketLimits, BrowserSocketOptions, BrowserSockets};
 use garcon_interface::errors::{AgentCallError, AgentDeliveryOutcome};
 use garcon_interface::execution_runtime::{
     ExecutionProjectInspectRequest, ExecutionProjectInspectResponse, ExecutionProjectService,
@@ -46,6 +47,7 @@ pub struct Controller {
     lease: ControllerLease,
     listener: JoinHandle<()>,
     auth_routes: Rc<AuthRoutes>,
+    browser_sockets: Rc<BrowserSockets>,
     listener_shutdown: CancellationToken,
     lease_lost: CancellationToken,
     shutting_down: Rc<Cell<bool>>,
@@ -170,6 +172,7 @@ impl Controller {
             runtime_file,
             instance_id,
             auth_routes,
+            browser_sockets,
         } = match result {
             Ok(values) => values,
             Err(error) => {
@@ -205,6 +208,7 @@ impl Controller {
             lease,
             listener,
             auth_routes,
+            browser_sockets,
             listener_shutdown,
             lease_lost,
             shutting_down,
@@ -224,6 +228,7 @@ impl Controller {
         self.shutting_down.set(true);
         self.logger.info("server: shutting down...");
         self.listener_shutdown.cancel();
+        self.browser_sockets.shutdown().await;
         let listener = self.listener.await;
         self.auth_routes.drain().await;
         let runtime = remove_server_runtime(self.runtime_file, &self.instance_id).await;
@@ -242,6 +247,7 @@ struct BoundController {
     runtime_file: String,
     instance_id: String,
     auth_routes: Rc<AuthRoutes>,
+    browser_sockets: Rc<BrowserSockets>,
 }
 
 async fn bind_controller(
@@ -267,7 +273,7 @@ async fn bind_controller(
         store,
         AuthTokens::new(config.jwt_token_expiry.clone(), clock.clone()),
         Rc::new(BunPasswords),
-        clock,
+        clock.clone(),
     ));
     let auth_routes = AuthRoutes::new(
         auth.clone(),
@@ -284,6 +290,28 @@ async fn bind_controller(
         },
         &auth_routes,
     )?;
+    let unported_log = std::env::var_os("GARCON_RS_UNPORTED_LOG")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    if !garcon_js::is_integer(config.max_ws_clients.0) || config.max_ws_clients.0 < 1.0 {
+        return Err("WebSocket maximum must be a positive integer".into());
+    }
+    let browser_sockets = BrowserSockets::new(
+        BrowserSocketOptions {
+            max_clients: config.max_ws_clients.0 as usize,
+            limits: BrowserSocketLimits::from_config(
+                config.ws_max_payload_length,
+                config.ws_idle_timeout_seconds,
+                config.ws_backpressure_limit,
+            )?,
+            auth_disabled: config.auth_disabled,
+            shutting_down: Rc::clone(&shutting_down),
+        },
+        auth.clone(),
+        runtime.identity.instance_id.clone(),
+        clock,
+        unported_log.clone(),
+    )?;
     let router = HttpRouter::new(
         routes,
         HttpRouteOptions {
@@ -292,15 +320,14 @@ async fn bind_controller(
             compression_enabled: config.http_compression_enabled,
             server_instance_id: Some(runtime.identity.instance_id.clone()),
             shutting_down,
-            unported_log: std::env::var_os("GARCON_RS_UNPORTED_LOG")
-                .filter(|value| !value.is_empty())
-                .map(PathBuf::from),
+            unported_log,
         },
         Rc::new(HttpAuthentication::new(
             auth,
             runtime.local_capability.clone(),
         )),
-    )?;
+    )?
+    .with_browser_sockets(browser_sockets.clone());
     if config.http_idle_timeout_seconds.0 > f64::from(u8::MAX) {
         return Err("Bun.serve expects idleTimeout to be 255 or less".into());
     }
@@ -329,6 +356,7 @@ async fn bind_controller(
         runtime_file: published.file_path,
         instance_id: runtime.identity.instance_id.clone(),
         auth_routes,
+        browser_sockets,
     })
 }
 
@@ -431,6 +459,44 @@ mod tests {
             assert!(!descriptor.exists());
             assert!(!lock.exists());
             assert!(TcpStream::connect(addr).await.is_err());
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn mounts_browser_sessions_with_the_controller_instance_identity() {
+        LocalSet::new().run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let mut config = config(root.path());
+            config.auth_disabled = true;
+            let controller = Controller::start(config, Rc::new(UnavailableLocalExecutor)).await.unwrap();
+            let address = SocketAddr::from(([127, 0, 0, 1], controller.address.port()));
+            let mut socket = TcpStream::connect(address).await.unwrap();
+            socket.write_all(b"GET /fixture/ws HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n").await.unwrap();
+            let payload = br#"{"type":"ws-ping","clientRequestId":"fixture"}"#;
+            let mask = [1, 2, 3, 4];
+            let mut request = vec![0x81, 0x80 | u8::try_from(payload.len()).unwrap()];
+            request.extend(mask);
+            request.extend(payload.iter().enumerate().map(|(index, byte)| byte ^ mask[index % 4]));
+            tokio::time::timeout(Duration::from_secs(3), async {
+                let mut head = Vec::new();
+                while !head.ends_with(b"\r\n\r\n") {
+                    head.push(socket.read_u8().await.unwrap());
+                }
+                assert!(head.starts_with(b"HTTP/1.1 101 "), "{}", String::from_utf8_lossy(&head));
+                socket.write_all(&request).await.unwrap();
+                assert_eq!(socket.read_u8().await.unwrap(), 0x81);
+                let size = match socket.read_u8().await.unwrap() {
+                    126 => usize::from(socket.read_u16().await.unwrap()),
+                    size => usize::from(size),
+                };
+                let mut response = vec![0; size];
+                socket.read_exact(&mut response).await.unwrap();
+                let response: Value = garcon_js::json::from_slice(&response).unwrap();
+                assert_eq!(response["type"], "ws-pong");
+                assert_eq!(response["clientRequestId"], "fixture");
+                assert_eq!(response["serverInstanceId"], controller.instance_id);
+            }).await.unwrap();
+            controller.shutdown().await.unwrap();
         }).await;
     }
 
