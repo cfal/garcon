@@ -1,0 +1,16 @@
+{
+  "module": "common/chat-activity.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-activity.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isChatActivityStatus",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 12,
+  "sha256": "777571a77f67e90c1757a9f9e07c490a55d55b951e78091dbe6ce14f854bfc11"
+}

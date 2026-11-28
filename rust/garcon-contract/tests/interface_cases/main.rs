@@ -5,6 +5,12 @@
 //! match here. One file per recorded module.
 
 mod bun;
+mod chat_activity;
+mod chat_boards;
+mod chat_parentage;
+mod chat_tag_mutations;
+mod command_output;
+mod command_request_validation;
 mod domain_wire;
 mod file_contracts;
 mod gh_identity;

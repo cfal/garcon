@@ -1,0 +1,77 @@
+{
+  "module": "common/chat-boards.ts",
+  "tests": [
+    "common/__tests__/chat-boards.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-boards.jsonl",
+  "guards": [
+    {
+      "fn": "chatMatchesBoardColumn",
+      "argument": 1,
+      "guard": "rust/garcon-contract/tests/interface_cases/chat-board-input-guards.ts#boardColumnRule",
+      "dropped": 20,
+      "kept": 33
+    },
+    {
+      "fn": "tagSetMatchesBoardColumn",
+      "argument": 1,
+      "guard": "rust/garcon-contract/tests/interface_cases/chat-board-input-guards.ts#boardColumnRule",
+      "dropped": 20,
+      "kept": 33
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "isChatBoardId",
+      "argument": 0
+    },
+    {
+      "fn": "isChatBoardColumnId",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeChatBoardColumn",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeChatBoard",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeChatBoardCatalog",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeChatBoardMutationResponse",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeCreateChatBoardResponse",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeBoardTagInput",
+      "argument": 0
+    },
+    {
+      "fn": "chatMatchesBoardColumn",
+      "argument": 0
+    },
+    {
+      "fn": "chatMatchesBoardColumn",
+      "argument": 1
+    },
+    {
+      "fn": "tagSetMatchesBoardColumn",
+      "argument": 1
+    },
+    {
+      "fn": "calculateChatTagTransition",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 513,
+  "sha256": "81ff6b43f9a89bb4c18f3e6ec68ea7906dcb52a0af60f091cc3e71c786a251a0"
+}

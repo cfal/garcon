@@ -480,6 +480,7 @@ dependencies = [
  "async-trait",
  "garcon-cases",
  "garcon-js",
+ "icu_normalizer",
  "indexmap",
  "regex",
  "serde",

@@ -594,3 +594,25 @@ Consequences: An integration can be built and tested with
 exist. `garcon-server/tests/workspace_structure.rs` fails on a dependency an
 integration may not have. An integration unit is done only when conformance
 and every SACS module registered for its driver pass in the worker quadrant.
+
+## ADR-028: The manager approves known differences that are clear bugs
+
+Status: accepted (2026-11-28)
+
+Context: ADR-015 requires the user's approval for every known difference.
+Recording at the unit level, with trap inputs, surfaces many small ones: a
+lookup that reaches inherited Object properties for the key `__proto__`, a
+string with a lone surrogate, which a Rust string cannot hold. Each stopped a
+session until the user answered.
+
+Decision: The user has authorized the manager to decide where the original's
+behavior is a clear bug or an accident of JavaScript that the port cannot or
+should not reproduce. The manager approves such a case as a known difference,
+and its entry records who approved it and why. Anything that is not clearly a
+bug still goes to the user: a behavior a client could rely on, a difference
+in an error a user sees, or a choice between two defensible behaviors.
+Sessions still never add an entry on their own.
+
+Consequences: Supersedes the approval rule of ADR-015; the rest of it stands.
+Every known difference, whoever approved it, is listed for the user's review
+at the lift.
