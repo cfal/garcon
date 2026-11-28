@@ -1,0 +1,6 @@
+{"fn":"sanitizeClaudeProjectPath","args":["/garcon/.worktrees/simplify"]}
+{"fn":"sanitizeClaudeProjectPath","args":["/tmp/a b_c:d~e/f.g"]}
+{"fn":"sanitizeClaudeProjectPath","args":["/tmp/na\u00efve/\u9879\u76ee"]}
+{"fn":"sanitizeClaudeProjectPath","args":["/tmp/claude-long-hash-vector/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]}
+{"fn":"sanitizeClaudeProjectPath","args":["/repo/\ud83d\ude00"]}
+{"fn":"sanitizeClaudeProjectPath","args":[""]}

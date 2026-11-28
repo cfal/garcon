@@ -424,6 +424,7 @@ async fn refuses_cross_origin_redirects_before_sending_bearer_or_api_key_request
 
 struct Request {
     line: String,
+    headers: HeaderMap,
     body: Vec<u8>,
 }
 
@@ -431,23 +432,27 @@ async fn take_request(socket: &mut TcpStream) -> Request {
     let mut reader = BufReader::new(socket);
     let mut line = String::new();
     reader.read_line(&mut line).await.unwrap();
-    let mut length = 0;
+    let mut headers = HeaderMap::new();
     loop {
         let mut field = String::new();
         assert_ne!(reader.read_line(&mut field).await.unwrap(), 0);
         if field == "\r\n" {
             break;
         }
-        if let Some((name, value)) = field.split_once(':')
-            && name.eq_ignore_ascii_case("content-length")
-        {
-            length = value.trim().parse().unwrap();
-        }
+        let (name, value) = field.split_once(':').unwrap();
+        headers.append(
+            header::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+            HeaderValue::from_str(value.trim()).unwrap(),
+        );
     }
+    let length = headers
+        .get(header::CONTENT_LENGTH)
+        .map_or(0, |value| value.to_str().unwrap().parse().unwrap());
     let mut body = vec![0; length];
     reader.read_exact(&mut body).await.unwrap();
     Request {
         line: line.trim_end().into(),
+        headers,
         body,
     }
 }
@@ -462,6 +467,92 @@ async fn reply(socket: &mut TcpStream, status: &str, content_type: &str, body: &
     );
     socket.write_all(response.as_bytes()).await.unwrap();
     socket.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn sends_bodyless_get_and_raw_bytes_with_the_shared_defaults() {
+    const TEST: &str =
+        "shared::provider_http::tests::sends_bodyless_get_and_raw_bytes_with_the_shared_defaults";
+    if env::var_os(MODE).is_none() {
+        run_child(child_command(TEST, "isolated", "")).await;
+        return;
+    }
+    let manifest: serde_json::Value =
+        garcon_js::json::from_str(include_str!("../../../../../package.json")).unwrap();
+    let expected_user_agent = format!("Garcon/{}", manifest["version"].as_str().unwrap());
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let (observed, wait_for_event) = tokio::sync::oneshot::channel();
+    let bytes = b"\0\xff\n";
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let request = take_request(&mut socket).await;
+        assert_eq!(request.line, "GET /global/event HTTP/1.1");
+        assert!(request.body.is_empty());
+        assert_eq!(request.headers[USER_AGENT], expected_user_agent.as_str());
+        assert_eq!(request.headers[ACCEPT], "text/event-stream");
+        assert_eq!(request.headers[ACCEPT_ENCODING], "gzip, deflate, br, zstd");
+        assert_eq!(request.headers[CONNECTION], "keep-alive");
+        socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 16\r\nConnection: close\r\n\r\ndata: event\n\n").await.unwrap();
+        wait_for_event.await.unwrap();
+        socket.write_all(b":\n\n").await.unwrap();
+        socket.shutdown().await.unwrap();
+
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let request = take_request(&mut socket).await;
+        assert_eq!(request.line, "PATCH /session HTTP/1.1");
+        assert_eq!(request.body, bytes);
+        assert_eq!(request.headers[CONTENT_TYPE], "application/octet-stream");
+        reply(
+            &mut socket,
+            "202 Accepted",
+            "application/json",
+            r#"{"accepted":true}"#,
+        )
+        .await;
+    });
+    let mut headers = HeaderMap::new();
+    headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
+    headers.insert(
+        USER_AGENT,
+        HeaderValue::from_static("not-the-release-agent"),
+    );
+    let response = send(
+        Method::GET,
+        &format!("{origin}/global/event"),
+        headers,
+        None,
+    )
+    .await
+    .unwrap();
+    let mut observed = Some(observed);
+    read_sse(response, |data| {
+        assert_eq!(data, "event");
+        observed.take().unwrap().send(()).unwrap();
+        Ok(())
+    })
+    .await
+    .unwrap();
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    let response = send(
+        Method::PATCH,
+        &format!("{origin}/session"),
+        headers,
+        Some(bytes.to_vec()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert_eq!(
+        response.json::<serde_json::Value>().await.unwrap(),
+        serde_json::json!({"accepted": true})
+    );
+    server.await.unwrap();
 }
 
 #[tokio::test]

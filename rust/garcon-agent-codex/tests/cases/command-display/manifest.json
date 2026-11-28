@@ -1,0 +1,13 @@
+{
+  "module": "server-agents/codex/src/agents/codex/app-server/command-display.ts",
+  "tests": [
+    "server-agents/codex/src/agents/codex/app-server/__tests__/command-display.test.js"
+  ],
+  "inputs": "../../../home/ubuntu/tmp/agent-codex/command-display-inputs.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 92,
+  "sha256": "da55a16ddac685dc88fabc607d9ca586ec7f204a3d561722bae1af53468ebf79"
+}

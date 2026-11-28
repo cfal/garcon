@@ -9,7 +9,8 @@ use http::{HeaderValue, Response, StatusCode, header};
 use serde::Serialize;
 
 use crate::domain_error::{as_domain_error, transcript_unavailable_message};
-use crate::errors::{ErrorInput, as_agent_call_error, js_string};
+use crate::errors::{ErrorInput, js_string};
+use crate::executor_disconnect::as_agent_call_error;
 use crate::log::{Logger, ScopedLogger, create_logger};
 
 pub const DEFAULT_VALIDATION_ERROR_CODE: &str = "VALIDATION_FAILED";
