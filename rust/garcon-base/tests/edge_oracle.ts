@@ -34,6 +34,16 @@ export function bearerFixture(authorization: string | null) {
   return getTokenFromRequest(new Request("http://localhost/", { headers }));
 }
 
+export function duplicateJsonBodyFixture(contentTypes: string[], body: string) {
+  const headers: [string, string][] = contentTypes.map(value => ["Content-Type", value]);
+  return parseJsonBody(new Request("http://localhost/", { method: "POST", body, headers }));
+}
+
+export function duplicateBearerFixture(values: string[]) {
+  const headers: [string, string][] = values.map(value => ["Authorization", value]);
+  return getTokenFromRequest(new Request("http://localhost/", { headers }));
+}
+
 export function jsonErrorFixture(
   error: string, status: number, code?: string, retryable?: boolean, details?: string,
 ) {
