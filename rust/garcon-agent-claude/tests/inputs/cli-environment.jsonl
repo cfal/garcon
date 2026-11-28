@@ -1,0 +1,4 @@
+{"fn":"buildWithEnvironment","args":["sonnet[1m]",{"CLAUDECODE":"nested","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"240000","KEEP":"fixture"},{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000","SYNTHETIC_TOKEN":"fixture"}]}
+{"fn":"buildWithEnvironment","args":["sonnet[300k]",{"CLAUDECODE":"nested","CLAUDE_CODE_AUTO_COMPACT_WINDOW":"240000","KEEP":"fixture"},{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"250000","SYNTHETIC_TOKEN":"fixture"}]}
+{"fn":"buildWithEnvironment","args":["",{"CLAUDECODE":"nested"},{"CLAUDECODE":"explicit","KEEP":"\u00a0"}]}
+{"fn":"buildWithEnvironment","args":["sonnet[0k]",{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":"240000"}]}
