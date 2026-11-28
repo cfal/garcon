@@ -1,0 +1,35 @@
+{"fn":"jsonBodyFixture","args":[null,"garbage"]}
+{"fn":"jsonBodyFixture","args":["text/plain","garbage"]}
+{"fn":"jsonBodyFixture","args":["application/problem+json","garbage"]}
+{"fn":"jsonBodyFixture","args":["APPLICATION/JSON; charset=UTF-8","\ufeff[1,null,\"\u00e9\"]"]}
+{"fn":"jsonBodyFixture","args":["application/json","null"]}
+{"fn":"jsonBodyFixture","args":["application/json",null]}
+{"fn":"jsonBodyFixture","args":["application/json"," \n"]}
+{"fn":"jsonBodyFixture","args":["application/json","{\"broken\":}"]}
+{"fn":"bearerFixture","args":[null]}
+{"fn":"bearerFixture","args":["bearer test"]}
+{"fn":"bearerFixture","args":["Bearer test"]}
+{"fn":"bearerFixture","args":["Bearer  fixture"]}
+{"fn":"bearerFixture","args":["Bearer "]}
+{"fn":"bearerFixture","args":["  Bearer test\t"]}
+{"fn":"jsonErrorFixture","args":["synthetic error",404]}
+{"fn":"jsonErrorFixture","args":["synthetic failure",500]}
+{"fn":"jsonErrorFixture","args":["retry later",429,"RATE_LIMITED",true,"fixture details"]}
+{"fn":"jsonErrorFixture","args":["invalid status",600]}
+{"fn":"jsonErrorFixture","args":["bad number",{"$":"number","value":"NaN"}]}
+{"fn":"unknownHttpErrorFixture","args":[{"kind":"call","outcome":"not-dispatched","code":"EXECUTOR_BUSY","message":"busy"}]}
+{"fn":"unknownHttpErrorFixture","args":[{"kind":"call","outcome":"rejected","code":"OPERATION_UNSUPPORTED","message":"unavailable"}]}
+{"fn":"unknownHttpErrorFixture","args":[{"kind":"integration","code":"OPERATION_UNSUPPORTED","message":"unavailable","retryable":false}]}
+{"fn":"unknownHttpErrorFixture","args":[{"kind":"integration","code":"TRANSCRIPT_UNAVAILABLE","message":"private detail","retryable":true}]}
+{"fn":"unknownHttpErrorFixture","args":[{"kind":"integration","code":"TRANSCRIPT_UNAVAILABLE","message":"private detail","retryable":false}]}
+{"fn":"unknownHttpErrorFixture","args":[{"kind":"integration","code":"BINARY_NOT_FOUND","message":"binary not found","retryable":true}]}
+{"fn":"unknownHttpErrorFixture","args":[{"kind":"domain","status":500,"code":"INTERNAL_ERROR","message":"known failure","retryable":false}]}
+{"fn":"unknownHttpErrorFixture","args":[{"kind":"error","message":"untyped failure"}]}
+{"fn":"unknownHttpErrorFixture","args":[{"kind":"error","message":"invalid input"},400]}
+{"fn":"unknownHttpErrorFixture","args":[{"kind":"unknown","value":[true,null,123]},400]}
+{"fn":"runtimeProofFixture","args":[{"identity":{"schemaVersion":1,"instanceId":"fixture","workspaceDir":"/fixture","startedAt":"1970-01-01T00:00:00.000Z"},"localCapability":"garcon_local_abcdefghijklmnopqrstuvwxyz_1234567890-ABCDE"},"http://localhost/probe?challenge=abcdefghijklmnopqrstuvwxyz_1234567890-ABCDE&challenge=invalid"]}
+{"fn":"runtimeProofFixture","args":[{"identity":{"schemaVersion":1,"instanceId":"fixture","workspaceDir":"/fixture","startedAt":"1970-01-01T00:00:00.000Z"},"localCapability":"garcon_local_abcdefghijklmnopqrstuvwxyz_1234567890-ABCDE"},"http://localhost/probe?challenge=&challenge=abcdefghijklmnopqrstuvwxyz_1234567890-ABCDE"]}
+{"fn":"terminalFrameFixture","args":[{"type":"terminal-output","terminalId":"fixture","sequence":1,"data":"hello\n\u00e9","attachmentId":"test"}]}
+{"fn":"terminalFrameFixture","args":[{"type":"terminal-output","terminalId":"fixture","sequence":2,"data":"hello\n\u00e9","attachmentId":"test"},16000]}
+{"fn":"jsonBytesBodyFixture","args":["application/json","\ufeff[1,null,\"\u00e9\"]"]}
+{"fn":"jsonBytesBodyFixture","args":["application/json","[1.0,9007199254740993,1e21,1e-7]"]}

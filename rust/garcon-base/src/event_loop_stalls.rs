@@ -18,7 +18,7 @@ const REPORT_THRESHOLD_MS: f64 = 250.0;
 const RECENT_ACTIVITY_LIMIT: usize = 64;
 const REPORTED_ACTIVITY_LIMIT: usize = 8;
 
-fn timer_interval(interval_ms: f64) -> Duration {
+pub(crate) fn timer_interval(interval_ms: f64) -> Duration {
     const MAX_DELAY_MS: f64 = i32::MAX as f64;
     let fallback = Duration::from_millis(1);
     if !(1.0..=MAX_DELAY_MS).contains(&interval_ms) {

@@ -1,0 +1,13 @@
+{
+  "module": "server/common/errors.ts",
+  "tests": [
+    "server/common/__tests__/errors.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 124,
+  "sha256": "a9aa027ca736606af4bca18ef0486f9cb2665ea63d1fabc0db3a82c984e146d3"
+}

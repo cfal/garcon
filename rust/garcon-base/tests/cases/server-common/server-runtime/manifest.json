@@ -1,0 +1,11 @@
+{
+  "module": "server/common/server-runtime.ts",
+  "tests": [],
+  "inputs": "rust/garcon-base/tests/inputs/server-common/server-runtime.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 12,
+  "sha256": "33d34124cddf59a4dc5172006224c6b5fca48f853818ad6296704a23f0628d8a"
+}
