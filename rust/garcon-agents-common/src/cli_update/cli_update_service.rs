@@ -71,7 +71,7 @@ pub struct CliUpdateServiceOptions {
     pub label: String,
     pub definition: CliInstallDefinition,
     pub target: CliUpdateTargetResolver,
-    pub environment: Rc<dyn Fn() -> Environment>,
+    pub environment: Rc<dyn Fn() -> ExecutorResult<Environment>>,
     pub native_release: NativeReleaseResolver,
     pub on_updated: Option<Rc<dyn Fn()>>,
     pub logger: Rc<dyn AgentLogger>,
@@ -199,7 +199,7 @@ impl CliUpdateService {
     }
 
     async fn begin(&self) -> ExecutorResult<()> {
-        let env = (self.0.options.environment)();
+        let env = (self.0.options.environment)()?;
         let (_, installation) = self.resolve(&env).await?;
         let Some(action) = installation.update.clone() else {
             return Err(Box::new(AgentIntegrationError::new(
@@ -353,7 +353,7 @@ impl CliUpdateService {
     }
 
     async fn inspect(&self, refresh: bool) -> ExecutorResult<InstalledStatus> {
-        let env = (self.0.options.environment)();
+        let env = (self.0.options.environment)()?;
         let (target, installation) = self.resolve(&env).await?;
         let Some(paths) = &installation.paths else {
             return Ok(InstalledStatus {
