@@ -47,17 +47,17 @@ pub struct DataUrlParts<'a> {
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename = "document")]
-pub struct AttachmentDocumentBlock<'a> {
-    source: AttachmentDocumentSource<'a>,
+pub struct AttachmentDocumentBlock {
+    source: AttachmentDocumentSource,
     #[serde(skip_serializing_if = "Option::is_none")]
-    title: Option<&'a str>,
+    title: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename = "base64")]
-struct AttachmentDocumentSource<'a> {
+struct AttachmentDocumentSource {
     media_type: String,
-    data: &'a str,
+    data: String,
 }
 
 pub fn parse_attachment_data_url(data: Option<&str>) -> Option<DataUrlParts<'_>> {
@@ -138,14 +138,17 @@ pub fn document_attachments<'a>(
 
 pub fn attachment_document_block(
     attachment: AttachmentInput<'_>,
-) -> Option<AttachmentDocumentBlock<'_>> {
+) -> Option<AttachmentDocumentBlock> {
     let parts = parse_attachment_data_url(Some(attachment.data))?;
     Some(AttachmentDocumentBlock {
         source: AttachmentDocumentSource {
             media_type: parts.mime_type,
-            data: parts.base64,
+            data: parts.base64.to_owned(),
         },
-        title: attachment.name.filter(|name| !name.is_empty()),
+        title: attachment
+            .name
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned),
     })
 }
 

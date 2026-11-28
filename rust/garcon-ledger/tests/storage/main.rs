@@ -1,5 +1,9 @@
+mod anchor_cases;
+mod anchor_views;
+mod bulk_views;
 mod connection;
 mod error_diagnostics;
 mod failure_fences;
 mod input_cases;
+mod replay_views;
 mod store_behavior;

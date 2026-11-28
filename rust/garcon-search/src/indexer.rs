@@ -28,6 +28,9 @@ const CLEANUP_BATCHES: usize = 8;
 const CHECKPOINT_ATTEMPTS: usize = 5;
 const CHECKPOINT_DELAY: Duration = Duration::from_secs(1);
 
+#[cfg(test)]
+mod tests;
+
 pub type IndexerWorker = SearchWorker<IndexerRequest, IndexerEvent>;
 pub type IndexerSlot = WorkerSlot<IndexerRequest, IndexerEvent>;
 
@@ -70,6 +73,7 @@ struct ActiveSync {
 #[derive(Default)]
 struct Indexer {
     db: Option<Connection>,
+    open_generation: u64,
     syncs: HashMap<u64, ActiveSync>,
     duty_debt: Duration,
     closing: bool,
@@ -178,14 +182,22 @@ impl Indexer {
             .remove(&request_id)
             .ok_or_else(|| WorkerFailure::new("INVALID_INDEX_REQUEST", false))
     }
+
+    fn db_in(&self, generation: u64) -> IndexerResult<&Connection> {
+        if generation != self.open_generation {
+            return Err(unavailable());
+        }
+        self.db()
+    }
 }
 
 async fn pay_duty<T>(
     state: &RefCell<Indexer>,
+    generation: u64,
     work: impl FnOnce(&Connection) -> SearchSchemaResult<T>,
 ) -> IndexerResult<T> {
     let started = Instant::now();
-    let result = work(state.borrow().db()?).map_err(schema_failure);
+    let result = work(state.borrow().db_in(generation)?).map_err(schema_failure);
     let delay = {
         let mut state = state.borrow_mut();
         state.duty_debt += started.elapsed();
@@ -225,6 +237,7 @@ fn batch_ranges(rows: &[HistoricalSearchMessageRow]) -> Vec<Range<usize>> {
 
 async fn apply_rows(
     state: &RefCell<Indexer>,
+    generation: u64,
     sync: &mut ActiveSync,
     rows: &[HistoricalSearchMessageRow],
     advance_to: u64,
@@ -239,7 +252,7 @@ async fn apply_rows(
         } else {
             rows[batch.end - 1].ordinal
         };
-        let result = pay_duty(state, |db| {
+        let result = pay_duty(state, generation, |db| {
             insert_rows_batch(
                 db,
                 InsertRowsBatch {
@@ -253,7 +266,7 @@ async fn apply_rows(
         })
         .await?;
         sync.indexed_through = result.indexed_through;
-        state.borrow().db()?;
+        state.borrow().db_in(generation)?;
     }
     Ok(())
 }
@@ -265,10 +278,12 @@ async fn process(
     reply: &Reply<IndexerEvent>,
 ) -> IndexerResult<IndexerEvent> {
     use IndexerRequest::*;
+    let generation = state.borrow().open_generation;
     match request {
         Open(path) => {
             let mut state = state.borrow_mut();
             state.closing = false;
+            state.open_generation = state.open_generation.wrapping_add(1);
             state.syncs.clear();
             if let Some(db) = state.db.take() {
                 close_search_database(db).map_err(schema_failure)?;
@@ -343,7 +358,7 @@ async fn process(
                 if !sync.stale_rows_remaining {
                     break;
                 }
-                let deleted = pay_duty(state, |db| {
+                let deleted = pay_duty(state, generation, |db| {
                     delete_stale_rows_batch(
                         db,
                         DeleteStaleRows {
@@ -357,7 +372,7 @@ async fn process(
                 .await?;
                 deleted_rows += deleted;
                 sync.stale_rows_remaining = deleted > 0;
-                state.borrow().db()?;
+                state.borrow().db_in(generation)?;
             }
             let remaining = sync.stale_rows_remaining;
             state.borrow_mut().syncs.insert(request_id, sync);
@@ -376,7 +391,7 @@ async fn process(
                 return Err(WorkerFailure::new("INVALID_INDEX_FRAME", false));
             }
             sync.next_frame_index += 1;
-            apply_rows(state, &mut sync, &rows, advance_to).await?;
+            apply_rows(state, generation, &mut sync, &rows, advance_to).await?;
             let indexed_through = sync.indexed_through;
             state.borrow_mut().syncs.insert(request_id, sync);
             Ok(IndexerEvent::SyncProgress {
@@ -416,7 +431,10 @@ async fn process(
         }
         DeleteChat { chat_id } => {
             loop {
-                let batch = pay_duty(state, |db| delete_chat_batch(db, &chat_id, None)).await?;
+                let batch = pay_duty(state, generation, |db| {
+                    delete_chat_batch(db, &chat_id, None)
+                })
+                .await?;
                 if batch.deleted_rows > 0 {
                     emit(
                         reply,
@@ -433,7 +451,7 @@ async fn process(
             Ok(IndexerEvent::Ack)
         }
         Maintenance => {
-            pay_duty(state, run_idle_maintenance).await?;
+            pay_duty(state, generation, run_idle_maintenance).await?;
             Ok(IndexerEvent::Ack)
         }
         StatusSnapshot => {
@@ -442,7 +460,7 @@ async fn process(
         }
         Checkpoint => {
             for _ in 0..CHECKPOINT_ATTEMPTS {
-                if observe_wal_truncate(state.borrow().db()?)
+                if observe_wal_truncate(state.borrow().db_in(generation)?)
                     .map_err(schema_failure)?
                     .busy
                     == 0

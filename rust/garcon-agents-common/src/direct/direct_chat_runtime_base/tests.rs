@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 use garcon_contract::chat_modes::PermissionMode;
-use garcon_interface::producer::AgentRunFailureDetail;
+use garcon_interface::{execution::AgentExecutionAdmission, producer::AgentRunFailureDetail};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::LocalSet;
 
@@ -20,6 +20,7 @@ enum Completion {
 struct Observation {
     transcripts: RefCell<Vec<Vec<String>>>,
     completions: RefCell<VecDeque<Completion>>,
+    cancel_while_projecting: RefCell<Option<CancellationToken>>,
 }
 
 struct Protocol(Rc<Observation>);
@@ -29,6 +30,11 @@ impl DirectChatProtocol for Protocol {
     type Message = String;
 
     fn build_user_message(&self, command: &str, _: &[AgentAttachment]) -> String {
+        if command == "admitted then stopped"
+            && let Some(token) = self.0.cancel_while_projecting.take()
+        {
+            token.cancel();
+        }
         format!("user: {command}")
     }
 
@@ -73,8 +79,8 @@ fn runtime(
     limit: usize,
 ) -> (Rc<Observation>, Rc<DirectChatRuntimeBase<Protocol>>) {
     let observation = Rc::new(Observation {
-        transcripts: RefCell::default(),
         completions: RefCell::new(completions.into_iter().collect()),
+        ..Default::default()
     });
     let runtime = DirectChatRuntimeBase::new(
         DirectChatRuntimeBaseConfig {
@@ -285,5 +291,41 @@ async fn does_not_publish_an_answer_when_the_durable_session_disappears() {
         fixture.store.delete(&started.agent_session_id).await.unwrap();
         reply.send("orphan answer").unwrap();
         assert!(matches!(next_events(&mut events).await, (0, ProviderRunOutcome::Failed { error: Some(AgentRunFailureDetail { code, .. }) }) if code == "TRANSCRIPT_UNAVAILABLE"));
+    }).await;
+}
+
+struct Admission(CancellationToken);
+
+#[async_trait(?Send)]
+impl AgentExecutionAdmission for Admission {
+    fn signal(&self) -> &CancellationToken {
+        &self.0
+    }
+    async fn mark_started(&self) -> ExecutorResult<()> {
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn retains_an_input_when_admission_closes_after_its_durable_append() {
+    LocalSet::new().run_until(async {
+        let fixture = Fixture::new();
+        let (observed, runtime) = runtime(fixture.store.clone(), [Completion::Ready("OK"), Completion::Ready("next")], 8);
+        let (sink, mut events) = mpsc::unbounded_channel();
+        let started = runtime.start_session(DirectStartRequest { execution: request("run-first", "first message", sink.clone()), on_session_activated: None }).await.unwrap();
+        next_events(&mut events).await;
+        let admission = CancellationToken::new();
+        // The runtime projects the new user record only after the append succeeds.
+        observed.cancel_while_projecting.replace(Some(admission.clone()));
+        let mut execution = request("run-stopped", "admitted then stopped", sink.clone());
+        execution.execution_admission = Some(Rc::new(Admission(admission)));
+        let error = runtime.run_turn(DirectResumeRequest { execution, agent_session_id: started.agent_session_id.clone(), native_session: Some(started.native_session.clone()) }).await.unwrap_err();
+        assert_eq!(error.downcast_ref::<NamedError>().unwrap().name, "AbortError");
+        let durable = fixture.store.load(&started.agent_session_id).await.unwrap();
+        assert!(matches!(durable.records.last(), Some(DirectSessionRecordV1::User(record)) if record.content == "admitted then stopped"));
+        assert_eq!(observed.transcripts.borrow().len(), 1);
+        runtime.run_turn(DirectResumeRequest { execution: request("run-following", "following message", sink), agent_session_id: started.agent_session_id, native_session: Some(started.native_session) }).await.unwrap();
+        next_events(&mut events).await;
+        assert_eq!(observed.transcripts.borrow()[1], ["user: first message", "assistant: OK", "user: admitted then stopped", "user: following message"]);
     }).await;
 }

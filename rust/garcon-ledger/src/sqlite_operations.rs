@@ -4,7 +4,10 @@ use garcon_base::errors::{DiagnosticError, ErrorMetadata};
 use garcon_js::Number;
 use rusqlite::{Connection, Row, ffi};
 
-use crate::codec::StoredLedgerRow;
+use crate::{
+    codec::StoredLedgerRow,
+    write_timings::{LedgerWriteTimings, WritePhase},
+};
 
 mod result_code_names;
 use result_code_names::sqlite_code_name;
@@ -62,14 +65,39 @@ pub fn run_transaction<T>(
     db: &Connection,
     work: impl FnOnce() -> LedgerResult<T>,
 ) -> LedgerResult<T> {
-    let result = (|| {
+    run_transaction_with_timings(db, work, None)
+}
+
+pub(crate) fn run_timed_transaction<T>(
+    db: &Connection,
+    work: impl FnOnce() -> LedgerResult<T>,
+    timings: &mut LedgerWriteTimings<'_>,
+) -> LedgerResult<T> {
+    run_transaction_with_timings(db, work, Some(timings))
+}
+
+fn run_transaction_with_timings<T>(
+    db: &Connection,
+    work: impl FnOnce() -> LedgerResult<T>,
+    mut timings: Option<&mut LedgerWriteTimings<'_>>,
+) -> LedgerResult<T> {
+    let mut phase = |phase| {
+        if let Some(timings) = &mut timings {
+            timings.phase(phase);
+        }
+    };
+    let result: LedgerResult<T> = (|| {
+        phase(WritePhase::Begin);
         db.execute_batch("BEGIN IMMEDIATE").map_err(as_error)?;
+        phase(WritePhase::Statements);
         let result = work().map_err(as_error)?;
+        phase(WritePhase::Commit);
         db.execute_batch("COMMIT").map_err(as_error)?;
         Ok(result)
     })();
-    match result {
+    let result: LedgerResult<T> = match result {
         Err(cause) if !db.is_autocommit() => {
+            phase(WritePhase::Rollback);
             if let Err(failure) = db.execute_batch("ROLLBACK") {
                 Err(Box::new(TransactionFailure {
                     cause,
@@ -80,7 +108,9 @@ pub fn run_transaction<T>(
             }
         }
         result => result,
-    }
+    };
+    phase(WritePhase::Complete);
+    result
 }
 
 #[derive(Debug, thiserror::Error)]

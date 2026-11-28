@@ -369,6 +369,8 @@ fn missing_endpoint(side: Side, freshness: bool) -> &'static str {
 pub struct ComparisonOperations {
     registry: Rc<GitReviewDocumentRegistry>,
     allowed: Option<Rc<dyn ProjectPathAllowed>>,
+    #[cfg(test)]
+    pub(super) before_worktree_validation: Option<Box<dyn Fn()>>,
 }
 
 impl ComparisonOperations {
@@ -376,7 +378,12 @@ impl ComparisonOperations {
         registry: Rc<GitReviewDocumentRegistry>,
         allowed: Option<Rc<dyn ProjectPathAllowed>>,
     ) -> Self {
-        Self { registry, allowed }
+        Self {
+            registry,
+            allowed,
+            #[cfg(test)]
+            before_worktree_validation: None,
+        }
     }
 
     async fn resolve_root(
@@ -578,6 +585,10 @@ impl ComparisonOperations {
                 context.signal.cloned(),
             )
             .await?;
+            #[cfg(test)]
+            if let Some(before_validation) = &self.before_worktree_validation {
+                before_validation();
+            }
             if !is_working_tree_observation_current(&observation, context.trace, context.signal)
                 .await?
             {
