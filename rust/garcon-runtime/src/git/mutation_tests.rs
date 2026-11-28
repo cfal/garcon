@@ -446,7 +446,11 @@ async fn compares_status_refs_and_literal_selected_commits_without_losing_unrela
             );
             replace_committed_oid(&original, &mut expected[2]["ok"]).await;
             replace_committed_oid(&rust, &mut committed).await;
-            assert_eq!(committed, expected[2]["ok"]);
+            assert_eq!(
+                committed.to_string(),
+                expected[2]["ok"].to_string(),
+                "selected-file commit wire order"
+            );
             assert_eq!(committed["commitScope"], "selected-files");
             assert_eq!(committed["indexSynchronized"], true);
             assert_eq!(
@@ -461,6 +465,66 @@ async fn compares_status_refs_and_literal_selected_commits_without_losing_unrela
             assert_eq!(
                 rust.run(&["diff", "--cached", "--name-only"]).await,
                 "unrelated.txt\n"
+            );
+        })
+        .await;
+}
+
+async fn whole_index_commit_fixture() -> GitFixture {
+    let repo = GitFixture::with_commit().await;
+    repo.run(&["checkout", "-b", "side"]).await;
+    tokio::fs::write(repo.path().join("side.txt"), "from side\n")
+        .await
+        .unwrap();
+    repo.run(&["add", "side.txt"]).await;
+    repo.run(&["commit", "-m", "side change"]).await;
+    repo.run(&["checkout", "main"]).await;
+    repo.run(&["merge", "--no-ff", "--no-commit", "side"]).await;
+    tokio::fs::write(repo.path().join("a.txt"), "selected\n")
+        .await
+        .unwrap();
+    repo
+}
+
+#[tokio::test]
+async fn compares_the_whole_index_commit_wire_order_with_the_original() {
+    LocalSet::new()
+        .run_until(async {
+            let rust = whole_index_commit_fixture().await;
+            let original = whole_index_commit_fixture().await;
+            let options = |repo: &GitFixture| CommitOptions {
+                project_path: repo.path().to_str().unwrap().into(),
+                message: "finish merge".into(),
+                files: vec!["a.txt".into()],
+            };
+            let original_options = options(&original);
+            let expected = original_operations(
+                &original_options.project_path,
+                vec![request("commit", &original_options)],
+            )
+            .await;
+            let mut expected = expected[0]["ok"].clone();
+            let mut actual = serialized(
+                commit(&options(&rust), &TemporaryGitIndexEnvironment::default())
+                    .await
+                    .unwrap(),
+            );
+            replace_committed_oid(&original, &mut expected).await;
+            replace_committed_oid(&rust, &mut actual).await;
+            assert_eq!(
+                actual.to_string(),
+                expected.to_string(),
+                "whole-index commit wire order"
+            );
+            assert_eq!(actual["commitScope"], "whole-index");
+            assert_eq!(rust.run(&["show", "HEAD:side.txt"]).await, "from side\n");
+            assert_eq!(
+                rust.run(&["show", "-s", "--format=%P", "HEAD"])
+                    .await
+                    .trim_end()
+                    .split(' ')
+                    .count(),
+                2
             );
         })
         .await;

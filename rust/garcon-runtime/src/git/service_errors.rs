@@ -184,6 +184,8 @@ mod tests {
                 let cwd = fixture.path().to_str().unwrap();
                 let absent = fixture.path().join("absent");
                 let absent = absent.to_str().unwrap();
+                let not_a_directory = fixture.path().join("a.txt");
+                let not_a_directory = not_a_directory.to_str().unwrap();
                 let bin = fixture.path().join("bin");
                 tokio::fs::create_dir(&bin).await.unwrap();
                 let git = bin.join("git");
@@ -193,11 +195,18 @@ mod tests {
                     .unwrap();
 
                 let cases = [
-                    (cwd, Some(absent), false, true),
-                    (absent, None, false, false),
-                    (cwd, Some("bin"), false, false),
-                    (cwd, Some(absent), true, true),
-                    (cwd, Some("bin"), true, false),
+                    (cwd, Some(absent), false, None),
+                    (absent, None, false, Some(io::ErrorKind::NotFound)),
+                    (cwd, Some("bin"), false, Some(io::ErrorKind::NotFound)),
+                    (cwd, Some(absent), true, None),
+                    (cwd, Some("bin"), true, Some(io::ErrorKind::NotFound)),
+                    (
+                        not_a_directory,
+                        None,
+                        false,
+                        Some(io::ErrorKind::NotADirectory),
+                    ),
+                    (not_a_directory, Some(absent), true, None),
                 ];
                 let mut bun = Command::new("bun")
                     .arg(
@@ -229,9 +238,7 @@ mod tests {
                 let original: Vec<Value> = garcon_js::json::from_slice(&output.stdout).unwrap();
 
                 assert_eq!(original.len(), cases.len());
-                for ((cwd, path, worker, missing_executable), expected) in
-                    cases.into_iter().zip(original)
-                {
+                for ((cwd, path, worker, kind), expected) in cases.into_iter().zip(original) {
                     let base_environment = worker.then(|| [("PATH".into(), absent.into())].into());
                     let env = path
                         .filter(|path| !worker || *path != absent)
@@ -251,19 +258,20 @@ mod tests {
                         diagnostic_error_code(ErrorInput::Error(error.as_ref())),
                         expected["code"]
                     );
-                    if missing_executable {
-                        assert!(error.is::<NamedError>());
-                        assert_eq!(error.to_string(), expected["message"]);
-                    } else {
+                    if let Some(kind) = kind {
                         // Bun labels the native spawn error; Rust retains the I/O error itself.
                         assert_eq!(
                             expected["message"],
-                            "ENOENT: no such file or directory, posix_spawn 'git'"
+                            if kind == io::ErrorKind::NotADirectory {
+                                "ENOTDIR: not a directory, posix_spawn 'git'"
+                            } else {
+                                "ENOENT: no such file or directory, posix_spawn 'git'"
+                            }
                         );
-                        assert_eq!(
-                            error.downcast_ref::<io::Error>().unwrap().kind(),
-                            io::ErrorKind::NotFound
-                        );
+                        assert_eq!(error.downcast_ref::<io::Error>().unwrap().kind(), kind);
+                    } else {
+                        assert!(error.is::<NamedError>());
+                        assert_eq!(error.to_string(), expected["message"]);
                     }
                     let error = mapped(error);
                     assert_eq!(error.code.as_str(), expected["serviceCode"]);
