@@ -34,7 +34,7 @@ type WaitForEvent = Rc<
 type GetClient = Rc<dyn Fn() -> LocalBoxFuture<'static, ExecutorResult<Rc<dyn OpenCodeClient>>>>;
 type ConfirmEventDelivery =
     Rc<dyn Fn(ConfirmEventDeliveryInput) -> LocalBoxFuture<'static, ExecutorResult<()>>>;
-type HandleEvent = Rc<dyn Fn(Rc<dyn OpenCodeClient>, SseEvent)>;
+type HandleEvent = Rc<dyn Fn(Rc<dyn OpenCodeClient>, SseEvent) -> ExecutorResult<()>>;
 
 pub struct ConfirmEventDeliveryInput {
     pub client: Rc<dyn OpenCodeClient>,
@@ -349,7 +349,7 @@ impl OpenCodeGlobalEventListener {
             }
             self.arm_heartbeat(attempt);
             self.resolve_event_waiters(attempt.generation, &event);
-            (self.options.handle_event)(client.clone(), event);
+            (self.options.handle_event)(client.clone(), event)?;
             tokio::task::yield_now().await;
         }
         Ok(())

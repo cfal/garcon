@@ -40,6 +40,7 @@ pub struct OpenCodeRuntimeOptions {
     pub idle_retirement_delay_ms: Option<f64>,
     pub idle_retirement_check_interval_ms: Option<f64>,
     pub clock: Option<Rc<dyn Clock>>,
+    pub new_id: Option<Rc<dyn Fn() -> String>>,
     pub create_instance: Option<OpenCodeInstanceFactory>,
 }
 
