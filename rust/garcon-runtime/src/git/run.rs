@@ -495,9 +495,39 @@ pub async fn run_git_traced(
     trace: Option<&mut Vec<GitCommandTrace>>,
     options: GitCommandOptions,
 ) -> ExecutorResult<GitCommandResult> {
+    run_git_with_trace(
+        cwd,
+        args,
+        trace.map(|trace| move |entry| trace.push(entry)),
+        options,
+    )
+    .await
+}
+
+pub(super) async fn run_git_traced_shared(
+    cwd: &str,
+    args: Vec<String>,
+    trace: Option<&RefCell<Vec<GitCommandTrace>>>,
+    options: GitCommandOptions,
+) -> ExecutorResult<GitCommandResult> {
+    run_git_with_trace(
+        cwd,
+        args,
+        trace.map(|trace| move |entry| trace.borrow_mut().push(entry)),
+        options,
+    )
+    .await
+}
+
+async fn run_git_with_trace(
+    cwd: &str,
+    args: Vec<String>,
+    record: Option<impl FnOnce(GitCommandTrace)>,
+    options: GitCommandOptions,
+) -> ExecutorResult<GitCommandResult> {
     let started = Instant::now();
     let result = run_git(cwd, args.clone(), options).await;
-    if let Some(trace) = trace {
+    if let Some(record) = record {
         let failure = result
             .as_ref()
             .err()
@@ -506,7 +536,7 @@ pub async fn run_git_traced(
             Ok(result) => (&result.stdout[..], &result.stderr[..]),
             Err(_) => failure.map_or(("", ""), |error| (&error.stdout, &error.stderr)),
         };
-        trace.push(GitCommandTrace {
+        record(GitCommandTrace {
             args,
             duration_ms: math_round(started.elapsed().as_secs_f64() * 1000.0) as u64,
             stdout_bytes: stdout.len(),
@@ -642,7 +672,7 @@ pub async fn assert_git_repository(
     Ok(())
 }
 
-async fn directory_accessible(path: &str) -> bool {
+pub(super) async fn directory_accessible(path: &str) -> bool {
     #[cfg(unix)]
     {
         let path = path.to_owned();

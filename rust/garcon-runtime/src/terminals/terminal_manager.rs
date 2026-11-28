@@ -2,6 +2,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
+use std::ffi::OsString;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -420,21 +421,12 @@ impl TerminalManager {
             terminal_runtime_id: self.terminal_runtime_id().to_owned(),
             session_id: (self.0.options.new_id)().to_string(),
         });
-        let mut env: std::collections::BTreeMap<_, _> = std::env::vars_os().collect();
-        for (key, value) in [
-            ("GARCON_CONTROLLER_URL", ""),
-            ("TERM", "xterm-256color"),
-            ("COLORTERM", "truecolor"),
-            ("FORCE_COLOR", "3"),
-        ] {
-            env.insert(key.into(), value.into());
-        }
         let started = match self
             .spawn(PtyCommand {
                 file: self.0.user_shell.clone(),
                 args: Vec::new(),
                 cwd: cwd.clone(),
-                env,
+                env: pty_environment(std::env::vars_os()),
                 name: "xterm-256color".into(),
                 cols: 80,
                 rows: 24,
@@ -1087,6 +1079,22 @@ impl TerminalManager {
     }
 }
 
+fn pty_environment(
+    inherited: impl IntoIterator<Item = (OsString, OsString)>,
+) -> Vec<(OsString, OsString)> {
+    // CommandBuilder replaces environment keys case-insensitively on Windows.
+    let overrides = [
+        ("GARCON_CONTROLLER_URL", ""),
+        ("TERM", "xterm-256color"),
+        ("COLORTERM", "truecolor"),
+        ("FORCE_COLOR", "3"),
+    ];
+    inherited
+        .into_iter()
+        .chain(overrides.map(|(key, value)| (key.into(), value.into())))
+        .collect()
+}
+
 fn send(peer: &Peer, payload: Message) {
     peer.send_terminal_message(TerminalStreamServerMessage {
         payload,
@@ -1114,4 +1122,39 @@ pub(super) fn stopping() -> TerminalError {
         "Terminal executor is stopping.",
         503,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+
+    use super::pty_environment;
+
+    #[test]
+    fn pty_overrides_win_with_mixed_case_inherited_names() {
+        let inherited = [
+            ("Garcon_Controller_Url", "synthetic-credential"),
+            ("term", "dumb"),
+            ("colorterm", "none"),
+            ("force_color", "0"),
+        ]
+        .map(|(key, value)| (key.into(), value.into()));
+        let env = pty_environment(inherited);
+        for (key, expected) in [
+            ("GARCON_CONTROLLER_URL", ""),
+            ("TERM", "xterm-256color"),
+            ("COLORTERM", "truecolor"),
+            ("FORCE_COLOR", "3"),
+        ] {
+            let (actual_key, actual_value) = env
+                .iter()
+                .rev()
+                .find(|(name, _)| name.eq_ignore_ascii_case(OsStr::new(key)))
+                .unwrap();
+            assert_eq!(
+                (actual_key.as_os_str(), actual_value.as_os_str()),
+                (OsStr::new(key), OsStr::new(expected))
+            );
+        }
+    }
 }

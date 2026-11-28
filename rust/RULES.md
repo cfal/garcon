@@ -71,6 +71,13 @@ the user corrects how a port behaves, the correction is added under
   result: where slicing by code units leaves an unpaired surrogate in what the
   original returns, the port returns U+FFFD in its place and the case is
   listed with the reason "unpaired surrogate in a result".
+  Exception, before a durable write: where the original refuses an
+  ill-formed string before it writes (creating the account, changing the
+  username), the route refuses too, by asking
+  `garcon_js::json::contains_unpaired_surrogate_escape` about the raw body
+  and checking the parsed field for U+FFFD. The validator itself is unchanged
+  and a genuine U+FFFD still passes. A new route of this kind goes to the
+  manager first.
 - Prototype lookups (standing decision, 2026-11-28, ADR-028). Where the
   original indexes a plain object with an untrusted key and so returns an
   inherited member (`table["__proto__"]`, `"constructor"`, `"toString"`),

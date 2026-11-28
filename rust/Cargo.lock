@@ -652,6 +652,7 @@ name = "garcon-js"
 version = "0.0.0"
 dependencies = [
  "icu_collator",
+ "icu_properties",
  "ryu-js",
  "serde",
  "serde_json",
@@ -716,12 +717,14 @@ dependencies = [
  "indexmap",
  "libc",
  "portable-pty",
+ "regress",
  "rustix",
  "serde",
  "serde_json",
  "sha2",
  "tempfile",
  "thiserror 2.0.21",
+ "time",
  "tokio",
  "tokio-util",
  "uuid",

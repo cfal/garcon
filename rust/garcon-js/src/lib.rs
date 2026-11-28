@@ -10,6 +10,7 @@ pub mod js;
 pub mod json;
 pub mod optional_nullable;
 pub mod path;
+pub mod unicode;
 pub mod utf16;
 
 pub use clock::{

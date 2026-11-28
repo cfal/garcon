@@ -1,0 +1,5 @@
+{"fn":"parseTicketErrorCode","args":["TICKET_NOT_FOUND"]}
+{"fn":"parseTicketErrorCode","args":["INTERNAL_ERROR"]}
+{"fn":"parseTicketErrorCode","args":[null]}
+{"fn":"parseTicketCommandOutcome","args":[{"type":"ticket-command-outcome","command":"read","ticketId":"G-1","requestViewId":"00000000-0000-4000-8000-000000000001","requestOrdinal":1,"status":"ok","revision":1}]}
+{"fn":"parseTicketCommandOutcome","args":[{"type":"ticket-command-outcome","command":"list","requestViewId":"00000000-0000-4000-8000-000000000001","requestOrdinal":1,"status":"error","errorCode":"TICKET_NOT_FOUND"}]}
