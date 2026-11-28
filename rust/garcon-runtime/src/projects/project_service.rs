@@ -15,7 +15,7 @@ use garcon_interface::execution_runtime::{
 use garcon_interface::resources::{ExecutorCallOptions, ExecutorResult};
 use garcon_js::{path::native, trim};
 
-use crate::files::errors::check_cancelled;
+use crate::cancellation::check_cancelled;
 use crate::git::run::{read_only_git_options, run_git};
 use crate::git::types::GitCommandOptions;
 

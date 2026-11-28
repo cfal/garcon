@@ -113,9 +113,6 @@ pub struct AssetCache {
     budget: usize,
 }
 
-/// Compresses `body` without holding up other tasks on this runtime worker:
-/// large application chunks take tens of milliseconds, which would otherwise
-/// delay every connection, WebSocket relays included, scheduled on it.
 /// Compresses without stalling the async workers on the multi-threaded runtime.
 pub fn compress_off_runtime(encoding: Encoding, body: &Bytes) -> std::io::Result<Bytes> {
     let multi_thread = tokio::runtime::Handle::try_current()

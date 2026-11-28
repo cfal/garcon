@@ -15,6 +15,10 @@ use garcon_js::{Number, clock::to_iso_string, collation::Collation, path::native
 use tokio::fs;
 use tokio_util::sync::CancellationToken;
 
+use crate::cancellation::check_cancelled;
+
+use super::errors::is_skippable_entry_error;
+
 const MAX_ENTRIES: usize = 10_000;
 const MAX_LIST_BYTES: usize = 1024 * 1024;
 const DIRECTORY_READ_CONCURRENCY: usize = 16;
@@ -106,8 +110,6 @@ async fn read_directory(
     selection: Selection,
     signal: Option<&CancellationToken>,
 ) -> ExecutorResult<Vec<FileTreeEntry>> {
-    use super::errors::check_cancelled;
-
     check_cancelled(signal)?;
     let mut handle = fs::read_dir(directory).await?;
     let mut entries = Vec::new();
@@ -203,8 +205,6 @@ async fn read_entry(
     signal: Option<&CancellationToken>,
     name: &str,
 ) -> ExecutorResult<Option<FileTreeEntry>> {
-    use super::errors::{check_cancelled, is_skippable_entry_error};
-
     check_cancelled(signal)?;
     let candidate = native::join(&[directory, name]);
     let stat: ExecutorResult<_> = async {
@@ -292,8 +292,6 @@ impl Listing {
         signal: Option<&'a CancellationToken>,
     ) -> LocalBoxFuture<'a, ExecutorResult<()>> {
         Box::pin(async move {
-            use super::errors::{check_cancelled, is_skippable_entry_error};
-
             let mut handle = fs::read_dir(directory).await?;
             while let Some(entry) = handle.next_entry().await? {
                 check_cancelled(signal)?;

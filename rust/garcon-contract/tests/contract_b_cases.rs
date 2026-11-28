@@ -67,6 +67,62 @@ fn typed_argument<T: DeserializeOwned>(
 }
 
 #[test]
+fn garcon_command_text_recordings() {
+    use garcon_contract::garcon_command_text::normalize_garcon_command_body;
+    assert_recording("garcon-command-text", |function, args| match function {
+        "normalizeGarconCommandBody" => Ok(json!(normalize_garcon_command_body(required_text(
+            function,
+            args.first()
+        )?))),
+        _ => Err(CaseError::unhandled(function)),
+    });
+}
+
+#[test]
+fn garcon_agent_request_recordings() {
+    use garcon_contract::garcon_agent_request::parse_garcon_agent_request_options;
+    assert_recording("garcon-agent-request", |function, args| match function {
+        "parseGarconAgentRequestOptions" => Ok(json!(parse_garcon_agent_request_options(
+            unknown(function, args.first())?.as_ref()
+        ))),
+        _ => Err(CaseError::unhandled(function)),
+    });
+}
+
+#[test]
+fn agent_start_progress_recordings() {
+    use garcon_contract::agent_start_progress::parse_agent_start_progress_notice;
+    assert_recording("agent-start-progress", |function, args| match function {
+        "parseAgentStartProgressNotice" => Ok(json!(parse_agent_start_progress_notice(
+            unknown(function, args.first())?.as_ref()
+        ))),
+        _ => Err(CaseError::unhandled(function)),
+    });
+}
+
+#[test]
+fn startup_progress_constants_match_bun() {
+    use garcon_contract::agent_start_progress::*;
+    let original = pinned_bun_stdout(
+        r#"import * as progress from "./common/agent-start-progress.ts";
+           console.log(JSON.stringify(progress.AGENT_START_PROGRESS_PHASES));
+           console.log(JSON.stringify(progress.AGENT_START_PROGRESS_CONTENT));"#,
+        &[],
+    );
+    let lines: Vec<_> = original.lines().collect();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(
+        serde_json::to_string(&AGENT_START_PROGRESS_PHASES).unwrap(),
+        lines[0]
+    );
+    let content: serde_json::Map<String, Value> = AGENT_START_PROGRESS_CONTENT
+        .into_iter()
+        .map(|(phase, text)| (phase.as_str().to_owned(), json!(text)))
+        .collect();
+    assert_eq!(serde_json::to_string(&content).unwrap(), lines[1]);
+}
+
+#[test]
 fn start_selection_recordings() {
     use garcon_contract::settings::RemoteExecutionDefaults;
     use garcon_contract::start_selection::*;

@@ -30,6 +30,8 @@ use serde_json::Value;
 use tokio::fs;
 use tokio_util::sync::CancellationToken;
 
+use crate::cancellation::check_cancelled;
+
 use super::directory_creation::{
     create_child_directory, descriptor_paths_directory, directory_creation_unsupported,
 };
@@ -37,9 +39,7 @@ use super::directory_reader::{
     file_breadcrumbs, list_project_files, read_directory_candidates, read_file_directory,
     relative_file_path,
 };
-use super::errors::{
-    check_cancelled, directory_creation_error, file_operation_error, file_revision_conflict,
-};
+use super::errors::{directory_creation_error, file_operation_error, file_revision_conflict};
 use super::file_revision::{
     VersionedReadOptions, file_too_large, get_file_lock_key, get_file_revision_or_missing,
     read_versioned_file, write_versioned_text_file,

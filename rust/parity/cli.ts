@@ -10,7 +10,7 @@ import { bunCheck, pinnedBunVersion } from './src/bun-version.js';
 import { commandBuild, originalBuild, type ServerBuild } from './src/environment.js';
 import { mergeRuns, readGolden, writeGolden } from './src/golden.js';
 import { readKnownDifferences, scenarioKnownDifferencesForBuild } from './src/known-differences.js';
-import { compareScenario, renderReport, replaySummary, type ScenarioResult } from './src/report.js';
+import { compareScenario, renderReport, replayPassed, replaySummary, type ScenarioResult } from './src/report.js';
 import { runScenario } from './src/runner.js';
 import { loadScenarios } from './src/scenario.js';
 import { unitCli, UNIT_USAGE } from './src/unit/cli.js';
@@ -20,7 +20,7 @@ const repoRoot = resolve(import.meta.dir, '../..');
 
 const usage = `Usage:
   bun rust/parity/cli.ts record [--scenario <name>] [--any-bun]
-  bun rust/parity/cli.ts replay [--build "<command>"] [--label <name>] [--scenario <name>] [--report <path>]
+  bun rust/parity/cli.ts replay [--build "<command>"] [--label <name>] [--scenario <name>] [--report <path>] [--allow-unported]
   bun rust/parity/cli.ts unit record <module.ts> --tests <test file>... [--inputs <file.jsonl>] [--guard <function>:<argument index>=<guard>]... [--json <function>:<argument index>]... [--instances] [--any-bun] --out <dir>
   bun rust/parity/cli.ts unit replay <dir>
 
@@ -29,7 +29,8 @@ record   Runs the original twice per scenario and writes rust/parity/golden/.
          --any-bun is given.
 replay   Runs a build (default: the original) against the recordings, writes
          the report when --report is given, and exits non-zero on any
-         mismatch. On another Bun than the pinned one it warns.
+         mismatch. Unported and blocked cases also fail unless --allow-unported
+         is given. On another Bun than the pinned one it warns.
 
 Suite traces (ADR-020):
 ${TRACES_USAGE}
@@ -50,7 +51,7 @@ async function record(scenarioName: string | undefined): Promise<void> {
   }
 }
 
-async function replay(build: ServerBuild, label: string, scenarioName: string | undefined, reportPath: string | undefined, compareKnown: boolean): Promise<boolean> {
+async function replay(build: ServerBuild, label: string, scenarioName: string | undefined, reportPath: string | undefined, compareKnown: boolean, allowUnported: boolean): Promise<boolean> {
   const results: ScenarioResult[] = [];
   const known = compareKnown ? scenarioKnownDifferencesForBuild(await readKnownDifferences(repoRoot), label) : [];
   const scenarios = await loadScenarios(repoRoot, scenarioName);
@@ -68,7 +69,7 @@ async function replay(build: ServerBuild, label: string, scenarioName: string | 
   const report = renderReport(label, results, measuresFallback);
   if (reportPath) await writeFile(resolve(repoRoot, reportPath), report);
   console.log(replaySummary(results, report));
-  return results.every((result) => result.cases.every((entry) => entry.difference === null) && !result.missingGolden);
+  return replayPassed(results, allowUnported);
 }
 
 const args = Bun.argv.slice(2);
@@ -83,6 +84,7 @@ const { positionals, values } = parseArgs({
     build: { type: 'string' },
     label: { type: 'string' },
     report: { type: 'string' },
+    'allow-unported': { type: 'boolean' },
     // Records on another Bun than the pinned one.
     'any-bun': { type: 'boolean' },
     help: { type: 'boolean', short: 'h' },
@@ -106,6 +108,6 @@ if (command === 'record') {
 } else {
   const build = values.build ? commandBuild(values.build) : originalBuild();
   const label = values.label ?? build.label;
-  const passed = await replay(build, label, values.scenario, values.report, Boolean(values.build));
+  const passed = await replay(build, label, values.scenario, values.report, Boolean(values.build), values['allow-unported'] === true);
   process.exit(passed ? 0 : 1);
 }

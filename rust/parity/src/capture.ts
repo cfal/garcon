@@ -70,9 +70,15 @@ export interface CapturedSocket {
   close: { code: number; reason: string } | null;
   // The HTTP response to a refused upgrade, which WebSocket clients hide.
   refusal: { status: number; contentType: string | null; body: string } | null;
+  rawHeaders?: Headers;
 }
 
 export type Capture = CapturedExchange | CapturedSocket;
+
+export function isUnported(capture: Capture): boolean {
+  const status = 'status' in capture ? capture.status : capture.refusal?.status;
+  return status === 501 && capture.rawHeaders?.get('x-garcon-rs-unported') === '1';
+}
 
 function base64Url(input: string | Buffer): string {
   return Buffer.from(input).toString('base64url');
@@ -147,6 +153,14 @@ export function decodeBody(bytes: Uint8Array, encoding: string | null): Uint8Arr
   }
 }
 
+function incomingHeaders(response: IncomingMessage): Headers {
+  const headers = new Headers();
+  for (let index = 0; index < response.rawHeaders.length; index += 2) {
+    headers.append(response.rawHeaders[index], response.rawHeaders[index + 1]);
+  }
+  return headers;
+}
+
 async function rawHttpResponse(url: URL, method: string, headers: string[], body: string | undefined) {
   // Fetch combines duplicate fields; node:http's flat header array writes
   // them as separate lines. This mode must supply its own Host and framing.
@@ -157,13 +171,9 @@ async function rawHttpResponse(url: URL, method: string, headers: string[], body
     outgoing.on('error', reject);
     outgoing.end(body);
   });
-  const responseHeaders = new Headers();
-  for (let index = 0; index < response.rawHeaders.length; index += 2) {
-    responseHeaders.append(response.rawHeaders[index], response.rawHeaders[index + 1]);
-  }
   const chunks: Uint8Array[] = [];
   for await (const chunk of response) chunks.push(chunk);
-  return { status: response.statusCode ?? 0, headers: responseHeaders, bytes: Buffer.concat(chunks) };
+  return { status: response.statusCode ?? 0, headers: incomingHeaders(response), bytes: Buffer.concat(chunks) };
 }
 
 async function captureHttp(server: StartedServer, step: HttpStep, placeholders: Placeholders): Promise<CapturedExchange> {
@@ -236,7 +246,7 @@ function parseFrame(data: unknown): Json {
 // Repeats a refused upgrade as a raw HTTP/1.1 request to record the status and
 // body the WebSocket client does not expose. A refused upgrade has no side
 // effects, so sending it twice is safe.
-function captureRefusal(url: string, protocols: string[]): Promise<CapturedSocket['refusal']> {
+function captureRefusal(url: string, protocols: string[]): Promise<Pick<CapturedSocket, 'refusal' | 'rawHeaders'>> {
   return new Promise((resolve, reject) => {
     const outgoing = httpRequest(url.replace(/^ws/, 'http'), {
       headers: {
@@ -252,12 +262,15 @@ function captureRefusal(url: string, protocols: string[]): Promise<CapturedSocke
       let body = '';
       response.setEncoding('utf8');
       for await (const chunk of response) body += chunk;
-      resolve({ status: response.statusCode ?? 0, contentType: response.headers['content-type'] ?? null, body });
+      resolve({
+        refusal: { status: response.statusCode ?? 0, contentType: response.headers['content-type'] ?? null, body },
+        rawHeaders: incomingHeaders(response),
+      });
     });
     // An upgrade that succeeds on the second attempt is recorded as such.
     outgoing.on('upgrade', (response, socket) => {
       socket.destroy();
-      resolve({ status: response.statusCode ?? 101, contentType: null, body: '' });
+      resolve({ refusal: { status: response.statusCode ?? 101, contentType: null, body: '' } });
     });
     outgoing.on('timeout', () => outgoing.destroy(new Error('The refused upgrade did not complete')));
     outgoing.on('error', reject);
@@ -315,14 +328,14 @@ async function captureWebSocket(server: StartedServer, step: WebSocketStep, plac
   });
   const protocol = socket.protocol;
   if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close(1000);
-  const refusal = opened ? null : await captureRefusal(url, protocols);
+  const refusal = opened ? { refusal: null } : await captureRefusal(url, protocols);
   return {
     request: { path: step.path, auth, protocols: step.protocols ?? ['(default)'] },
     opened,
     protocol,
     frames: step.frames !== undefined ? frames.slice(0, step.frames) : frames,
     close: opened ? close : null,
-    refusal,
+    ...refusal,
   };
 }
 
