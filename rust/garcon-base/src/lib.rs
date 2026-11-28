@@ -25,6 +25,7 @@ pub mod runtime_proof;
 pub mod server_runtime;
 pub mod stored_json;
 pub mod terminal_framing;
+pub mod ticket_error;
 pub mod unavailable_service;
 pub mod unhandled_rejection_policy;
 pub mod user_shell;

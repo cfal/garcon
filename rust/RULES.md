@@ -42,6 +42,18 @@ the user corrects how a port behaves, the correction is added under
 - Silence a lint with `#[expect(lint, reason = "...")]`, not `#[allow]`.
 - No `unsafe` without a `// SAFETY:` comment, and only where no safe API
   exists.
+- `hasNodeErrorCode` and `diagnosticErrorCode` read `.code` and `.name` off
+  any thrown value; `garcon_base::errors` can only see what it is told about.
+  A new error type that carries a code or its own JavaScript class name
+  implements `garcon_base::errors::DiagnosticError` and reaches those
+  functions as `ErrorInput::Diagnostic(&error)` before it is erased to
+  `dyn Error`; a type that is routinely erased first gets a downcast in that
+  module and a test through the erased path. Test with the concrete error a
+  real failing call produces (`std::io::Error` from the file system), never
+  only with a stand-in built for the test.
+- A request header is read as Fetch's `headers.get()` returns it: every field
+  of that name, each trimmed, joined with `", "`. Reading only the first
+  field accepts requests the original refuses.
 
 ## JSON
 
@@ -147,6 +159,11 @@ the user corrects how a port behaves, the correction is added under
   environment, working directory, process group, and termination sequence
   (signal, grace period, kill).
 - Timers use `tokio::time`, so tests run with paused time.
+- Rust has no process-wide unhandled-rejection event. A task that nothing
+  awaits reports its terminal error to
+  `garcon_base::unhandled_rejection_policy`; dropping its `JoinHandle`
+  reports nothing and never turns a failure into process termination. A task
+  whose owner awaits the result propagates as usual and is not reported twice.
 
 ## Files and SQLite
 
@@ -235,6 +252,11 @@ the user corrects how a port behaves, the correction is added under
   `bun:sqlite` behaviors in `research/sqlite.md`).
 - Use the versions in `[workspace.dependencies]`. A dependency that is not
   there goes in your crate's `Cargo.toml` and in your report.
+- Merge `origin/rust-server`, never the local `rust-server` branch: the
+  manager gates before pushing, so the local branch can be ahead of what has
+  passed.
+- Before porting a module another lane owns, or asking for it, look for it in
+  `origin/rust-server`; it may already be there.
 
 ## Corrections
 

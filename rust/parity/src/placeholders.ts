@@ -62,6 +62,7 @@ function texts(step: ScenarioStep): string[] {
       http.path ?? '',
       http.originPath ?? '',
       ...Object.values(http.headers ?? {}),
+      ...(http.rawHeaders?.map(([, value]) => value) ?? []),
       http.body ?? '',
       ...(http.json === undefined ? [] : [JSON.stringify(http.json)]),
     ] : []),

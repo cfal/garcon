@@ -2,7 +2,10 @@
 //!
 //! Ports `common/`, one module per TypeScript file with the same name.
 
+pub mod agent_auth;
+pub mod agent_execution;
 pub mod agent_integration;
+pub mod agent_settings;
 pub mod agents;
 pub mod api_providers;
 pub mod attachments;
@@ -15,6 +18,7 @@ pub mod chat_id;
 pub mod chat_modes;
 pub mod chat_parentage;
 pub mod chat_plan;
+pub mod chat_row_contracts;
 pub mod chat_stop;
 pub mod chat_tag_mutations;
 pub mod chat_title_contracts;
@@ -52,6 +56,7 @@ pub mod tags;
 pub mod template_tokens;
 pub mod terminal;
 pub mod terminal_error;
+pub mod ticket_validation;
 pub mod tickets;
 pub mod tool_schedule;
 pub mod transcript_projection;
