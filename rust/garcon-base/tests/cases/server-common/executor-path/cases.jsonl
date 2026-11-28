@@ -1,0 +1,5 @@
+{"id":"toExecutorPath#0","fn":"toExecutorPath","args":["C:\\work\\literal","\\"],"result":"C:/work/literal","origin":"rust/garcon-base/tests/inputs/server-common/executor-path.jsonl:1"}
+{"id":"toExecutorPath#1","fn":"toExecutorPath","args":["/work/literal\\name"],"result":"/work/literal\\name","origin":"rust/garcon-base/tests/inputs/server-common/executor-path.jsonl:2"}
+{"id":"toNativePath#0","fn":"toNativePath","args":["C:/work/place","\\"],"result":"C:\\work\\place","origin":"rust/garcon-base/tests/inputs/server-common/executor-path.jsonl:3"}
+{"id":"toNativePath#1","fn":"toNativePath","args":["/work/literal\\name","/"],"result":"/work/literal\\name","origin":"rust/garcon-base/tests/inputs/server-common/executor-path.jsonl:4"}
+{"id":"toNativePath#2","fn":"toNativePath","args":["/work/literal\\name"],"result":"/work/literal\\name","origin":"rust/garcon-base/tests/inputs/server-common/executor-path.jsonl:5"}
