@@ -1,0 +1,3 @@
+{"fn":"parseTicketSourceResolution","args":[{"kind":"found","target":{"chatId":"9007199254740991","transcriptViewId":"11111111-1111-4111-8111-111111111111","ordinal":9007199254740991}}]}
+{"fn":"parseTicketSourceResolution","args":[{"kind":"transcript-reloaded","chatId":" 1000000000000001 "}]}
+{"fn":"parseTicketSourceResolution","args":[{"kind":"outcome-unavailable","chatId":null}]}

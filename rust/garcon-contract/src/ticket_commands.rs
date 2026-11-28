@@ -1,7 +1,7 @@
 //! Ports `common/ticket-commands.ts`.
 
 use garcon_js::OptionalNullable;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{ticket_validation::*, tickets::*};
@@ -146,7 +146,7 @@ pub enum TicketReadPayload {
 
 macro_rules! ticket_actions {
     ($($variant:ident => $wire:literal),+ $(,)?) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
         #[serde(rename_all = "kebab-case")]
         pub enum TicketAction { $($variant),+ }
 

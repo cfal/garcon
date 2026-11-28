@@ -4,7 +4,7 @@ use garcon_js::{
     json::{self, Opaque, from_str},
     trim,
 };
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Value, json};
 
 use crate::error_codes::{ErrorCode, is_error_code};
@@ -32,7 +32,7 @@ const FILTER_KEYS: &[&str] = &[
     "query",
 ];
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TicketNoticeContext {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filters: Option<TicketListQuery>,
@@ -40,7 +40,7 @@ pub struct TicketNoticeContext {
     pub link: Option<TicketNoticeLink>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TicketNoticeLink {
     pub kind: TicketLinkKind,
@@ -129,7 +129,7 @@ pub struct TicketMutationReceipt {
     pub related_ticket: Option<TicketResultReference>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TicketResultIdentity {
     pub command: TicketAction,
@@ -177,7 +177,7 @@ pub struct GarconTicketResult {
     pub status: TicketResultStatus,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "status",
     rename_all = "lowercase",
@@ -189,18 +189,21 @@ pub enum TicketCommandOutcomeStatus {
         revision: Option<u64>,
     },
     Error {
-        #[serde(serialize_with = "serialize_ticket_error_code")]
+        #[serde(
+            serialize_with = "serialize_ticket_error_code",
+            deserialize_with = "deserialize_ticket_error_code"
+        )]
         error_code: TicketErrorCode,
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 enum TicketOutcomeTag {
     TicketCommandOutcome,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TicketCommandOutcome {
     #[serde(rename = "type")]
     kind: TicketOutcomeTag,
@@ -215,6 +218,13 @@ fn serialize_ticket_error_code<S: Serializer>(
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     serializer.serialize_str(ErrorCode::from(*value).as_str())
+}
+
+fn deserialize_ticket_error_code<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<TicketErrorCode, D::Error> {
+    let value = Value::deserialize(deserializer)?;
+    parse_ticket_error_code(&value).map_err(serde::de::Error::custom)
 }
 
 pub fn ticket_mutation_receipt(result: &TicketWriteResult) -> TicketMutationReceipt {

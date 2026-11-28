@@ -1,0 +1,31 @@
+{
+  "module": "common/ws-revision-invalidations.ts",
+  "tests": [
+    "common/__tests__/ticket-responses.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/ws-revision-invalidations.jsonl",
+  "guards": [
+    {
+      "fn": "new TicketsInvalidatedMessage",
+      "argument": 0,
+      "guard": "rust/garcon-contract/tests/inputs/common/revision-invalidation-guards.ts#revision",
+      "dropped": 8,
+      "kept": 2
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "parseRevisionInvalidation",
+      "argument": 0
+    },
+    {
+      "fn": "isRevisionInvalidationType",
+      "argument": 0
+    }
+  ],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 121,
+  "sha256": "796c9297d0d99b9812a00e78a37b3fc1fc09d01697887af74192286058e3a3ff"
+}

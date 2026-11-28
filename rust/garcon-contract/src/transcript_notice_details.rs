@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use serde::Serialize;
+use serde::{Serialize, Serializer, ser::SerializeStruct};
 use serde_json::Value;
 
 use crate::agent_start_progress::{
@@ -40,12 +40,7 @@ pub enum InterAgentMessageFailureReason {
     DeliveryFailed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(
-    tag = "status",
-    rename_all = "kebab-case",
-    rename_all_fields = "camelCase"
-)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InterAgentMessageResult {
     Delivered {
         chat_id: ChatId,
@@ -57,6 +52,26 @@ pub enum InterAgentMessageResult {
         chat_id: ChatId,
         reason: InterAgentMessageFailureReason,
     },
+}
+
+impl Serialize for InterAgentMessageResult {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let (chat_id, status, reason) = match self {
+            Self::Delivered { chat_id } => (chat_id, "delivered", None),
+            Self::Queued { chat_id } => (chat_id, "queued", None),
+            Self::Failed { chat_id, reason } => (chat_id, "failed", Some(reason)),
+        };
+        let mut result = serializer.serialize_struct(
+            "InterAgentMessageResult",
+            if reason.is_some() { 3 } else { 2 },
+        )?;
+        result.serialize_field("chatId", chat_id)?;
+        result.serialize_field("status", status)?;
+        if let Some(reason) = reason {
+            result.serialize_field("reason", reason)?;
+        }
+        result.end()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

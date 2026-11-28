@@ -24,6 +24,7 @@ use crate::command_output::{
     parse_command_outcome, parse_command_output_context,
 };
 use crate::tool_result_message::ToolResultMessage;
+use crate::transcript_notice_details::{TranscriptNoticeDetail, parse_transcript_notice_detail};
 use crate::user_message_presentation::{UserMessagePresentation, parse_user_message_presentation};
 
 use super::{ToolUseChatMessage, parse_tool_use_message};
@@ -87,6 +88,14 @@ message_structs! {
     ErrorMessage("error") {
         timestamp: String,
         content: String,
+    }
+    TranscriptNoticeMessage("transcript-notice") {
+        timestamp: String,
+        content: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<TranscriptNoticeDetail>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
     }
     CliRowMessage("cli-row") {
         timestamp: String,
@@ -200,7 +209,7 @@ pub enum CompactionTrigger {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
-pub enum NonNoticeChatMessage {
+pub enum ChatMessage {
     User(UserMessage),
     Assistant(AssistantMessage),
     CommandOutput(CommandOutputMessage),
@@ -209,6 +218,7 @@ pub enum NonNoticeChatMessage {
     ToolUse(ToolUseChatMessage),
     ToolResult(ToolResultMessage),
     Error(ErrorMessage),
+    Notice(TranscriptNoticeMessage),
     CliRow(CliRowMessage),
     PermissionRequest(PermissionRequestMessage),
     PermissionResolved(PermissionResolvedMessage),
@@ -218,10 +228,12 @@ pub enum NonNoticeChatMessage {
     AgentSwitch(AgentSwitchMessage),
 }
 
-pub fn parse_non_notice_chat_message(
-    data: &Value,
-) -> Result<Option<NonNoticeChatMessage>, InvalidAsyncQuestionReply> {
-    use NonNoticeChatMessage as Message;
+pub fn is_tool_use_message(message: &ChatMessage) -> bool {
+    matches!(message, ChatMessage::ToolUse(_))
+}
+
+pub fn parse_chat_message(data: &Value) -> Result<Option<ChatMessage>, InvalidAsyncQuestionReply> {
+    use ChatMessage as Message;
     let Some(raw) = data.as_object() else {
         return Ok(None);
     };
@@ -293,6 +305,15 @@ pub fn parse_non_notice_chat_message(
             timestamp: timestamp(),
             content: content(),
         }),
+        Some(TranscriptNoticeMessage::TYPE) => {
+            let detail = parse_transcript_notice_detail(&data["detail"]);
+            Message::Notice(TranscriptNoticeMessage {
+                timestamp: timestamp(),
+                content: content(),
+                detail,
+                title: nonempty_string(&data["title"]),
+            })
+        }
         Some(CliRowMessage::TYPE) => Message::CliRow(CliRowMessage {
             timestamp: timestamp(),
             content: content(),
@@ -302,7 +323,7 @@ pub fn parse_non_notice_chat_message(
             disclosure: coerce_durable_cli_body_disclosure(&data["disclosure"]),
         }),
         Some(PermissionRequestMessage::TYPE) => {
-            let requested_tool = parse_non_notice_chat_message(&data["requestedTool"])?;
+            let requested_tool = parse_chat_message(&data["requestedTool"])?;
             let (Some(id), Some(Message::ToolUse(requested_tool))) =
                 (permission_occurrence_id(), requested_tool)
             else {
@@ -378,15 +399,13 @@ fn nonempty_string(value: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-pub fn parse_non_notice_chat_messages(
-    data: &Value,
-) -> Result<Vec<NonNoticeChatMessage>, InvalidAsyncQuestionReply> {
+pub fn parse_chat_messages(data: &Value) -> Result<Vec<ChatMessage>, InvalidAsyncQuestionReply> {
     let Some(items) = data.as_array() else {
         return Ok(Vec::new());
     };
     let mut messages = Vec::with_capacity(items.len());
     for item in items {
-        if let Some(message) = parse_non_notice_chat_message(item)? {
+        if let Some(message) = parse_chat_message(item)? {
             messages.push(message);
         }
     }
