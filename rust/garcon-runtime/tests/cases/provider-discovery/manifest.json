@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-runtime/tests/oracles/provider-discovery.ts",
+  "tests": [],
+  "inputs": "rust/garcon-runtime/tests/inputs/provider-discovery.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 18,
+  "sha256": "bef944acbca804a636d867c1939685e2695bba99b5c6cd85430c7971a25b4fbe"
+}
