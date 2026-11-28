@@ -2,13 +2,13 @@ use std::error::Error;
 use std::io;
 use std::path::Path;
 
-use garcon_base::json_file_store::{JsonFileStore, JsonWriteOptions, sync_directory};
+use garcon_base::json_file_store::{JsonFileStore, JsonWriteOptions};
 use garcon_base::stored_json::parse_stored_json;
 use garcon_base::workspace_lease::WORKSPACE_LOCK_NAME;
 use garcon_js::{is_safe_integer, json::as_number};
+use garcon_stores::api_providers::assignments::ApiProviderAssignmentStore;
 use serde_json::{Value, json};
 use tokio::fs;
-use tokio::io::AsyncWriteExt;
 
 const VERSION_FILE: &str = "workspace-version.json";
 const CURRENT_WORKSPACE_VERSION: u64 = 10;
@@ -80,7 +80,7 @@ pub async fn open_workspace(workspace_dir: &Path) -> Result<(), Box<dyn Error>> 
                 return Err(WorkspaceVersionError::Older(0).into());
             }
         }
-        initialize_empty_assignments(workspace_dir).await?;
+        ApiProviderAssignmentStore::initialize_fresh_workspace(workspace_dir).await?;
     }
     let path = workspace_dir.join(VERSION_FILE);
     JsonFileStore::default()
@@ -91,21 +91,6 @@ pub async fn open_workspace(workspace_dir: &Path) -> Result<(), Box<dyn Error>> 
         )
         .await?;
     Ok(())
-}
-
-async fn initialize_empty_assignments(workspace_dir: &Path) -> io::Result<()> {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-    let mut file = options
-        .open(workspace_dir.join("api-provider-assignments.json"))
-        .await?;
-    file.write_all(br#"{"version":1,"revision":0,"assignments":{}}"#)
-        .await?;
-    file.sync_all().await?;
-    drop(file);
-    sync_directory(workspace_dir).await
 }
 
 #[cfg(test)]

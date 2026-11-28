@@ -1,0 +1,163 @@
+{
+  "scenario": "api-providers-management",
+  "cases": [
+    {
+      "name": "read-redacted-profile",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "assignments": {
+              "assignments": {
+                "local": [
+                  "profile_one"
+                ]
+              },
+              "revision": 6
+            },
+            "providers": [
+              {
+                "createdAt": "{{timestamp}}",
+                "endpoints": [
+                  {
+                    "apiKeyLabel": "Synt...tial",
+                    "baseUrl": "https://provider.example.invalid/v1",
+                    "capabilities": {
+                      "chatCompletions": true,
+                      "responses": false
+                    },
+                    "defaultModel": "default",
+                    "hasApiKey": true,
+                    "id": "profile_one_openai",
+                    "modelDiscovery": "openai-models",
+                    "models": [
+                      {
+                        "label": "default",
+                        "value": "default"
+                      },
+                      {
+                        "isLocal": true,
+                        "label": "Other model",
+                        "value": "other"
+                      }
+                    ],
+                    "protocol": "openai-compatible",
+                    "supportsImages": false
+                  }
+                ],
+                "id": "profile_one",
+                "label": "Fixture",
+                "revision": 3,
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/api-providers"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "read-assignments-after-startup-prune",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "assignments": {
+              "assignments": {
+                "local": [
+                  "profile_one"
+                ]
+              },
+              "revision": 6
+            },
+            "providers": [
+              {
+                "createdAt": "{{timestamp}}",
+                "endpoints": [
+                  {
+                    "apiKeyLabel": "Synt...tial",
+                    "baseUrl": "https://provider.example.invalid/v1",
+                    "capabilities": {
+                      "chatCompletions": true,
+                      "responses": false
+                    },
+                    "defaultModel": "default",
+                    "hasApiKey": true,
+                    "id": "profile_one_openai",
+                    "modelDiscovery": "openai-models",
+                    "models": [
+                      {
+                        "label": "default",
+                        "value": "default"
+                      },
+                      {
+                        "isLocal": true,
+                        "label": "Other model",
+                        "value": "other"
+                      }
+                    ],
+                    "protocol": "openai-compatible",
+                    "supportsImages": false
+                  }
+                ],
+                "id": "profile_one",
+                "label": "Fixture",
+                "revision": 3,
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/api-provider-assignments"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "deny-missing-session",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/api-providers"
+        },
+        "status": 401
+      },
+      "noise": []
+    }
+  ]
+}
