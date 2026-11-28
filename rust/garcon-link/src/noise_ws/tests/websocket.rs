@@ -18,7 +18,7 @@ use super::helpers::{
     client_options, code, deadline, ignoring, inbox, large_exchange_ms, options, real, received,
     received_within, text, until,
 };
-use super::listener::{Reply, get, serve, tls_identity};
+use super::listener::{Reply, get, serve, tls_identity, tls_signed_by_ca};
 
 fn echo() -> NoiseOptions {
     options(Rc::new(|socket, message| {
@@ -270,6 +270,83 @@ fn tls_verifies_dns_names_and_still_requires_the_correct_psk() {
 #[test]
 fn tls_verifies_ip_addresses_and_still_requires_the_correct_psk() {
     verifies_tls("127.0.0.1", "localhost");
+}
+
+#[test]
+fn tls_trusts_extra_ca_without_a_tls_option() {
+    verifies_environment_ca(
+        "NODE_EXTRA_CA_CERTS",
+        "tls_trusts_extra_ca_without_a_tls_option",
+    );
+}
+
+#[test]
+fn tls_trusts_openssl_default_ca_file_without_a_tls_option() {
+    verifies_environment_ca(
+        "SSL_CERT_FILE",
+        "tls_trusts_openssl_default_ca_file_without_a_tls_option",
+    );
+}
+
+fn verifies_environment_ca(variable: &str, test: &str) {
+    const ADDRESS: &str = "GARCON_LINK_TEST_WSS";
+    real(async {
+        if let Ok(url) = std::env::var(ADDRESS) {
+            let options = client_options(ignoring());
+            assert!(options.tls.is_none());
+            assert!(!options.allow_unverified_tls);
+            let socket = connect_noise_web_socket(&url, options).unwrap();
+            ready(&socket).await;
+            socket.close();
+            deadline(socket.closed(), 2_000).await;
+            let (_, unrelated_ca) = tls_identity("127.0.0.1");
+            let mut options = client_options(ignoring());
+            options.tls = Some(NoiseTlsOptions {
+                ca: Some(unrelated_ca),
+            });
+            let rejected = connect_noise_web_socket(&url, options).unwrap();
+            assert_eq!(
+                deadline(rejected.ready(), 2_000).await.unwrap_err().code,
+                NoiseErrorCode::TransportError
+            );
+            return;
+        }
+
+        let (tls, ca) = tls_signed_by_ca("127.0.0.1");
+        let server = Rc::new(create_noise_server(NoiseServerOptions::default()).unwrap());
+        let fixture = serve(Some(tls), move |_| Reply::Noise {
+            server: Rc::clone(&server),
+            options: echo(),
+        })
+        .await;
+        let temporary =
+            std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join("tmp/link");
+        std::fs::create_dir_all(&temporary).unwrap();
+        let directory = tempfile::tempdir_in(temporary).unwrap();
+        let certificate = directory.path().join("ca.pem");
+        std::fs::write(&certificate, ca).unwrap();
+        let mut child = tokio::process::Command::new(std::env::current_exe().unwrap());
+        child
+            .args(["--exact", "--nocapture"])
+            .arg(format!(
+                "{}::{test}",
+                module_path!().split_once("::").unwrap().1
+            ))
+            .env(ADDRESS, fixture.url("wss", "/node"))
+            .env_remove("NODE_EXTRA_CA_CERTS")
+            .env_remove("SSL_CERT_FILE")
+            .env("SSL_CERT_DIR", "")
+            .env_remove("NODE_USE_SYSTEM_CA")
+            .env(variable, certificate)
+            .kill_on_drop(true);
+        let result = deadline(child.output(), 5_000).await.unwrap();
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        assert!(
+            result.status.success() && stdout.contains("1 passed"),
+            "{stdout}\n{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    });
 }
 
 #[test]

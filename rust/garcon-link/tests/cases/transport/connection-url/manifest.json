@@ -1,11 +1,18 @@
 {
   "module": "server/remote/transport/connection-url.ts",
   "tests": [
-    "server/remote/transport/__tests__/connection-url.test.ts"
+    "rust/garcon-link/tests/oracles/connection-url.test.ts"
   ],
-  "inputs": null,
+  "inputs": "rust/garcon-link/tests/inputs/connection-url.jsonl",
   "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isExecutorSecret",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
   "notCaptured": [],
-  "cases": 273,
-  "sha256": "1438461768a9f05da777dcbcf315dccdb612d994d58ab25bbe6084586d68887e"
+  "cases": 185,
+  "sha256": "d3d13598493641c2d48a36d36330835b6487d303d7d78f0b77b4d5aeba643ccf"
 }

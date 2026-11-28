@@ -44,7 +44,12 @@ pub fn validate_terminal_rpc(method: &str, input: &Value) -> Result<(), Terminal
                     .get("type")
                     .and_then(Value::as_str)
                     .and_then(|kind| kind.strip_prefix("terminal-"))
-                    == method.get("terminals.".len()..)
+                    .is_some_and(|kind| {
+                        method
+                            .encode_utf16()
+                            .skip(utf16::len("terminals."))
+                            .eq(kind.encode_utf16())
+                    })
         }),
     };
     if valid {

@@ -5,8 +5,25 @@
     "server/remote/transport/__tests__/rpc-routing.test.ts"
   ],
   "inputs": "rust/garcon-link/tests/inputs/cli-protocol.jsonl",
-  "guards": [],
+  "guards": [
+    {
+      "fn": "cliPolicy",
+      "argument": 0,
+      "guard": "rust/garcon-link/tests/oracles/recording-guards.ts#isCliHttpRequest",
+      "dropped": 29,
+      "kept": 0
+    },
+    {
+      "fn": "cliRequestBytes",
+      "argument": 0,
+      "guard": "rust/garcon-link/tests/oracles/recording-guards.ts#isRpcLane",
+      "dropped": 29,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
   "notCaptured": [],
-  "cases": 338,
-  "sha256": "74a4b7720c4fedf3fe32be47af1f4e9c1c0abae27c3aa23bdb5f9330e66da502"
+  "cases": 299,
+  "sha256": "bc37ca18b47c4fdf40bac6a5dcb4c0c9e588b3590519794e4838a38b93178c25"
 }

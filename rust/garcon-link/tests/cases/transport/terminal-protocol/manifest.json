@@ -5,7 +5,9 @@
   ],
   "inputs": "rust/garcon-link/tests/inputs/terminal-protocol.jsonl",
   "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
   "notCaptured": [],
-  "cases": 104,
-  "sha256": "3ef25e8870167a913ee3ff1086161795d8ceddf6b16be2584693b44e524ecbb9"
+  "cases": 112,
+  "sha256": "24af77d17541e47ac961331291c566cc24625b231cf6ae3bfc5feb927e02a5eb"
 }
