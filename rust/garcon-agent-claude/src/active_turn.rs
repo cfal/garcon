@@ -1,18 +1,12 @@
 use std::cell::{Cell, RefCell};
 
 use garcon_agents_common::execution::runtime_events::AgentRuntimeOperation;
-use garcon_contract::chat_types::CompactionTrigger;
-use garcon_js::Number;
 use tokio::{task::AbortHandle, time::Instant};
 use tokio_util::sync::CancellationToken;
 
-use crate::{cli_protocol::ClaudeTurnState, steering::ClaudeTurnSteeringState};
-
-pub struct ClaudePendingCompaction {
-    pub trigger: CompactionTrigger,
-    pub pre_tokens: Option<Number>,
-    pub post_tokens: Option<Number>,
-}
+use crate::{
+    cli_protocol::ClaudeTurnState, compaction::CompactionInfo, steering::ClaudeTurnSteeringState,
+};
 
 pub struct ClaudeActiveTurn {
     pub protocol: RefCell<ClaudeTurnState>,
@@ -20,7 +14,7 @@ pub struct ClaudeActiveTurn {
     pub started_at: Instant,
     pub operation: AgentRuntimeOperation,
     pub abort_timer: Cell<Option<AbortHandle>>,
-    pub pending_compaction: Cell<Option<ClaudePendingCompaction>>,
+    pub pending_compaction: Cell<Option<CompactionInfo>>,
     completion: CancellationToken,
     pre_start_abort_confirmation: CancellationToken,
     interrupt_request_failed: Cell<bool>,
