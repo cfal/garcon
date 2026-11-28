@@ -206,6 +206,15 @@ the user corrects how a port behaves, the correction is added under
   `--guard` it keeps a trap variant of a typed argument only when the
   original's own parser for that type accepts it. A dispatcher never skips a
   case.
+- A result with a wildcard is opted into by number:
+  `replay_with_expected_wildcards(dir, count, dispatch)`, with a comment
+  naming each one. Plain `replay` fails on any wildcard, so a nondeterministic
+  recording cannot pass unnoticed. Prefer removing the randomness from the
+  input.
+- Only a test that a lane runs is named `*.test.ts` or `*.spec.ts`. A fixture
+  suite, a recorder input, or an oracle script under `rust/` gets another
+  suffix: `scripts/__tests__/test-inventory.test.js` fails the server lane
+  on any test-named file that no lane discovers, and it is part of the gate.
 
 ## Build
 
