@@ -96,6 +96,46 @@ const HOST: &str = "Host: localhost\r\n";
 const AUTHORIZED: &str = "Host: localhost\r\nAuthorization: Bearer fixture\r\n";
 
 #[tokio::test]
+async fn unmatched_paths_and_methods_validate_host_unless_shutting_down() {
+    LocalSet::new()
+        .run_until(async {
+            let closing = Rc::new(Cell::new(false));
+            let router = HttpRouter::new(
+                compose_routes::RouteMap::new(),
+                options(closing.clone(), false),
+                Rc::new(FixtureAuth),
+            )
+            .unwrap();
+            let (addr, shutdown) = start(router).await;
+            for (method, path) in [("GET", "/tools/unknown"), ("PUT", "/tools/api/v1/tickets")] {
+                let result = exchange(addr, method, path, "Host: a b\r\n").await;
+                assert!(result.starts_with("HTTP/1.1 500 "), "{result}");
+                assert!(result.contains("INTERNAL_ERROR"), "{result}");
+            }
+            let mut socket = TcpStream::connect(addr).await.unwrap();
+            socket
+                .write_all(b"GET /tools/unknown HTTP/1.0\r\n\r\n")
+                .await
+                .unwrap();
+            let mut result = String::new();
+            tokio::time::timeout(Duration::from_secs(3), socket.read_to_string(&mut result))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(result.starts_with("HTTP/1.0 500 "), "{result}");
+            assert!(result.contains("INTERNAL_ERROR"), "{result}");
+            closing.set(true);
+            for headers in [HOST, "Host: a b\r\n"] {
+                let result = exchange(addr, "GET", "/tools/unknown", headers).await;
+                assert!(result.starts_with("HTTP/1.1 503 "), "{result}");
+                assert!(result.contains("SERVER_SHUTTING_DOWN"), "{result}");
+            }
+            shutdown.cancel();
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn only_recognized_unported_routes_return_the_marker_and_are_logged() {
     LocalSet::new()
         .run_until(async {

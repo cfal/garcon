@@ -1,0 +1,14 @@
+{
+  "module": "server/runtime/git/git-error-classifier.ts",
+  "tests": [
+    "server/runtime/git/__tests__/git-error-classifier.test.js",
+    "rust/parity/fixtures/git/pure.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 82,
+  "sha256": "d9dd7e827889921aed3f0b4925f4b2d5192101f0a9c18007736d56f2b8945eaa"
+}
