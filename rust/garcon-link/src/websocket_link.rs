@@ -93,6 +93,12 @@ pub struct ExecutorListenerTls {
     pub key: Vec<u8>,
 }
 
+impl ExecutorListenerTls {
+    pub fn validate(&self) -> Result<(), SessionError> {
+        listener_tls(self).map(|_| ())
+    }
+}
+
 struct Listener {
     stop: CancellationToken,
     noise: Rc<NoiseServer>,
@@ -666,7 +672,7 @@ impl WebSocketLink {
         hostname: &str,
         tls: Option<ExecutorListenerTls>,
     ) -> Result<String, SessionError> {
-        let tls = tls.map(listener_tls).transpose()?;
+        let tls = tls.as_ref().map(listener_tls).transpose()?;
         let listener = TcpListener::bind((hostname, port))
             .await
             .map_err(|error| Rc::new(error) as SessionError)?;
@@ -1646,7 +1652,7 @@ fn noise_closure_cause(code: NoiseErrorCode) -> LinkClosureCause {
     }
 }
 
-fn listener_tls(tls: ExecutorListenerTls) -> Result<TlsAcceptor, SessionError> {
+fn listener_tls(tls: &ExecutorListenerTls) -> Result<TlsAcceptor, SessionError> {
     let cert = CertificateDer::pem_slice_iter(&tls.cert)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| Rc::new(error) as SessionError)?;
