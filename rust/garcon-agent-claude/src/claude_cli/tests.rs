@@ -282,6 +282,104 @@ fn write_fake_cli(script: &Path, body: &str) {
 }
 
 #[tokio::test]
+async fn a_real_cli_publishes_only_the_correlated_result_and_waits_for_provider_idle() {
+    use garcon_interface::producer::AgentFinalResponse;
+
+    async fn receive<T>(receiver: &mut mpsc::UnboundedReceiver<T>) -> T {
+        tokio::time::timeout(Duration::from_secs(5), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    }
+    LocalSet::new().run_until(async {
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("fake-claude-results");
+        write_fake_cli(&script, r#"
+read -r prompt || exit 1
+case "$prompt" in *'"uuid":"submitted-input"'*) ;; *) exit 2 ;; esac
+printf '%s\n' '{"type":"result","is_error":true,"result":"synthetic internal error"}'
+printf '%s\n' '{"type":"command_lifecycle","state":"started","command_uuid":"submitted-input"}'
+printf '%s\n' '{"type":"result","user_message_uuid":"foreign-input","result":"synthetic foreign output"}'
+printf '%s\n' '{"type":"result","user_message_uuid":"submitted-input","result":"  synthetic result  "}'
+printf '%s\n' '{"type":"result-received"}'
+read -r release || exit 3
+printf '%s\n' '{"type":"system","subtype":"session_state_changed","state":"idle"}'
+read -r close || exit 4
+"#);
+        let runtime = ClaudeCli::new(Rc::new(move || script.as_os_str().to_owned()), Rc::new(Logger));
+        let options = options(directory.path());
+        let session = Rc::new(ClaudeRunningSession::new(options.clone()));
+        runtime.register_session(session.clone());
+        let (publish, mut events) = mpsc::unbounded_channel();
+        let turn = runtime.begin_turn(&session, runtime_operation("run-1".into(),
+            Rc::new(move |event| publish.send(event).unwrap()))).unwrap();
+        turn.protocol.borrow_mut().input_uuid = "submitted-input".into();
+        let (signal, mut barrier) = mpsc::unbounded_channel();
+        runtime.spawn_cli(&session, options, false, Rc::new(move |_, frame| signal.send(frame).unwrap())).await.unwrap();
+        let process = session.process.borrow().clone().unwrap();
+        process.transport.write_line(r#"{"type":"user","uuid":"submitted-input"}"#.into(), Default::default()).await.unwrap();
+        assert_eq!(receive(&mut barrier).await["type"], "result-received");
+        assert!(session.is_current_turn(&turn));
+        assert!(matches!(receive(&mut events).await, AgentRuntimeEvent::Steerable));
+        let AgentRuntimeEvent::Rows { rows } = receive(&mut events).await else { panic!("expected one rendered result"); };
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(&rows[0].message, ChatMessage::Assistant(message) if message.content == "synthetic result"));
+        assert!(events.try_recv().is_err());
+
+        process.transport.write_line("{}".into(), Default::default()).await.unwrap();
+        let AgentRuntimeEvent::RunEnded { outcome: ProviderRunOutcome::Finished { final_response: Some(AgentFinalResponse::Text { text }) }, .. }
+            = receive(&mut events).await else { panic!("expected final response at provider idle"); };
+        assert_eq!(text, "  synthetic result  ");
+        assert!(session.active_turn.borrow().is_none());
+        process.transport.write_line("{}".into(), Default::default()).await.unwrap();
+        assert_eq!(process.transport.exited().await.unwrap(), 0);
+    }).await;
+}
+
+#[test]
+fn a_conversation_reset_supersedes_the_recorded_result_failure() {
+    let runtime = ClaudeCli::new(Rc::new(|| "not-spawned".into()), Rc::new(Logger));
+    let session = Rc::new(ClaudeRunningSession::new(options(Path::new("."))));
+    let (publish, mut events) = mpsc::unbounded_channel();
+    let turn = runtime
+        .begin_turn(
+            &session,
+            runtime_operation(
+                "run-1".into(),
+                Rc::new(move |event| publish.send(event).unwrap()),
+            ),
+        )
+        .unwrap();
+    let input = turn.protocol.borrow().input_uuid.clone();
+    turn.protocol
+        .borrow_mut()
+        .observe_input(&json!({"type":"command_lifecycle","state":"started","command_uuid":input}));
+    assert!(runtime.on_control_or_lifecycle(&session, &json!({
+        "type":"result","user_message_uuid":input,"is_error":true,"errors":["synthetic model error"]
+    })));
+    assert_eq!(
+        turn.protocol.borrow().recorded_result_failure_message(),
+        Some("synthetic model error")
+    );
+    assert!(runtime.on_control_or_lifecycle(
+        &session,
+        &json!({
+            "type":"conversation_reset","new_conversation_id":"foreign-conversation"
+        })
+    ));
+    let AgentRuntimeEvent::RunEnded {
+        outcome: ProviderRunOutcome::Failed { error: Some(error) },
+        ..
+    } = events.try_recv().unwrap()
+    else {
+        panic!("expected reset failure");
+    };
+    assert_eq!(error.message.as_deref(), Some(CONVERSATION_RESET_FAILURE));
+    assert_eq!(session.id, "synthetic-session");
+    assert!(session.active_turn.borrow().is_none());
+}
+
+#[tokio::test]
 async fn a_rejected_initialize_retires_the_cli_before_the_next_resume() {
     LocalSet::new().run_until(async {
         let directory = tempfile::tempdir().unwrap();
