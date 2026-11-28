@@ -1,0 +1,11 @@
+{
+  "module": "server-agents/common/src/cli-update/install-resolution.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/cli-install-resolution.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 9,
+  "sha256": "59e0f80c2846cb3ea914ad7cade0f5b93c2233bcfdeb548c60901fb3a992cbe4"
+}

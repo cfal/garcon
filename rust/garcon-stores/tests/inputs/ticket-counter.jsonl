@@ -1,0 +1,10 @@
+{"fn":"nextTicketCounter","args":[0]}
+{"fn":"nextTicketCounter","args":[1]}
+{"fn":"nextTicketCounter","args":[9007199254740989]}
+{"fn":"nextTicketCounter","args":[9007199254740990]}
+{"fn":"nextTicketCounter","args":[9007199254740991]}
+{"fn":"nextTicketCounter","args":[-1]}
+{"fn":"nextTicketCounter","args":[0.5]}
+{"fn":"nextTicketCounter","args":[{"$":"number","value":"-0"}]}
+{"fn":"nextTicketCounter","args":[{"$":"number","value":"NaN"}]}
+{"fn":"nextTicketCounter","args":[{"$":"number","value":"Infinity"}]}

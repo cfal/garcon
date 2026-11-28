@@ -1,4 +1,9 @@
-use std::{cell::RefCell, mem, rc::Rc, sync::LazyLock};
+use std::{
+    cell::{Cell, RefCell},
+    mem,
+    rc::Rc,
+    sync::LazyLock,
+};
 
 use garcon_base::{
     event_loop_stalls::ActivityTracker,
@@ -42,7 +47,10 @@ use crate::{
     staging_views::{StagingViews, encode_drafts, insert_encoded_rows, materialize_rows},
 };
 
+mod anchors;
 mod bulk;
+mod read_pages;
+pub use anchors::{TranscriptReadSignal, TranscriptWatermark};
 pub use bulk::StageViewInput;
 
 const DEFAULT_CONNECTION_CACHE_SIZE: usize = 10;
@@ -66,6 +74,7 @@ pub struct InitializeViewInput<'a> {
 pub struct TranscriptLedgerStore {
     state: RefCell<StoreState>,
     staging: Rc<StagingViews>,
+    anchor_read_epoch: Cell<u64>,
     create_view_id: Rc<dyn Fn() -> LedgerResult<TranscriptViewId>>,
     now: Rc<dyn Fn() -> LedgerResult<String>>,
 }
@@ -107,6 +116,7 @@ impl TranscriptLedgerStore {
                 fences: LedgerFailureFences::default(),
             }),
             staging,
+            anchor_read_epoch: Cell::new(0),
             create_view_id,
             now: options
                 .now
@@ -417,11 +427,7 @@ impl TranscriptLedgerStore {
         limit: u64,
         before: Option<u64>,
     ) -> LedgerResult<TranscriptPage> {
-        if !(1..=1000).contains(&limit) {
-            return Err(type_error(
-                "Transcript page limit must be between 1 and 1000",
-            ));
-        }
+        read_pages::validate_page_limit(limit)?;
         if before.is_some_and(|value| value < 1 || !is_safe_integer(value as f64)) {
             return Err(type_error(
                 "Transcript page cursor must be a positive integer",
@@ -519,6 +525,7 @@ impl TranscriptLedgerStore {
     }
 
     pub fn close(&self) -> LedgerResult<()> {
+        self.anchor_read_epoch.set(self.anchor_read_epoch.get() + 1);
         self.staging.abandon_all();
         let mut state = self.state.borrow_mut();
         let cache = &mut state.connections;

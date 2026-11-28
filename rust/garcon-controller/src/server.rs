@@ -14,11 +14,15 @@ use garcon_base::server_runtime::{
 };
 use garcon_contract::cli_runtime_paths::{RuntimeKind, cli_runtime_file};
 use garcon_contract::tickets::TicketProjectDefault;
+use garcon_contract::ws_revision_invalidations::TicketsInvalidatedMessage;
 use garcon_http::app_title::resolve_public_app_title;
+use garcon_http::compose_routes::compose_routes;
 use garcon_http::http_request::HttpAuthentication;
 use garcon_http::http_route::{HttpRouteOptions, HttpRouter};
 use garcon_http::listener::Listener;
-use garcon_http::routes::{auth::AuthRoutes, create_edge_routes, r#static::StaticRoutes};
+use garcon_http::routes::{
+    auth::AuthRoutes, create_edge_routes, r#static::StaticRoutes, tickets::create_ticket_routes,
+};
 use garcon_http::ws::{BrowserSocketLimits, BrowserSocketOptions, BrowserSockets};
 use garcon_interface::errors::{AgentCallError, AgentDeliveryOutcome};
 use garcon_interface::execution_runtime::{
@@ -33,6 +37,10 @@ use garcon_stores::auth::store::AuthAccountStore;
 use garcon_stores::auth::token::AuthTokens;
 use garcon_stores::settings::{SettingsStore, SettingsStoreOptions};
 use garcon_stores::telegram_settings_store::TelegramSettingsStore;
+use garcon_stores::tickets::{
+    service::TicketServiceOptions,
+    setup::{TicketRuntime, initialize_tickets},
+};
 use tokio::fs;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -50,6 +58,7 @@ pub struct Controller {
     listener: JoinHandle<()>,
     auth_routes: Rc<AuthRoutes>,
     browser_sockets: Rc<BrowserSockets>,
+    tickets: Rc<TicketRuntime>,
     listener_shutdown: CancellationToken,
     lease_lost: CancellationToken,
     shutting_down: Rc<Cell<bool>>,
@@ -175,6 +184,7 @@ impl Controller {
             instance_id,
             auth_routes,
             browser_sockets,
+            tickets,
         } = match result {
             Ok(values) => values,
             Err(error) => {
@@ -211,6 +221,7 @@ impl Controller {
             listener,
             auth_routes,
             browser_sockets,
+            tickets,
             listener_shutdown,
             lease_lost,
             shutting_down,
@@ -233,6 +244,7 @@ impl Controller {
         self.browser_sockets.shutdown().await;
         let listener = self.listener.await;
         self.auth_routes.drain().await;
+        self.tickets.close();
         let runtime = remove_server_runtime(self.runtime_file, &self.instance_id).await;
         let lease = self.lease.release().await;
         listener?;
@@ -250,6 +262,7 @@ struct BoundController {
     instance_id: String,
     auth_routes: Rc<AuthRoutes>,
     browser_sockets: Rc<BrowserSockets>,
+    tickets: Rc<TicketRuntime>,
 }
 
 async fn bind_controller(
@@ -288,14 +301,15 @@ async fn bind_controller(
     )
     .await?;
     TelegramSettingsStore::open(&config.config_dir, clock.clone()).await?;
-    let routes = create_edge_routes(
+    let title_settings = settings.clone();
+    let edge_routes = create_edge_routes(
         Rc::clone(&runtime),
         config.workspace_name.clone(),
         StaticRoutes {
             web_build_dir: PathBuf::from(&config.web_build_dir),
             base_path: config.base_path.clone(),
             app_title: Rc::new(move || {
-                let current = settings.snapshot();
+                let current = title_settings.snapshot();
                 resolve_public_app_title(&current.ui, current.remote_settings_version)
             }),
         },
@@ -323,9 +337,27 @@ async fn bind_controller(
         },
         auth.clone(),
         runtime.identity.instance_id.clone(),
-        clock,
+        clock.clone(),
         unported_log.clone(),
     )?;
+    let ticket_sockets = browser_sockets.clone();
+    let tickets = Rc::new(initialize_tickets(
+        lease.workspace_dir(),
+        TicketServiceOptions {
+            chat_exists: None,
+            commands_enabled: Rc::new(move || {
+                let commands = settings.feature_settings().agent_commands;
+                commands.enabled && commands.tickets
+            }),
+            on_invalidated: Some(Rc::new(move |revision| {
+                let payload = serde_json::to_vec(&TicketsInvalidatedMessage::new(revision))?;
+                ticket_sockets.publish("chat", &payload.into());
+                Ok(())
+            })),
+            clock,
+        },
+    ));
+    let routes = compose_routes([&edge_routes, &create_ticket_routes(&tickets)])?;
     let router = HttpRouter::new(
         routes,
         HttpRouteOptions {
@@ -368,6 +400,7 @@ async fn bind_controller(
         instance_id: runtime.identity.instance_id.clone(),
         auth_routes,
         browser_sockets,
+        tickets,
     })
 }
 
@@ -546,6 +579,66 @@ mod tests {
                     assert!(response.contains(r#"__GARCON_APP_TITLE__={"title":"Tool & \u003cTeam>","version":19}"#), "{response}");
                 }
             }
+            controller.shutdown().await.unwrap();
+        }).await;
+    }
+
+    #[tokio::test]
+    async fn publishes_ticket_invalidation_after_commit_and_marks_missing_chat_authority() {
+        async fn exchange(address: SocketAddr, method: &str, path: &str, body: &str) -> String {
+            let mut stream = TcpStream::connect(address).await.unwrap();
+            let wire = format!(
+                "{method} /fixture/api/v1/tickets{path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(wire.as_bytes()).await.unwrap();
+            let mut reply = String::new();
+            stream.read_to_string(&mut reply).await.unwrap();
+            reply
+        }
+
+        LocalSet::new().run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let mut config = config(root.path());
+            config.auth_disabled = true;
+            let workspace = PathBuf::from(&config.workspace_dir);
+            let controller = Controller::start(config, Rc::new(UnavailableLocalExecutor)).await.unwrap();
+            let address = SocketAddr::from(([127, 0, 0, 1], controller.address.port()));
+            tokio::time::timeout(Duration::from_secs(3), async {
+                let mut ws = TcpStream::connect(address).await.unwrap();
+                ws.write_all(b"GET /fixture/ws HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n").await.unwrap();
+                let mut head = Vec::new();
+                while !head.ends_with(b"\r\n\r\n") { head.push(ws.read_u8().await.unwrap()); }
+                assert!(head.starts_with(b"HTTP/1.1 101 "));
+
+                let boot = exchange(address, "GET", "/bootstrap", "").await;
+                assert!(boot.starts_with("HTTP/1.1 200 "), "{boot}");
+                let boot = garcon_js::json::parse(boot.split_once("\r\n\r\n").unwrap().1).unwrap();
+                let path = workspace.join("tickets.sqlite");
+                let wal = workspace.join("tickets.sqlite-wal");
+                let before = (fs::read(&path).await.unwrap(), fs::read(&wal).await.unwrap());
+                let mut value = serde_json::json!({"requestId":"00000000-0000-4000-8000-000000000001",
+                    "expectedStoreId":boot["storeId"],"payload":{"action":"create","input":{"title":"Fixture","project":"sample",
+                    "assignee":{"kind":"chat","chatId":"1000000000000001"}}}});
+                let marked = exchange(address, "POST", "/mutate", &value.to_string()).await;
+                assert!(marked.starts_with("HTTP/1.1 501 "), "{marked}");
+                assert!(marked.contains("\r\nx-garcon-rs-unported: 1\r\n"));
+                assert!(marked.ends_with(r#"{"error":"not ported"}"#));
+                assert_eq!((fs::read(path).await.unwrap(), fs::read(wal).await.unwrap()), before);
+                value["payload"]["input"].as_object_mut().unwrap().shift_remove("assignee");
+                let created = exchange(address, "POST", "/mutate", &value.to_string()).await;
+                assert!(created.starts_with("HTTP/1.1 201 "), "{created}");
+                let created = garcon_js::json::parse(created.split_once("\r\n\r\n").unwrap().1).unwrap();
+                assert_eq!(created["ticket"]["id"], "G-1");
+                assert_eq!(ws.read_u8().await.unwrap(), 0x81);
+                let size = ws.read_u8().await.unwrap() as usize;
+                assert!(size < 126);
+                let mut event = vec![0; size];
+                ws.read_exact(&mut event).await.unwrap();
+                let event: Value = garcon_js::json::from_slice(&event).unwrap();
+                assert_eq!(event["type"], "tickets-invalidated");
+                assert_eq!(event["revision"].as_u64(), Some(1));
+            }).await.unwrap();
             controller.shutdown().await.unwrap();
         }).await;
     }

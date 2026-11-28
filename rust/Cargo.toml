@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = [
+  "garcon-agent-claude",
+  "garcon-agent-codex",
   "garcon-agent-direct-anthropic-compatible",
   "garcon-agent-direct-openai-compatible",
   "garcon-agent-direct-openai-responses-compatible",
@@ -8,6 +10,7 @@ members = [
   "garcon-base",
   "garcon-bench",
   "garcon-cases",
+  "garcon-chats",
   "garcon-contract",
   "garcon-controller",
   "garcon-execution",
