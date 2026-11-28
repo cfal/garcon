@@ -1,5 +1,6 @@
 pub mod api_providers;
 pub mod auth;
+pub mod chat_details;
 pub mod chat_messages;
 pub mod chat_rows;
 pub mod chat_snapshot;
