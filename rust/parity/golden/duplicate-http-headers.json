@@ -1,0 +1,520 @@
+{
+  "scenario": "duplicate-http-headers",
+  "cases": [
+    {
+      "name": "write-with-single-authorization-and-content-type",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "settings": {
+              "executionDefaults": {
+                "byAgent": {},
+                "global": {
+                  "agentSettingsById": {},
+                  "permissionMode": "default",
+                  "thinkingMode": "none"
+                }
+              },
+              "features": {
+                "agentCommands": {
+                  "chatIdDiscovery": true,
+                  "enabled": true,
+                  "resumeAgent": true,
+                  "schedule": true,
+                  "sendMessage": true,
+                  "startAgent": true,
+                  "tickets": true
+                },
+                "transcriptSearch": {
+                  "enabled": false
+                }
+              },
+              "paths": {
+                "browseStartPath": "",
+                "pinnedProjectPaths": [],
+                "recentProjectPaths": []
+              },
+              "pinnedChatIds": [],
+              "projectBasePath": "{{projectDir}}",
+              "recentAgentSettings": [],
+              "telegram": {
+                "botFirstName": null,
+                "botTokenAvailable": false,
+                "botUsername": null,
+                "linkUrl": null,
+                "pendingLink": false,
+                "recipientDisplayName": null,
+                "recipientLinked": false,
+                "recipientUsername": null
+              },
+              "ui": {
+                "appIdentity": {
+                  "title": "Single header"
+                }
+              },
+              "uiEffective": {
+                "agentSwitchCompaction": {
+                  "agentId": "amp",
+                  "apiProviderId": null,
+                  "contextWindowTokens": 500000,
+                  "enabled": false,
+                  "executorId": "local",
+                  "model": "medium",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "source": "auto",
+                  "thinkingMode": "none"
+                },
+                "chatTitle": {
+                  "agentId": "amp",
+                  "apiProviderId": null,
+                  "enabled": false,
+                  "executorId": "local",
+                  "model": "medium",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "source": "auto",
+                  "thinkingMode": "none"
+                },
+                "commitMessage": {
+                  "agentId": "amp",
+                  "apiProviderId": null,
+                  "executorId": "local",
+                  "model": "medium",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "source": "auto",
+                  "thinkingMode": "none"
+                },
+                "promptRefinement": {
+                  "agentId": "amp",
+                  "apiProviderId": null,
+                  "executorId": "local",
+                  "model": "medium",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "source": "auto",
+                  "thinkingMode": "none"
+                }
+              },
+              "version": 1
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/settings",
+          "rawHeaders": [
+            [
+              "Content-Type",
+              "application/json"
+            ]
+          ]
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "duplicate-authorization-rejects-the-write",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/settings",
+          "rawHeaders": [
+            [
+              "Authorization",
+              "Bearer surplus"
+            ]
+          ]
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "single-text-content-type-does-not-read-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "settings": {
+              "executionDefaults": {
+                "byAgent": {},
+                "global": {
+                  "agentSettingsById": {},
+                  "permissionMode": "default",
+                  "thinkingMode": "none"
+                }
+              },
+              "features": {
+                "agentCommands": {
+                  "chatIdDiscovery": true,
+                  "enabled": true,
+                  "resumeAgent": true,
+                  "schedule": true,
+                  "sendMessage": true,
+                  "startAgent": true,
+                  "tickets": true
+                },
+                "transcriptSearch": {
+                  "enabled": false
+                }
+              },
+              "paths": {
+                "browseStartPath": "",
+                "pinnedProjectPaths": [],
+                "recentProjectPaths": []
+              },
+              "pinnedChatIds": [],
+              "projectBasePath": "{{projectDir}}",
+              "recentAgentSettings": [],
+              "telegram": {
+                "botFirstName": null,
+                "botTokenAvailable": false,
+                "botUsername": null,
+                "linkUrl": null,
+                "pendingLink": false,
+                "recipientDisplayName": null,
+                "recipientLinked": false,
+                "recipientUsername": null
+              },
+              "ui": {
+                "appIdentity": {
+                  "title": "Single header"
+                }
+              },
+              "uiEffective": {
+                "agentSwitchCompaction": {
+                  "agentId": "amp",
+                  "apiProviderId": null,
+                  "contextWindowTokens": 500000,
+                  "enabled": false,
+                  "executorId": "local",
+                  "model": "medium",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "source": "auto",
+                  "thinkingMode": "none"
+                },
+                "chatTitle": {
+                  "agentId": "amp",
+                  "apiProviderId": null,
+                  "enabled": false,
+                  "executorId": "local",
+                  "model": "medium",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "source": "auto",
+                  "thinkingMode": "none"
+                },
+                "commitMessage": {
+                  "agentId": "amp",
+                  "apiProviderId": null,
+                  "executorId": "local",
+                  "model": "medium",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "source": "auto",
+                  "thinkingMode": "none"
+                },
+                "promptRefinement": {
+                  "agentId": "amp",
+                  "apiProviderId": null,
+                  "executorId": "local",
+                  "model": "medium",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "source": "auto",
+                  "thinkingMode": "none"
+                }
+              },
+              "version": 1
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/settings",
+          "rawHeaders": [
+            [
+              "Content-Type",
+              "text/plain"
+            ]
+          ]
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "duplicate-content-type-includes-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "settings": {
+              "executionDefaults": {
+                "byAgent": {},
+                "global": {
+                  "agentSettingsById": {},
+                  "permissionMode": "default",
+                  "thinkingMode": "none"
+                }
+              },
+              "features": {
+                "agentCommands": {
+                  "chatIdDiscovery": true,
+                  "enabled": true,
+                  "resumeAgent": true,
+                  "schedule": true,
+                  "sendMessage": true,
+                  "startAgent": true,
+                  "tickets": true
+                },
+                "transcriptSearch": {
+                  "enabled": false
+                }
+              },
+              "paths": {
+                "browseStartPath": "",
+                "pinnedProjectPaths": [],
+                "recentProjectPaths": []
+              },
+              "pinnedChatIds": [],
+              "projectBasePath": "{{projectDir}}",
+              "recentAgentSettings": [],
+              "telegram": {
+                "botFirstName": null,
+                "botTokenAvailable": false,
+                "botUsername": null,
+                "linkUrl": null,
+                "pendingLink": false,
+                "recipientDisplayName": null,
+                "recipientLinked": false,
+                "recipientUsername": null
+              },
+              "ui": {
+                "appIdentity": {
+                  "title": "Joined content type"
+                }
+              },
+              "uiEffective": {
+                "agentSwitchCompaction": {
+                  "agentId": "amp",
+                  "apiProviderId": null,
+                  "contextWindowTokens": 500000,
+                  "enabled": false,
+                  "executorId": "local",
+                  "model": "medium",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "source": "auto",
+                  "thinkingMode": "none"
+                },
+                "chatTitle": {
+                  "agentId": "amp",
+                  "apiProviderId": null,
+                  "enabled": false,
+                  "executorId": "local",
+                  "model": "medium",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "source": "auto",
+                  "thinkingMode": "none"
+                },
+                "commitMessage": {
+                  "agentId": "amp",
+                  "apiProviderId": null,
+                  "executorId": "local",
+                  "model": "medium",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "source": "auto",
+                  "thinkingMode": "none"
+                },
+                "promptRefinement": {
+                  "agentId": "amp",
+                  "apiProviderId": null,
+                  "executorId": "local",
+                  "model": "medium",
+                  "modelEndpointId": null,
+                  "modelProtocol": null,
+                  "source": "auto",
+                  "thinkingMode": "none"
+                }
+              },
+              "version": 2
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/settings",
+          "rawHeaders": [
+            [
+              "Content-Type",
+              "text/plain"
+            ],
+            [
+              "Content-Type",
+              "application/json"
+            ]
+          ]
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "reads-the-write-with-joined-content-type",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "executionDefaults": {
+              "byAgent": {},
+              "global": {
+                "agentSettingsById": {},
+                "permissionMode": "default",
+                "thinkingMode": "none"
+              }
+            },
+            "features": {
+              "agentCommands": {
+                "chatIdDiscovery": true,
+                "enabled": true,
+                "resumeAgent": true,
+                "schedule": true,
+                "sendMessage": true,
+                "startAgent": true,
+                "tickets": true
+              },
+              "transcriptSearch": {
+                "enabled": false
+              }
+            },
+            "paths": {
+              "browseStartPath": "",
+              "pinnedProjectPaths": [],
+              "recentProjectPaths": []
+            },
+            "pinnedChatIds": [],
+            "projectBasePath": "{{projectDir}}",
+            "recentAgentSettings": [],
+            "telegram": {
+              "botFirstName": null,
+              "botTokenAvailable": false,
+              "botUsername": null,
+              "linkUrl": null,
+              "pendingLink": false,
+              "recipientDisplayName": null,
+              "recipientLinked": false,
+              "recipientUsername": null
+            },
+            "ui": {
+              "appIdentity": {
+                "title": "Joined content type"
+              }
+            },
+            "uiEffective": {
+              "agentSwitchCompaction": {
+                "agentId": "amp",
+                "apiProviderId": null,
+                "contextWindowTokens": 500000,
+                "enabled": false,
+                "executorId": "local",
+                "model": "medium",
+                "modelEndpointId": null,
+                "modelProtocol": null,
+                "source": "auto",
+                "thinkingMode": "none"
+              },
+              "chatTitle": {
+                "agentId": "amp",
+                "apiProviderId": null,
+                "enabled": false,
+                "executorId": "local",
+                "model": "medium",
+                "modelEndpointId": null,
+                "modelProtocol": null,
+                "source": "auto",
+                "thinkingMode": "none"
+              },
+              "commitMessage": {
+                "agentId": "amp",
+                "apiProviderId": null,
+                "executorId": "local",
+                "model": "medium",
+                "modelEndpointId": null,
+                "modelProtocol": null,
+                "source": "auto",
+                "thinkingMode": "none"
+              },
+              "promptRefinement": {
+                "agentId": "amp",
+                "apiProviderId": null,
+                "executorId": "local",
+                "model": "medium",
+                "modelEndpointId": null,
+                "modelProtocol": null,
+                "source": "auto",
+                "thinkingMode": "none"
+              }
+            },
+            "version": 2
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/settings"
+        },
+        "status": 200
+      },
+      "noise": []
+    }
+  ]
+}
