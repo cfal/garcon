@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use garcon_base::{
     domain_error::DomainError,
     errors::{ErrorInput, error_metadata},
+    executor_disconnect::ExecutorSessionLostError,
 };
 use garcon_cases::{CaseError, replay, unknown};
 use garcon_contract::{
@@ -662,4 +663,36 @@ fn only_unknown_launch_errors_are_reclassified_before_dispatch() {
     let after = after.downcast_ref::<AgentCallError>().unwrap();
     assert_eq!(after.outcome, AgentDeliveryOutcome::NotDispatched);
     assert_eq!(after.message, "The turn did not start: lost");
+}
+
+#[test]
+fn setup_and_dispatch_classify_a_lost_executor_session_as_an_agent_call_error() {
+    for (outcome, code) in [
+        (AgentDeliveryOutcome::NotDispatched, "UNAVAILABLE"),
+        (AgentDeliveryOutcome::Rejected, "UNAVAILABLE"),
+        (AgentDeliveryOutcome::Unknown, "OUTCOME_UNKNOWN"),
+    ] {
+        let error: Box<dyn Error> = Box::new(ExecutorSessionLostError::new(outcome, "lost"));
+        let detail = dispatch_failure_detail(error.as_ref());
+        assert_eq!(detail.code, code);
+        assert_eq!(detail.message.as_deref(), Some("lost"));
+        assert_eq!(
+            is_lost_launch_reply(error.as_ref()),
+            outcome == AgentDeliveryOutcome::Unknown
+        );
+        let setup = execution_setup_failure(error);
+        if outcome == AgentDeliveryOutcome::Unknown {
+            let setup = setup.downcast_ref::<AgentCallError>().unwrap();
+            assert_eq!(setup.outcome, AgentDeliveryOutcome::NotDispatched);
+            assert_eq!(setup.message, "The turn did not start: lost");
+        } else {
+            assert_eq!(
+                setup
+                    .downcast_ref::<ExecutorSessionLostError>()
+                    .unwrap()
+                    .outcome,
+                outcome
+            );
+        }
+    }
 }

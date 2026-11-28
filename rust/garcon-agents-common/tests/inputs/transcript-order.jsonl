@@ -1,0 +1,13 @@
+{"fn":"compareTranscriptTimestamps","args":[3,1]}
+{"fn":"compareTranscriptTimestamps","args":[1,3]}
+{"fn":"compareTranscriptTimestamps","args":[1,1]}
+{"fn":"compareTranscriptTimestamps","args":[0,1]}
+{"fn":"compareTranscriptTimestamps","args":[1,0]}
+{"fn":"compareTranscriptTimestamps","args":[0,-1]}
+{"fn":"compareTranscriptTimestamps","args":[-2,-1]}
+{"fn":"compareTranscriptTimestamps","args":[0.5,1]}
+{"fn":"compareTranscriptTimestamps","args":[{"$":"number","value":"NaN"},1]}
+{"fn":"compareTranscriptTimestamps","args":[1,{"$":"number","value":"NaN"}]}
+{"fn":"compareTranscriptTimestamps","args":[{"$":"number","value":"Infinity"},1]}
+{"fn":"compareTranscriptTimestamps","args":[1,{"$":"number","value":"Infinity"}]}
+{"fn":"compareTranscriptTimestamps","args":[{"$":"number","value":"Infinity"},{"$":"number","value":"Infinity"}]}

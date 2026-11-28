@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use garcon_base::{
     domain_error::{DomainError, as_domain_error},
     errors::{ErrorInput, error_metadata},
+    executor_disconnect::ExecutorSessionLostError,
 };
 use garcon_cases::{CaseError, replay, unknown};
 use garcon_contract::{
@@ -199,13 +200,19 @@ impl AgentTurnRunnerPort for SteerFake {
             prepare().await?;
             self.effects.borrow_mut().push(json!(["prepared"]));
         }
-        if let Some(outcome) = self.spec.get("agentError") {
+        let lost_session = self.spec.get("sessionLost");
+        if let Some(outcome) = lost_session.or_else(|| self.spec.get("agentError")) {
             let outcome = match outcome.as_str().unwrap() {
                 "not-dispatched" => AgentDeliveryOutcome::NotDispatched,
+                "rejected" => AgentDeliveryOutcome::Rejected,
                 "unknown" => AgentDeliveryOutcome::Unknown,
                 value => panic!("unexpected agent outcome {value}"),
             };
-            return Err(Box::new(AgentCallError::new(outcome, "send failed")));
+            return Err(if lost_session.is_some() {
+                Box::new(ExecutorSessionLostError::new(outcome, "send failed"))
+            } else {
+                Box::new(AgentCallError::new(outcome, "send failed"))
+            });
         }
         if let Some(outcome) = self.spec.get("failure") {
             return Ok(AgentSteerResult::Failed {
@@ -489,6 +496,20 @@ async fn admits_the_input_before_delivering_it_to_a_steerable_turn() {
         ]
     );
     assert_eq!(trace["effects"][3][6], 122.5);
+}
+
+#[tokio::test]
+async fn a_lost_session_uses_its_delivery_outcome_even_after_preparation() {
+    for (outcome, code, delivery) in [
+        ("not-dispatched", "STEER_NOT_DELIVERED", "not-sent"),
+        ("rejected", "STEER_NOT_DELIVERED", "not-sent"),
+        ("unknown", "STEER_OUTCOME_UNKNOWN", "unknown"),
+    ] {
+        let trace = steer_trace(&json!({"sessionLost":outcome})).await;
+        assert!(effect_names(&trace).contains(&"prepared"));
+        assert_eq!(trace["result"]["error"]["code"], code, "{outcome}");
+        assert_eq!(trace["result"]["error"]["outcome"], delivery, "{outcome}");
+    }
 }
 
 #[tokio::test]
