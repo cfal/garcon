@@ -1,0 +1,41 @@
+{
+  "module": "common/chat-parentage.ts",
+  "tests": [
+    "common/__tests__/chat-parentage.test.js"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "chatLineagesEqual",
+      "argument": 0,
+      "guard": "parseChatLineage",
+      "dropped": 65,
+      "kept": 30
+    },
+    {
+      "fn": "chatLineagesEqual",
+      "argument": 1,
+      "guard": "parseChatLineage",
+      "dropped": 62,
+      "kept": 30
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "parseChatLineage",
+      "argument": 0
+    },
+    {
+      "fn": "chatLineagesEqual",
+      "argument": 0
+    },
+    {
+      "fn": "chatLineagesEqual",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 149,
+  "sha256": "e8f085b8e1f6f402b1fdc79fe9ea3136416d6dc7995b1ad84a48f27aa6863ade"
+}
