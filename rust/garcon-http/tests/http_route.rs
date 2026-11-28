@@ -320,7 +320,24 @@ fn json_response_preserves_status_content_type_and_json_bytes() {
     assert_eq!(response.into_body().unwrap(), r#"{"error":"fixture"}"#);
 }
 
-fn edge_routes(web_build_dir: PathBuf) -> compose_routes::RouteMap<Route> {
+async fn edge_routes(web_build_dir: PathBuf, config: &Path) -> compose_routes::RouteMap<Route> {
+    use garcon_js::{Clock, SystemClock};
+    use garcon_stores::auth::passwords::BunPasswords;
+    use garcon_stores::auth::service::AuthService;
+    use garcon_stores::auth::store::AuthAccountStore;
+    use garcon_stores::auth::token::AuthTokens;
+
+    let clock: Rc<dyn Clock> = Rc::new(SystemClock);
+    let store = AuthAccountStore::open(config.to_str().unwrap(), clock.clone())
+        .await
+        .unwrap();
+    let service = Rc::new(AuthService::new(
+        store,
+        AuthTokens::new("30d".into(), clock.clone()),
+        Rc::new(BunPasswords),
+        clock,
+    ));
+    let auth = routes::auth::AuthRoutes::new(service, false, false).unwrap();
     let runtime = Rc::new(ServerRuntimeState {
         identity: ServerRuntimeIdentity {
             schema_version: 1,
@@ -338,13 +355,17 @@ fn edge_routes(web_build_dir: PathBuf) -> compose_routes::RouteMap<Route> {
             base_path: "/tools".into(),
             app_title: Rc::new(app_title::PublicAppTitle::default),
         },
+        &auth,
     )
     .unwrap()
 }
 
-#[test]
-fn unported_inventory_matches_the_original_after_subtracting_registered_handlers() {
-    let routes = edge_routes("/fixture/build".into());
+#[tokio::test]
+async fn unported_inventory_matches_the_original_after_subtracting_registered_handlers() {
+    let config = tempfile::tempdir().unwrap();
+    let routes = LocalSet::new()
+        .run_until(edge_routes("/fixture/build".into(), config.path()))
+        .await;
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let output = Command::new("bun")
         .arg("rust/garcon-http/tests/oracles/unported-routes.ts")
@@ -369,12 +390,13 @@ fn unported_inventory_matches_the_original_after_subtracting_registered_handlers
 async fn native_routes_serve_the_shell_and_runtime_with_their_original_access_rules() {
     LocalSet::new().run_until(async {
         let build = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
         std::fs::write(
             build.path().join("index.html"),
             r#"<head><title>Before</title><link href="__GARCON_RUNTIME_BASE_PATH__/site.webmanifest" /></head>"#,
         ).unwrap();
         let router = HttpRouter::new(
-            edge_routes(build.path().to_path_buf()),
+            edge_routes(build.path().to_path_buf(), config.path()).await,
             options(Rc::new(Cell::new(false)), false),
             Rc::new(FixtureAuth),
         ).unwrap();
@@ -403,4 +425,47 @@ async fn native_routes_serve_the_shell_and_runtime_with_their_original_access_ru
         assert!(context.ends_with(r#"{"serverInstanceId":"fixture-instance","defaultExecutorId":"local","workspaceName":"fixture"}"#), "{context}");
         shutdown.cancel();
     }).await;
+}
+
+#[tokio::test]
+async fn native_head_preserves_buns_fallback_redirect_and_file_headers() {
+    LocalSet::new()
+        .run_until(async {
+            let build = tempfile::tempdir().unwrap();
+            let config = tempfile::tempdir().unwrap();
+            std::fs::create_dir(build.path().join("_app")).unwrap();
+            std::fs::write(build.path().join("_app/no-extension"), "payload").unwrap();
+            let router = HttpRouter::new(
+                edge_routes(build.path().to_path_buf(), config.path()).await,
+                options(Rc::new(Cell::new(false)), false),
+                Rc::new(FixtureAuth),
+            )
+            .unwrap();
+            let (addr, shutdown) = start(router).await;
+            for (path, status, length, omitted) in [
+                ("/outside", "404", "9", "content-type:"),
+                ("/tools", "308", "0", "content-type:"),
+                (
+                    "/tools/_app/no-extension",
+                    "200",
+                    "7",
+                    "content-disposition:",
+                ),
+            ] {
+                let response = exchange(addr, "HEAD", path, HOST).await;
+                let (head, body) = response.split_once("\r\n\r\n").unwrap();
+                assert!(
+                    head.starts_with(&format!("HTTP/1.1 {status} ")),
+                    "{response}"
+                );
+                assert!(
+                    head.contains(&format!("\r\ncontent-length: {length}")),
+                    "{head}"
+                );
+                assert!(!head.contains(omitted), "{head}");
+                assert!(body.is_empty(), "{response}");
+            }
+            shutdown.cancel();
+        })
+        .await;
 }

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use http::header::CONTENT_DISPOSITION;
 use http::{Method, Response};
 
 use super::super::app_title::PublicAppTitle;
@@ -49,12 +50,16 @@ pub fn create_static_routes(options: StaticRoutes) -> RouteMap<Route> {
         }
     });
     let file_options = Rc::clone(&options);
-    let file = Route::new(public.clone(), move |_, url, _| {
+    let file = Route::new(public.clone(), move |request, url, _| {
         let options = Rc::clone(&file_options);
+        let head = request.method() == Method::HEAD;
         async move {
-            Ok(as_route_response(
-                serve_path(&options.web_build_dir, url.path()).await,
-            ))
+            let mut file = serve_path(&options.web_build_dir, url.path()).await;
+            if head {
+                // Bun adds this implicit header only when sending the file body.
+                file.headers.remove(CONTENT_DISPOSITION);
+            }
+            Ok(as_route_response(file))
         }
     });
     let worker = Route::new(public, move |_, _, _| {
