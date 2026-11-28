@@ -2,11 +2,16 @@
 
 use std::rc::Rc;
 
+use futures::TryStreamExt;
 use garcon_contract::{chat_id::ChatId, chat_types::*};
-use garcon_ledger::{projection::preview_messages, store::TranscriptLedgerStore};
+use garcon_ledger::{
+    projection::{message_for_conversation_row, preview_messages},
+    store::TranscriptLedgerStore,
+};
 
 use super::{
-    AgentPreviewMetadata, BoxError, ExistingTranscriptPreview, MetadataTranscriptSource,
+    AgentPreviewMetadata, BoxError, ExistingTranscriptPreview, MetadataIndex,
+    MetadataTranscriptSource,
     preview::{text, timestamp},
 };
 use crate::registry_contracts::ChatRegistryEntry;
@@ -18,6 +23,27 @@ pub struct LedgerMetadataSource {
 impl LedgerMetadataSource {
     pub fn new(store: Rc<TranscriptLedgerStore>) -> Self {
         Self { store }
+    }
+
+    pub async fn replace_metadata(
+        &self,
+        metadata: &Rc<MetadataIndex>,
+        chat_id: &ChatId,
+        view_id: &str,
+    ) -> Result<(), BoxError> {
+        let watermark = self.store.high_watermark(chat_id)?;
+        let pages = self
+            .store
+            .row_pages_through(chat_id, &watermark, 1, None)
+            .map_ok(|rows| {
+                rows.iter()
+                    .filter_map(message_for_conversation_row)
+                    .collect()
+            });
+        metadata
+            .replace_from_transcript_view(chat_id, view_id, pages)
+            .await?;
+        Ok(())
     }
 }
 
@@ -122,7 +148,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::registry_entry_codec::normalize_chat_registry_entry;
+    use crate::{registry_entry_codec::normalize_chat_registry_entry, store::ChatRegistry};
 
     const CHAT: &str = "1783725900000200";
     const AT: &str = "2026-08-15T00:00:00.000Z";
@@ -313,5 +339,68 @@ mod tests {
             serde_json::to_string(&wire).unwrap(),
             String::from_utf8(bun.stdout).unwrap().trim_end()
         );
+    }
+
+    #[tokio::test]
+    async fn replacement_metadata_folds_the_whole_view_and_keeps_the_view_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let fixture = Fixture::new(root.path());
+        std::fs::write(
+            root.path().join("chats.json"),
+            json!({"version":6,"sessions":{CHAT:&fixture.entry}}).to_string(),
+        )
+        .unwrap();
+        let registry = ChatRegistry::open(root.path()).await.unwrap();
+        let source = Rc::new(fixture.source);
+        let index = MetadataIndex::open(registry, source.clone(), Default::default()).await;
+        let mut drafts: Vec<_> = (0..450)
+            .map(|number| LedgerRowDraft {
+                at: AT.into(),
+                provider_meta: None,
+                data: LedgerRowData::ProviderRow {
+                    message: ChatMessage::Assistant(AssistantMessage {
+                        timestamp: AT.into(),
+                        content: format!("Synthetic reply {number}"),
+                        questions: None,
+                    }),
+                },
+            })
+            .collect();
+        drafts[1].data = LedgerRowData::ProviderRow {
+            message: ChatMessage::User(UserMessage {
+                timestamp: AT.into(),
+                content: "Synthetic first input".into(),
+                images: None,
+                metadata: None,
+                presentation: None,
+            }),
+        };
+        let view = source
+            .store
+            .initialize_current_view(
+                &fixture.id,
+                InitializeViewInput {
+                    view_id: None,
+                    content_start_ordinal: 1,
+                    rows: &drafts,
+                },
+            )
+            .unwrap();
+        source
+            .replace_metadata(&index, &fixture.id, "stale-view")
+            .await
+            .unwrap();
+        assert!(index.get_chat_metadata(&fixture.id).is_none());
+        source
+            .replace_metadata(&index, &fixture.id, view.view_id.as_str())
+            .await
+            .unwrap();
+        let entry = index.get_chat_metadata(&fixture.id).unwrap();
+        assert_eq!(
+            entry.transcript_view_id.as_deref(),
+            Some(view.view_id.as_str())
+        );
+        assert_eq!(entry.first_message, "Synthetic first input");
+        assert_eq!(entry.last_message, "Synthetic reply 449");
     }
 }
