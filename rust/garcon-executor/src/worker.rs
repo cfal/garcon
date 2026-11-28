@@ -255,7 +255,7 @@ impl ExecutionRuntimeApi for ExecutorApi {
         options: Option<ExecutorCallOptions>,
     ) -> ExecutorResult<Rc<dyn ExecutionGhService>> {
         self.lifetime.available(options.as_ref())?;
-        Err(unported_service("GitHub"))
+        Ok(self.git.clone())
     }
 
     async fn get_terminal_service(
@@ -381,7 +381,7 @@ impl Executor {
             services: ExecutorServices {
                 files: true,
                 git: true,
-                gh: false,
+                gh: true,
                 terminals: true,
                 directory_creation: files.can_create_directories(),
             },
@@ -955,7 +955,7 @@ mod tests {
                 assert_eq!(api.availability(), ExecutorAvailability::Ready);
                 let info = api.get_info(None).await.unwrap();
                 assert!(info.services.files && info.services.terminals);
-                assert!(info.services.git && !info.services.gh);
+                assert!(info.services.git && info.services.gh);
                 assert!(Rc::ptr_eq(
                     &api.get_project_service(None).await.unwrap(),
                     &api.get_project_service(None).await.unwrap(),
@@ -971,6 +971,10 @@ mod tests {
                 assert!(Rc::ptr_eq(
                     &api.get_git_service(None).await.unwrap(),
                     &api.get_git_service(None).await.unwrap()
+                ));
+                assert!(Rc::ptr_eq(
+                    &api.get_gh_service(None).await.unwrap(),
+                    &api.get_gh_service(None).await.unwrap()
                 ));
                 let unknown = api
                     .get_agent_integration("missing", None)
@@ -1109,6 +1113,7 @@ mod tests {
                 assert_eq!(describe["info"]["executorId"], executor_id);
                 assert_eq!(describe["info"]["services"]["files"], true);
                 assert_eq!(describe["info"]["services"]["terminals"], true);
+                assert_eq!(describe["info"]["services"]["gh"], true);
                 let id = "direct-openai-compatible";
                 let manifests = describe["integrations"].as_array().unwrap();
                 let advertised_ids: Vec<_> = manifests.iter().map(|entry| entry["descriptor"]["id"].as_str().unwrap()).collect();

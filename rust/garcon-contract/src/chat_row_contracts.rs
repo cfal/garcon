@@ -71,10 +71,19 @@ pub enum AddChatRowStatus {
 }
 
 pub fn parse_chat_row_content(value: &Value) -> Result<&str, CommandRequestValidationError> {
+    parse_content(value, false)
+}
+
+fn parse_content(value: &Value, unpaired: bool) -> Result<&str, CommandRequestValidationError> {
     let content = value
         .as_str()
         .filter(|value| !trim(value).is_empty())
         .ok_or_else(|| CommandRequestValidationError::new("content is required"))?;
+    if unpaired {
+        return Err(CommandRequestValidationError::new(
+            "content must contain well-formed Unicode",
+        ));
+    }
     if content.len() > CHAT_ROW_CONTENT_MAX_BYTES {
         return Err(CommandRequestValidationError::new(format!(
             "content must be at most {CHAT_ROW_CONTENT_MAX_BYTES} UTF-8 bytes"
@@ -84,6 +93,13 @@ pub fn parse_chat_row_content(value: &Value) -> Result<&str, CommandRequestValid
 }
 
 pub fn parse_chat_row_title(value: &Value) -> Result<Option<&str>, CommandRequestValidationError> {
+    parse_title(value, false)
+}
+
+fn parse_title(
+    value: &Value,
+    unpaired: bool,
+) -> Result<Option<&str>, CommandRequestValidationError> {
     if value.is_null() {
         return Ok(None);
     }
@@ -95,6 +111,11 @@ pub fn parse_chat_row_title(value: &Value) -> Result<Option<&str>, CommandReques
     if title.is_empty() {
         return Err(CommandRequestValidationError::new(
             "title must not be empty",
+        ));
+    }
+    if unpaired {
+        return Err(CommandRequestValidationError::new(
+            "title must contain well-formed Unicode",
         ));
     }
     if title
@@ -116,6 +137,19 @@ pub fn parse_chat_row_title(value: &Value) -> Result<Option<&str>, CommandReques
 pub fn parse_add_chat_row_request(
     value: &Value,
 ) -> Result<AddChatRowRequest, CommandRequestValidationError> {
+    parse_add_chat_row_request_with_unpaired_surrogates(value, ChatRowUnpairedSurrogates::default())
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ChatRowUnpairedSurrogates {
+    pub title: bool,
+    pub content: bool,
+}
+
+pub fn parse_add_chat_row_request_with_unpaired_surrogates(
+    value: &Value,
+    unpaired: ChatRowUnpairedSurrogates,
+) -> Result<AddChatRowRequest, CommandRequestValidationError> {
     let body = request_record(value)?;
     let presentation = body
         .get("presentation")
@@ -131,7 +165,7 @@ pub fn parse_add_chat_row_request(
         .ok_or_else(|| {
             CommandRequestValidationError::new("disclosure must be expanded or collapsed")
         })?;
-    let title = parse_chat_row_title(body.get("title").unwrap_or(&Value::Null))?;
+    let title = parse_title(body.get("title").unwrap_or(&Value::Null), unpaired.title)?;
     Ok(AddChatRowRequest {
         client_request_id: required_command_correlation_id(body, "clientRequestId")?.to_owned(),
         client_message_id: required_command_correlation_id(body, "clientMessageId")?.to_owned(),
@@ -141,7 +175,11 @@ pub fn parse_add_chat_row_request(
         format,
         disclosure,
         title: title.map(str::to_owned),
-        content: parse_chat_row_content(body.get("content").unwrap_or(&Value::Null))?.to_owned(),
+        content: parse_content(
+            body.get("content").unwrap_or(&Value::Null),
+            unpaired.content,
+        )?
+        .to_owned(),
     })
 }
 
@@ -340,6 +378,45 @@ mod tests {
             input[key] = valid;
         }
         assert!(parse_add_chat_row_request(&input).is_ok());
+    }
+
+    #[test]
+    fn durable_request_rejects_surrogates_without_changing_validation_order() {
+        let mut body = request();
+        body["title"] = json!("\u{fffd}\nsecond");
+        body["content"] = json!("\u{fffd}");
+        let mut unpaired = ChatRowUnpairedSurrogates {
+            title: true,
+            content: true,
+        };
+        body["format"] = json!("html");
+        let validate = |body: &Value, unpaired| {
+            parse_add_chat_row_request_with_unpaired_surrogates(body, unpaired)
+                .unwrap_err()
+                .to_string()
+        };
+        assert_eq!(
+            validate(&body, unpaired),
+            "format must be plain or markdown"
+        );
+        body["format"] = json!("plain");
+        assert_eq!(
+            validate(&body, unpaired),
+            "title must contain well-formed Unicode"
+        );
+        unpaired.title = false;
+        assert_eq!(validate(&body, unpaired), "title must be a single line");
+        body["title"] = json!("\u{fffd}");
+        body["clientRequestId"] = Value::Null;
+        assert_eq!(validate(&body, unpaired), "clientRequestId is required");
+        body["clientRequestId"] = json!("request-1");
+        assert_eq!(
+            validate(&body, unpaired),
+            "content must contain well-formed Unicode"
+        );
+        let accepted = parse_add_chat_row_request(&body).unwrap();
+        assert_eq!(accepted.title.as_deref(), Some("\u{fffd}"));
+        assert_eq!(accepted.content, "\u{fffd}");
     }
 
     #[test]
