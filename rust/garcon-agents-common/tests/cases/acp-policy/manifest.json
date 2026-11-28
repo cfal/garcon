@@ -1,0 +1,11 @@
+{
+  "module": "server-agents/common/src/acp/policy.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/acp-policy.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 8,
+  "sha256": "6bd915de302e51dcc5d6a3f1f69c3a5ccb3955551083e75cc90dec81da5e525c"
+}
