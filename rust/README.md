@@ -52,6 +52,10 @@ Unit names for the kill switch are listed in [`MAP.md`](MAP.md).
 
 ## The verification loop
 
+Run the recording, replay, and trace commands on the build machine through
+`garcon-rs-remote <lane> -- bash -c 'cd .. && ...'`: the wrapper starts in
+`rust/`, and these commands run from the repository root.
+
 A scenario is a sequence of HTTP and WebSocket steps run against a fresh server
 in an isolated config, workspace, project, and home directory, with seeded
 credentials. The server's PATH is a private directory containing links to
