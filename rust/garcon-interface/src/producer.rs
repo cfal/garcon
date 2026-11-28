@@ -321,7 +321,10 @@ pub trait AgentProducers {
         options: Option<ExecutorCallOptions>,
     ) -> ExecutorResult<()>;
     fn detach(&self, binding: AgentProducerBinding);
-    fn subscribe(&self, listener: Rc<dyn Fn(AgentProducerNotification)>) -> Box<dyn Fn()>;
+    fn subscribe(
+        &self,
+        listener: Rc<dyn Fn(AgentProducerNotification) -> ExecutorResult<()>>,
+    ) -> Box<dyn Fn()>;
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

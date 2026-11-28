@@ -6,6 +6,9 @@ use rusqlite::{Connection, Row, ffi};
 
 use crate::codec::StoredLedgerRow;
 
+mod result_code_names;
+use result_code_names::sqlite_code_name;
+
 pub type LedgerResult<T> = Result<T, Box<dyn Error>>;
 
 pub fn bind_ordinal(ordinal: u64) -> rusqlite::types::Value {
@@ -160,72 +163,4 @@ impl DiagnosticError for SqliteError {
             code: code.and_then(sqlite_code_name),
         }
     }
-}
-
-fn sqlite_code_name(code: i32) -> Option<&'static str> {
-    macro_rules! names {
-        ($($code:ident),* $(,)?) => {
-            match code {
-                $( ffi::$code => Some(stringify!($code)), )*
-                _ => None,
-            }
-        };
-    }
-    names!(
-        SQLITE_ERROR,
-        SQLITE_INTERNAL,
-        SQLITE_PERM,
-        SQLITE_ABORT,
-        SQLITE_BUSY,
-        SQLITE_LOCKED,
-        SQLITE_NOMEM,
-        SQLITE_READONLY,
-        SQLITE_INTERRUPT,
-        SQLITE_IOERR,
-        SQLITE_CORRUPT,
-        SQLITE_NOTFOUND,
-        SQLITE_FULL,
-        SQLITE_CANTOPEN,
-        SQLITE_PROTOCOL,
-        SQLITE_EMPTY,
-        SQLITE_SCHEMA,
-        SQLITE_TOOBIG,
-        SQLITE_CONSTRAINT,
-        SQLITE_MISMATCH,
-        SQLITE_MISUSE,
-        SQLITE_NOLFS,
-        SQLITE_AUTH,
-        SQLITE_FORMAT,
-        SQLITE_RANGE,
-        SQLITE_NOTADB,
-        SQLITE_BUSY_RECOVERY,
-        SQLITE_BUSY_SNAPSHOT,
-        SQLITE_BUSY_TIMEOUT,
-        SQLITE_CORRUPT_VTAB,
-        SQLITE_CORRUPT_SEQUENCE,
-        SQLITE_CORRUPT_INDEX,
-        SQLITE_CONSTRAINT_CHECK,
-        SQLITE_CONSTRAINT_COMMITHOOK,
-        SQLITE_CONSTRAINT_FOREIGNKEY,
-        SQLITE_CONSTRAINT_FUNCTION,
-        SQLITE_CONSTRAINT_NOTNULL,
-        SQLITE_CONSTRAINT_PRIMARYKEY,
-        SQLITE_CONSTRAINT_TRIGGER,
-        SQLITE_CONSTRAINT_UNIQUE,
-        SQLITE_CONSTRAINT_VTAB,
-        SQLITE_CONSTRAINT_ROWID,
-        SQLITE_CONSTRAINT_DATATYPE,
-        SQLITE_IOERR_READ,
-        SQLITE_IOERR_SHORT_READ,
-        SQLITE_IOERR_WRITE,
-        SQLITE_IOERR_FSYNC,
-        SQLITE_IOERR_TRUNCATE,
-        SQLITE_IOERR_FSTAT,
-        SQLITE_IOERR_DELETE,
-    )
-    .or_else(|| {
-        (code & 0xff != code)
-            .then(|| sqlite_code_name(code & 0xff))
-            .flatten()
-    })
 }

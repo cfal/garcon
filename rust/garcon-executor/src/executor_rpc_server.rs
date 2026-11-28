@@ -11,6 +11,7 @@ use garcon_interface::execution_v5::{
     AgentExecutionHandle, AgentResumeRequestV5, AgentStartRequestV5,
 };
 use garcon_interface::files::{ExecutionFileEntry, ExecutionFileTarget};
+use garcon_interface::integration::AgentIntegration;
 use garcon_interface::producer::{AgentPermissionRespondRequest, AgentProducerBindRequest};
 use garcon_interface::resources::{AgentProducerBinding, ExecutorCallOptions, ExecutorResult};
 use garcon_js::{
@@ -30,7 +31,7 @@ use tokio_util::sync::CancellationToken;
 use crate::history_rpc_server::HistoryRpcServer;
 use crate::producer_relay::{LaunchRequest, ProducerRelay, ProducerRelaySession, RelayIntegration};
 use crate::terminal_rpc_server::TerminalRpcServer;
-use crate::worker::ExecutorApi;
+use crate::worker::{ExecutorApi, UnknownAgentIntegration};
 
 pub(crate) struct ExecutorRpcServer {
     api: Rc<ExecutorApi>,
@@ -244,17 +245,12 @@ impl ExecutorRpcServer {
                 self.terminals.handle(method, request).await
             }
             "history.open" | "history.next" | "history.close" => {
-                let integration = self
-                    .api
-                    .get_agent_integration(&call.integration_id, options(signal.clone()))
-                    .await
-                    .map_err(|_| {
-                        shared_error(AgentCallError::with_code(
-                            AgentDeliveryOutcome::NotDispatched,
-                            "Unknown integration",
-                            AgentIntegrationErrorCode::OPERATION_UNSUPPORTED,
-                        ))
-                    })?;
+                let integration = resolve_worker_integration(
+                    self.api.as_ref(),
+                    &call.integration_id,
+                    signal.clone(),
+                )
+                .await?;
                 let history = history.ok_or_else(|| {
                     shared_error(AgentCallError::with_code(
                         AgentDeliveryOutcome::Rejected,
@@ -386,11 +382,9 @@ impl ExecutorRpcServer {
     ) -> RpcResult {
         let method = call.method.as_str();
         let request = &call.request;
-        let integration = self
-            .api
-            .get_agent_integration(&call.integration_id, options(signal.clone()))
-            .await
-            .map_err(|_| not_ported(method))?;
+        let integration =
+            resolve_worker_integration(self.api.as_ref(), &call.integration_id, signal.clone())
+                .await?;
         let owner = RelayIntegration::from(integration.as_ref());
         let session = &self.producer_session;
         let invalid = |_| rejected("Invalid producer or execution request");
@@ -534,6 +528,26 @@ impl ExecutorRpcServer {
     }
 }
 
+async fn resolve_worker_integration(
+    api: &dyn ExecutionRuntimeApi,
+    integration_id: &str,
+    signal: CancellationToken,
+) -> Result<Rc<AgentIntegration>, SessionError> {
+    api.get_agent_integration(integration_id, options(signal))
+        .await
+        .map_err(|error| {
+            if error.is::<UnknownAgentIntegration>() {
+                shared_error(AgentCallError::with_code(
+                    AgentDeliveryOutcome::NotDispatched,
+                    "Unknown integration",
+                    AgentIntegrationErrorCode::OPERATION_UNSUPPORTED,
+                ))
+            } else {
+                Rc::from(error)
+            }
+        })
+}
+
 fn producer_resume_requests(request: &Value) -> Result<Vec<(String, u64)>, SessionError> {
     let invalid = || rejected("Invalid producer resume request");
     let entries = request["bindings"].as_array().ok_or_else(invalid)?;
@@ -616,3 +630,6 @@ pub(crate) fn describe(info: &ExecutorInfo) -> RpcResult {
         integrations: [],
     }))
 }
+
+#[cfg(test)]
+mod tests;

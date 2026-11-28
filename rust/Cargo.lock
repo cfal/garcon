@@ -1037,11 +1037,13 @@ dependencies = [
  "garcon-contract",
  "garcon-interface",
  "garcon-js",
+ "indexmap",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "uuid",
 ]
 
 [[package]]
@@ -1122,8 +1124,11 @@ dependencies = [
  "garcon-js",
  "icu_normalizer",
  "regress",
+ "rusqlite",
  "serde",
  "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

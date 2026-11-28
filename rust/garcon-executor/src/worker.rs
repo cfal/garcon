@@ -120,6 +120,17 @@ pub(crate) struct ExecutorApi {
     lifetime: Rc<ExecutorLifetime>,
 }
 
+#[derive(Debug)]
+pub(crate) struct UnknownAgentIntegration(String);
+
+impl std::fmt::Display for UnknownAgentIntegration {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "Unsupported agent integration: {}", self.0)
+    }
+}
+
+impl Error for UnknownAgentIntegration {}
+
 impl ExecutorApi {
     pub(crate) fn info(&self) -> &ExecutorInfo {
         &self.info
@@ -184,7 +195,7 @@ impl ExecutionRuntimeApi for ExecutorApi {
         options: Option<ExecutorCallOptions>,
     ) -> ExecutorResult<Rc<AgentIntegration>> {
         self.lifetime.available(options.as_ref())?;
-        Err(format!("Unsupported agent integration: {agent_id}").into())
+        Err(UnknownAgentIntegration(agent_id.to_owned()).into())
     }
 
     async fn get_project_service(
@@ -992,9 +1003,18 @@ mod tests {
                 let error = error.downcast_ref::<AgentCallError>().unwrap();
                 assert_eq!(error.outcome, AgentDeliveryOutcome::NotDispatched);
                 assert_eq!(error.code, AgentIntegrationErrorCode::OPERATION_UNSUPPORTED);
+                assert_eq!(error.message, "Unknown integration");
+                let error = connection
+                    .primary
+                    .call("", "catalog.snapshot", request(), options())
+                    .await
+                    .unwrap_err();
+                let error = error.downcast_ref::<AgentCallError>().unwrap();
+                assert_eq!(error.outcome, AgentDeliveryOutcome::NotDispatched);
+                assert_eq!(error.code, AgentIntegrationErrorCode::OPERATION_UNSUPPORTED);
                 assert_eq!(
                     error.message,
-                    "Executor method execution.start is not ported yet"
+                    "Executor method catalog.snapshot is not ported yet"
                 );
                 assert!(connection.primary.active());
                 controller.dispose().await;

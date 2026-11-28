@@ -94,6 +94,10 @@ call('decodeClonedStoredRows', [good[0], { payload_json: null }]);
 call('decodeClonedStoredRows', [null]);
 call('decodeClonedStoredRows', [{ ...good[0], ordinal: null }]);
 call('decodeClonedStoredRows', [{ ...good[0], payload_json: 'not JSON' }]);
+for (const kind of [123, null, true, ['provider-row'], { synthetic: true }, undefined]) {
+  call('decodeClonedStoredRows', [{ ...good[2], kind }]);
+}
+call('decodeClonedStoredRows', [{ ...good[2], kind: 123, ordinal: 0 }]);
 call('fingerprintDecodedSubmission', good[0]);
 call('fingerprintDecodedSubmission', good[1]);
 call('fingerprintDecodedSubmission', good[2]);

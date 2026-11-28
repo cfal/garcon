@@ -121,7 +121,10 @@ impl AgentProducers for TestAgent {
         Ok(())
     }
     fn detach(&self, _binding: AgentProducerBinding) {}
-    fn subscribe(&self, _listener: Rc<dyn Fn(AgentProducerNotification)>) -> Box<dyn Fn()> {
+    fn subscribe(
+        &self,
+        _listener: Rc<dyn Fn(AgentProducerNotification) -> ExecutorResult<()>>,
+    ) -> Box<dyn Fn()> {
         Box::new(|| {})
     }
 }
@@ -157,12 +160,12 @@ impl AgentSettings for TestAgent {
     fn describe(&self) -> &[AgentSettingDescriptor] {
         &self.settings_descriptors
     }
-    fn defaults(&self) -> AgentSettingsEnvelope {
-        AgentSettingsEnvelope {
+    fn defaults(&self) -> ExecutorResult<AgentSettingsEnvelope> {
+        Ok(AgentSettingsEnvelope {
             owner_id: self.scope.integration_id.clone(),
             schema_version: 1,
             values: self.settings_values.clone(),
-        }
+        })
     }
     fn parse(&self, input: AgentSettingsEnvelope) -> ExecutorResult<AgentSettingsEnvelope> {
         Ok(input)

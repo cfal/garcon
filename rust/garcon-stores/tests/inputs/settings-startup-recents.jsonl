@@ -1,0 +1,17 @@
+{"fn":"sortedPinnedProjectPaths","args":[[" z ","","\u0000","\ue000","\ud83d\ude42","z","z","a","\ufeff",1]]}
+{"fn":"sortedPinnedProjectPaths","args":[false]}
+{"fn":"sanitizePathSettings","args":[{}]}
+{"fn":"sanitizePathSettings","args":[{"lastProjectPath":" x ","paths":{"custom":{"keep":true},"pinnedProjectPaths":["z","x","z",""],"recentProjectPaths":["x","x"," y ","  ",null]}}]}
+{"fn":"sanitizePathSettings","args":[{"lastProjectPath":"one","paths":{"pinnedProjectPaths":42,"recentProjectPaths":["one","two"]}}]}
+{"fn":"sanitizeRecentAgentSettings","args":[[{"agentId":" claude ","model":" m ","modelProtocol":"openai-compatible"},{"agentId":"claude","model":"m","modelProtocol":"openai-compatible","executorId":"local"},{"agentId":"claude","model":"m","modelProtocol":"other","executorId":"a1111111-1111-4111-8111-111111111111"}]]}
+{"fn":"sanitizeRecentAgentSettings","args":[[{"agentId":"codex","model":"m","executorId":"bad"},{"agentId":"p","model":" "},false]]}
+{"fn":"sanitizeRecentAgentSettings","args":[null]}
+{"fn":"sanitizeExecutionDefaultsSettings","args":[null]}
+{"fn":"sanitizeExecutionDefaultsSettings","args":[{"global":{"permissionMode":"bad","thinkingMode":"high","agentSettingsById":{}},"byAgent":{"   ":{}," codex ":{"thinkingMode":"medium"},"x":{"permissionMode":"bad"},"w":null}}]}
+{"fn":"sanitizeExecutionDefaultsSettings","args":[{"global":{}}]}
+{"fn":"sanitizeExecutionDefaultsSettings","args":[{"global":{"agentSettingsById":{}}}]}
+{"fn":"sanitizeExecutionDefaultsSettings","args":[{"global":{"agentSettingsById":{}},"byAgent":{}}]}
+{"fn":"sanitizeExecutionDefaultsSettings","args":[{"global":{},"byAgent":{" 3 ":{"thinkingMode":"low"},"1":{"thinkingMode":"medium"},"agent":{"thinkingMode":"high"}," 0 ":{},"3":{"thinkingMode":"none"}}}]}
+{"fn":"legacyExecutionDefaults","args":[{"lastPermissionMode":"acceptEdits","lastThinkingMode":"high"}]}
+{"fn":"legacyRecentAgentSetting","args":[{"lastAgentId":" codex ","lastModel":" m ","lastApiProviderId":" provider ","lastModelEndpointId":" endpoint ","lastModelProtocol":"openai-compatible"}]}
+{"fn":"legacyRecentAgentSetting","args":[{}]}

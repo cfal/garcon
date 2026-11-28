@@ -107,7 +107,7 @@ pub async fn run_agent_integration_conformance(
         return Err(format!("Agent integration {agent_id} declares duplicate setting keys").into());
     }
 
-    let defaults = integration.settings.defaults();
+    let defaults = integration.settings.defaults()?;
     let values = settings_values(agent_id, &defaults)?;
     for key in values.keys() {
         if !descriptor_keys.contains(key.as_str()) {

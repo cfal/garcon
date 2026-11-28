@@ -1,0 +1,36 @@
+{
+  "module": "server/controller/settings/startup-recents.ts",
+  "tests": [],
+  "inputs": "rust/garcon-stores/tests/inputs/settings-startup-recents.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "sortedPinnedProjectPaths",
+      "argument": 0
+    },
+    {
+      "fn": "sanitizePathSettings",
+      "argument": 0
+    },
+    {
+      "fn": "sanitizeRecentAgentSettings",
+      "argument": 0
+    },
+    {
+      "fn": "sanitizeExecutionDefaultsSettings",
+      "argument": 0
+    },
+    {
+      "fn": "legacyExecutionDefaults",
+      "argument": 0
+    },
+    {
+      "fn": "legacyRecentAgentSetting",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 17,
+  "sha256": "6f0b68f6cbd869ac9b788a3c4109270f5b6cc363deeedb09e22e032b7cb178ff"
+}
