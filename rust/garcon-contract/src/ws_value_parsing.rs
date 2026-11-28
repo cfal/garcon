@@ -1,7 +1,6 @@
 //! Ports common/ws-value-parsing.ts.
 
 use garcon_js::{is_safe_integer, trim};
-use serde::{Serialize, Serializer};
 use serde_json::Value;
 
 use crate::chat_id::{ChatId, parse_chat_id};
@@ -18,41 +17,9 @@ pub fn required_path(value: &Value) -> Option<&str> {
     value.as_str().filter(|value| !trim(value).is_empty())
 }
 
-/// A non-negative safe integer that retains JavaScript's signed zero
-/// in the parsed value. On the wire both zeros serialize as 0.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NonNegativeSafeInteger {
-    value: u64,
-    negative_zero: bool,
-}
-
-impl NonNegativeSafeInteger {
-    pub const ZERO: Self = Self {
-        value: 0,
-        negative_zero: false,
-    };
-
-    pub const fn get(self) -> u64 {
-        self.value
-    }
-
-    pub const fn is_negative_zero(self) -> bool {
-        self.negative_zero
-    }
-}
-
-impl Serialize for NonNegativeSafeInteger {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_u64(self.value)
-    }
-}
-
-pub fn non_negative_int(value: &Value) -> Option<NonNegativeSafeInteger> {
+pub fn non_negative_int(value: &Value) -> Option<u64> {
     let number = value.as_f64()?;
-    (is_safe_integer(number) && number >= 0.0).then(|| NonNegativeSafeInteger {
-        value: number as u64,
-        negative_zero: number == 0.0 && number.is_sign_negative(),
-    })
+    (is_safe_integer(number) && number >= 0.0).then_some(number as u64)
 }
 
 pub fn canonical_chat_id(value: &Value) -> Option<ChatId> {
@@ -76,17 +43,12 @@ mod tests {
     }
 
     #[test]
-    fn accepts_safe_non_negative_integers_and_keeps_signed_zero() {
-        let zero = non_negative_int(&json!(-0.0)).unwrap();
-        assert_eq!(zero.get(), 0);
-        assert!(zero.is_negative_zero());
-        assert_eq!(serde_json::to_string(&zero).unwrap(), "0");
-        assert!(!non_negative_int(&json!(0)).unwrap().is_negative_zero());
+    fn accepts_safe_non_negative_integers_and_normalizes_signed_zero() {
+        assert_eq!(non_negative_int(&json!(-0.0)), Some(0));
+        assert_eq!(non_negative_int(&json!(0)), Some(0));
         assert_eq!(
-            non_negative_int(&json!(9007199254740991_u64))
-                .unwrap()
-                .get(),
-            9007199254740991
+            non_negative_int(&json!(9007199254740991_u64)),
+            Some(9007199254740991)
         );
         for rejected in [
             json!(-1),

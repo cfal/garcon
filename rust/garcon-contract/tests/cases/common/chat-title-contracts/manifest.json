@@ -1,0 +1,23 @@
+{
+  "module": "common/chat-title-contracts.ts",
+  "tests": [
+    "common/__tests__/chat-title-contracts.test.js",
+    "common/__tests__/chat-metadata-contracts.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-title-contracts.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseUpdateChatTitleRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseUpdateChatTitleResponse",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 255,
+  "sha256": "d235e2dc00e0eb25f662c5989ff3803ff37109b4e347b26a1008055266f5dec7"
+}

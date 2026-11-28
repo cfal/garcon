@@ -1,0 +1,17 @@
+{"fn":"parseClientWsMessage","args":[{"type":"reconnect-state-query","clientRequestId":"request","controlChatIds":[null,""," chat-1 ","chat-1",7,"chat-2"]}]}
+{"fn":"parseClientWsMessage","args":[{"type":"reconnect-state-query","controlChatIds":false}]}
+{"fn":"parseClientWsMessage","args":[{"type":"chat-subscribe","transcriptViewId":"view","afterOrdinal":{"$":"number","value":"-0"}}]}
+{"fn":"parseClientWsMessage","args":[{"type":"chat-subscribe","transcriptViewId":"view","afterOrdinal":0,"throughOrdinal":null}]}
+{"fn":"parseClientWsMessage","args":[{"type":"chat-reload","chatId":"chat","clientRequestId":"reload"}]}
+{"fn":"parseClientWsMessage","args":[{"type":"chat-reload","chatId":42,"clientRequestId":false}]}
+{"fn":"parseClientWsMessage","args":[{"type":"ws-ping","clientRequestId":"request","sentAt":1.5}]}
+{"fn":"parseClientWsMessage","args":[{"type":"ws-ping","sentAt":{"$":"number","value":"-0"}}]}
+{"fn":"parseClientWsMessage","args":[{"type":"ws-ping","sentAt":"1.5"}]}
+{"fn":"parseClientWsMessage","args":[{"type":"unrecognized"}]}
+{"fn":"parseClientWsMessage","args":[null]}
+{"fn":"parseClientWsMessage","args":[1]}
+{"fn":"ReconnectStateQueryRequest.fromJson","args":[{"clientRequestId":"request","controlChatIds":[" chat-1 ","chat-1","chat-2"]}]}
+{"fn":"ChatSubscribeRequest.fromJson","args":[{"clientRequestId":"request","chatId":"chat","transcriptViewId":"view","afterOrdinal":0,"throughOrdinal":1}]}
+{"fn":"ChatReloadRequest.fromJson","args":[{"clientRequestId":"reload","chatId":"chat"}]}
+{"fn":"ChatReloadCancelRequest.fromJson","args":[{"chatId":"chat","reloadRequestId":"reload"}]}
+{"fn":"WsPingRequest.fromJson","args":[{"clientRequestId":"request","sentAt":1.5}]}
