@@ -9,13 +9,17 @@ use garcon_base::{
     errors::{DiagnosticError, ErrorMetadata},
 };
 use garcon_contract::{chat_stop::ChatStopOutcome, error_codes::ErrorCode};
-use serde::Serialize;
+use std::rc::Rc;
+
+use serde::{Deserialize, Serialize};
 
 use crate::chat_execution_control_transitions::TransitionRejection;
 use crate::control_state::{
     MAX_QUEUED_ATTACHMENT_BYTES, StoredChatExecutionControlState, StoredControlInput,
     clone_stored_chat_execution_control,
 };
+use crate::execution_ownership::ExecutionAdmission;
+use crate::turn_identity::TurnIdentity;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueueEntryMutationCode {
@@ -152,6 +156,40 @@ pub struct StopActiveTurnResult {
 }
 
 pub type ServerControlInput = StoredControlInput;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DrainSuppressionReason {
+    Abort,
+    ManualStop,
+    Deletion,
+}
+
+#[derive(Debug, Clone)]
+pub struct DirectTurnReservation {
+    pub chat_id: String,
+    pub reservation_id: String,
+    pub execution_admission: Rc<ExecutionAdmission>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptSnapshotReservation {
+    pub chat_id: String,
+    pub reservation_id: String,
+}
+
+pub fn execution_turn_identity(turn: &TurnIdentity) -> Option<TurnIdentity> {
+    let identity = TurnIdentity {
+        turn_id: turn.turn_id.as_ref().filter(|id| !id.is_empty()).cloned(),
+        client_request_id: turn
+            .client_request_id
+            .as_ref()
+            .filter(|id| !id.is_empty())
+            .cloned(),
+    };
+    (identity.turn_id.is_some() || identity.client_request_id.is_some()).then_some(identity)
+}
 
 pub fn transition_error(
     rejection: &TransitionRejection,
