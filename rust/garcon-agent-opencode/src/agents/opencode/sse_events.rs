@@ -1,12 +1,15 @@
 //! Ports `server-agents/opencode/src/agents/opencode/sse-events.ts`.
 
-use std::error::Error;
+use std::{collections::VecDeque, error::Error};
 
+use futures::{Stream, StreamExt, stream::LocalBoxStream};
 use garcon_contract::chat_message_coercion::as_record;
+use garcon_interface::resources::ExecutorResult;
 use garcon_js::{number_to_string, to_iso_string};
 use serde_json::{Map, Value};
 
-use crate::js::{prop, truthy};
+use super::sdk_client::{OpenCodeClient, OpenCodeEnvelopes};
+use crate::js::{AbortSignal, error, prop, truthy};
 
 /// One event of the server-wide `/global/event` stream.
 #[derive(Debug, Clone, PartialEq)]
@@ -60,6 +63,145 @@ pub fn unwrap_global_event(envelope: &Value) -> Option<SseEvent> {
         kind: kind.to_owned(),
         properties: prop(payload, "properties").as_object().cloned(),
     })
+}
+
+pub async fn stream_global_events(
+    client: &dyn OpenCodeClient,
+    signal: &AbortSignal,
+    on_connected: impl FnMut() + 'static,
+) -> ExecutorResult<LocalBoxStream<'static, ExecutorResult<SseEvent>>> {
+    let stream = client.global_events(signal).await?;
+    let state = (stream, signal.clone(), on_connected, false);
+    Ok(futures::stream::try_unfold(
+        state,
+        |(mut stream, signal, mut on_connected, mut connected)| async move {
+            loop {
+                let next = tokio::select! {
+                    biased;
+                    () = signal.token().cancelled() => return Err(signal.abort_reason().into()),
+                    next = stream.next() => next,
+                };
+                let Some(envelope) = next else {
+                    return Err(error(
+                        "Error",
+                        if connected {
+                            "OpenCode event stream ended"
+                        } else {
+                            "OpenCode event stream ended before server.connected"
+                        },
+                    ));
+                };
+                let Some(event) = unwrap_global_event(&envelope?) else {
+                    continue;
+                };
+                if event.kind == "server.connected" {
+                    connected = true;
+                    on_connected();
+                    continue;
+                }
+                if !connected {
+                    return Err(error(
+                        "Error",
+                        format!(
+                            "OpenCode event stream emitted {} before server.connected",
+                            event.kind
+                        ),
+                    ));
+                }
+                return Ok(Some((event, (stream, signal, on_connected, connected))));
+            }
+        },
+    )
+    .boxed_local())
+}
+
+// The SDK converts CRLF and CR separately on every newly decoded read. A CR
+// at one chunk's end followed by LF in the next becomes two LFs there too.
+pub(crate) fn read_sdk_events<T, E>(
+    body: impl Stream<Item = Result<T, E>> + 'static,
+    signal: AbortSignal,
+) -> OpenCodeEnvelopes
+where
+    T: AsRef<[u8]>,
+    E: Into<Box<dyn Error>>,
+{
+    let state = (Box::pin(body), signal, SdkEventFrames::default());
+    futures::stream::try_unfold(state, |(mut body, signal, mut frames)| async move {
+        loop {
+            if let Some(event) = frames.ready.pop_front() {
+                return Ok(Some((event, (body, signal, frames))));
+            }
+            let next = tokio::select! {
+                biased;
+                () = signal.token().cancelled() => return Err(signal.abort_reason().into()),
+                next = body.next() => next,
+            };
+            let Some(chunk) = next else {
+                return Ok(None);
+            };
+            frames.push(chunk.map_err(Into::into)?.as_ref());
+        }
+    })
+    .boxed_local()
+}
+
+#[derive(Default)]
+struct SdkEventFrames {
+    buffer: Vec<u8>,
+    checked_bom: bool,
+    ready: VecDeque<Value>,
+}
+
+impl SdkEventFrames {
+    fn push(&mut self, bytes: &[u8]) {
+        let previous = self.buffer.len();
+        let mut bytes = bytes.iter().copied().peekable();
+        while let Some(byte) = bytes.next() {
+            if byte == b'\r' {
+                bytes.next_if_eq(&b'\n');
+                self.buffer.push(b'\n');
+            } else {
+                self.buffer.push(byte);
+            }
+        }
+        let mut start = 0;
+        let mut index = previous.saturating_sub(1);
+        if !self.checked_bom {
+            if self.buffer.len() < 3 && b"\xef\xbb\xbf".starts_with(&self.buffer) {
+                return;
+            }
+            self.checked_bom = true;
+            if self.buffer.starts_with(b"\xef\xbb\xbf") {
+                start = 3;
+                index = 3;
+            }
+        }
+        while index + 1 < self.buffer.len() {
+            if self.buffer[index..].starts_with(b"\n\n") {
+                if let Some(event) = sdk_frame_data(&self.buffer[start..index]) {
+                    self.ready.push_back(event);
+                }
+                index += 2;
+                start = index;
+            } else {
+                index += 1;
+            }
+        }
+        self.buffer.drain(..start);
+    }
+}
+
+fn sdk_frame_data(chunk: &[u8]) -> Option<Value> {
+    let text = String::from_utf8_lossy(chunk);
+    let lines: Vec<&str> = text
+        .split('\n')
+        .filter_map(|line| line.strip_prefix("data:").map(garcon_js::trim_start))
+        .collect();
+    if lines.is_empty() {
+        return None;
+    }
+    let data = lines.join("\n");
+    Some(garcon_js::json::parse(&data).unwrap_or_else(|_| Value::String(data)))
 }
 
 pub fn open_code_assistant_terminal(event: &SseEvent) -> Option<OpenCodeAssistantTerminal> {

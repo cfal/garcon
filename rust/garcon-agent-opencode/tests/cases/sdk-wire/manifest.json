@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agent-opencode/tests/oracles/sdk-wire.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-opencode/tests/inputs/sdk-wire.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 19,
+  "sha256": "4e083d3f7f71b592e9daa3c046ff7fcd56678ada60ab04c4b5216f05c0323d00"
+}

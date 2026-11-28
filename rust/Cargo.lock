@@ -1019,6 +1019,7 @@ dependencies = [
 name = "garcon-agent-opencode"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "futures",
  "garcon-agents-common",
  "garcon-base",
@@ -1027,6 +1028,7 @@ dependencies = [
  "garcon-interface",
  "garcon-js",
  "indexmap",
+ "nix",
  "serde",
  "serde_json",
  "tempfile",
