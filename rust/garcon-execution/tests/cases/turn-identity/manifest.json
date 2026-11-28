@@ -1,0 +1,20 @@
+{
+  "module": "server/controller/lib/turn-identity.ts",
+  "tests": [],
+  "inputs": "rust/garcon-execution/tests/inputs/turn-identity.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "matchesTurnIdentity",
+      "argument": 0
+    },
+    {
+      "fn": "matchesTurnIdentity",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 9,
+  "sha256": "d988951b53b22cf4ab7ad046f45b50692ce0ba541f8e6630f8ef239bbd48e64f"
+}

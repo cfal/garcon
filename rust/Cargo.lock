@@ -920,13 +920,18 @@ dependencies = [
 name = "garcon-execution"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "garcon-base",
  "garcon-cases",
  "garcon-contract",
+ "garcon-interface",
  "garcon-js",
+ "indexmap",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -1116,6 +1121,8 @@ dependencies = [
  "garcon-cases",
  "garcon-contract",
  "garcon-js",
+ "icu_normalizer",
+ "regress",
  "serde",
  "serde_json",
 ]

@@ -1,0 +1,26 @@
+{
+  "module": "rust/garcon-search/tests/inputs/query-compiler-oracle.ts",
+  "tests": [
+    "rust/garcon-search/tests/inputs/query-compiler.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "validateSearchQuery",
+      "argument": 0,
+      "guard": "acceptsTypedQuery",
+      "dropped": 43,
+      "kept": 60
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "validateSearchQuery",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 74,
+  "sha256": "507f3235200410af871789fb75dcbc33bb2d07f6d6f6b3d47e8ba2e0da954c84"
+}

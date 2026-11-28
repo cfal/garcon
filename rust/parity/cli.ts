@@ -29,8 +29,8 @@ record   Runs the original twice per scenario and writes rust/parity/golden/.
          --any-bun is given.
 replay   Runs a build (default: the original) against the recordings, writes
          the report when --report is given, and exits non-zero on any
-         mismatch. Unported and blocked cases also fail unless --allow-unported
-         is given. On another Bun than the pinned one it warns.
+         mismatch. Unported, blocked, and differing cases after unported writes
+         also fail unless --allow-unported is given. It warns on another Bun.
 
 Suite traces (ADR-020):
 ${TRACES_USAGE}
