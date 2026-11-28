@@ -897,14 +897,20 @@ dependencies = [
 name = "garcon-agent-claude"
 version = "0.0.0"
 dependencies = [
+ "futures",
+ "garcon-base",
  "garcon-cases",
  "garcon-contract",
  "garcon-interface",
  "garcon-js",
+ "icu_normalizer",
+ "indexmap",
  "num-bigint",
  "num-traits",
  "serde",
  "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
