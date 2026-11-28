@@ -48,6 +48,7 @@ use uuid::Uuid;
 use crate::cli_gateway::CliGateway;
 use crate::executor_rpc_server::{ExecutorRpcServer, describe, not_dispatched};
 use crate::listener_secret::load_listener_secret;
+use crate::producer_relay::ProducerRelay;
 
 pub enum WorkerConnection {
     Dial {
@@ -382,6 +383,7 @@ struct Worker {
     executor: RefCell<Option<Executor>>,
     serving: RefCell<Option<Serving>>,
     mismatched: RefCell<Option<Rc<ExecutorRpc>>>,
+    relay: Rc<ProducerRelay>,
     journal: Rc<RpcReplyJournal>,
     admission: Rc<RpcAdmissionBudgets>,
     activity: Rc<ActivityTracker>,
@@ -400,6 +402,7 @@ impl Worker {
             executor: RefCell::default(),
             serving: RefCell::default(),
             mismatched: RefCell::default(),
+            relay: ProducerRelay::new(Default::default()),
             journal: RpcReplyJournal::new(Default::default()),
             admission: Rc::default(),
             activity: Rc::new(ActivityTracker::default()),
@@ -482,7 +485,7 @@ impl Worker {
                 ..Default::default()
             },
         )?;
-        let server = ExecutorRpcServer::new(api, &connection.primary);
+        let server = ExecutorRpcServer::new(api, &connection.primary, Rc::clone(&self.relay));
         let _off_endpoint = connection.on_endpoint(Rc::new({
             let server = Rc::downgrade(&server);
             move |endpoint| {
@@ -688,6 +691,7 @@ async fn serve_leased(
     if let Some(rpc) = worker.mismatched.take() {
         rpc.retire_unknown();
     }
+    worker.relay.dispose();
     worker.journal.dispose();
     worker.executor.take();
     result.and(gateway_cleanup)
