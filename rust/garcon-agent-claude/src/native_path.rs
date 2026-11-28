@@ -1,4 +1,4 @@
-use std::{io, path::Path};
+use std::{io, path::Path, rc::Rc};
 
 use garcon_base::path_boundary::realpath;
 use garcon_interface::{
@@ -17,7 +17,7 @@ const MAX_SANITIZED_LENGTH: usize = 200;
 pub struct ClaudeNativePathOptions<'a> {
     pub home_dir: &'a str,
     pub config_home_dir: Option<&'a str>,
-    pub logger: Option<&'a dyn AgentLogger>,
+    pub logger: Option<Rc<dyn AgentLogger>>,
 }
 
 pub struct ClaudeNativePathSession<'a> {
@@ -26,18 +26,18 @@ pub struct ClaudeNativePathSession<'a> {
     pub native_path: Option<&'a str>,
 }
 
-pub struct ClaudeNativeSessionRelocation<'a> {
+pub struct ClaudeNativeSessionRelocation {
     pub native_path: String,
     artifacts: Option<(ClaudeSessionArtifacts, ClaudeSessionArtifacts)>,
-    logger: Option<&'a dyn AgentLogger>,
+    logger: Option<Rc<dyn AgentLogger>>,
 }
 
-impl ClaudeNativeSessionRelocation<'_> {
+impl ClaudeNativeSessionRelocation {
     pub async fn commit(&self) -> Result<(), AgentIntegrationError> {
         if let Some((source, _)) = &self.artifacts {
             remove_claude_session_artifacts(source)
                 .await
-                .map_err(|error| relocation_error(self.logger, "commit", error))?;
+                .map_err(|error| relocation_error(self.logger.as_deref(), "commit", error))?;
         }
         Ok(())
     }
@@ -46,7 +46,7 @@ impl ClaudeNativeSessionRelocation<'_> {
         if let Some((_, target)) = &self.artifacts {
             remove_claude_session_artifacts(target)
                 .await
-                .map_err(|error| relocation_error(self.logger, "rollback", error))?;
+                .map_err(|error| relocation_error(self.logger.as_deref(), "rollback", error))?;
         }
         Ok(())
     }
@@ -181,7 +181,7 @@ async fn search_claude_projects(
     let mut directories = match fs::read_dir(&projects_dir).await {
         Ok(directories) => directories,
         Err(error) if is_missing_path(&error) => {
-            if let Some(logger) = options.logger {
+            if let Some(logger) = &options.logger {
                 logger.warn(
                     "Claude transcript search directory is unavailable",
                     Some(&logger_fields([
@@ -232,7 +232,7 @@ pub async fn resolve_claude_native_path(
     let home_options = |home| ClaudeNativePathOptions {
         home_dir: options.home_dir,
         config_home_dir: Some(home),
-        logger: options.logger,
+        logger: options.logger.clone(),
     };
     for config_home in &unique_config_homes {
         let derived =
@@ -241,7 +241,7 @@ pub async fn resolve_claude_native_path(
         if let Some(derived_path) = derived
             && is_file(&derived_path).await?
         {
-            if let Some(logger) = options.logger
+            if let Some(logger) = &options.logger
                 && native_path.is_some_and(|stored| stored != derived_path)
             {
                 logger.warn(
@@ -255,7 +255,7 @@ pub async fn resolve_claude_native_path(
             return Ok(Some(derived_path));
         }
     }
-    if let Some(logger) = options.logger {
+    if let Some(logger) = &options.logger {
         logger.warn(
             "Claude expected transcript path is unavailable; searching projects",
             Some(&logger_fields([
@@ -284,7 +284,7 @@ pub async fn resolve_claude_native_path(
         0 => Ok(None),
         1 => {
             let path = matches.into_iter().next();
-            if let Some(logger) = options.logger
+            if let Some(logger) = &options.logger
                 && let Some(path) = &path
             {
                 logger.warn(
@@ -298,7 +298,7 @@ pub async fn resolve_claude_native_path(
             Ok(path)
         }
         _ => {
-            if let Some(logger) = options.logger {
+            if let Some(logger) = &options.logger {
                 logger.error(
                     "Claude transcript search found multiple files and refused to choose",
                     Some(&logger_fields([
@@ -451,13 +451,13 @@ fn copy_support_path(source: &Path, target: &Path) -> io::Result<()> {
     target_file.set_times(times)
 }
 
-pub async fn prepare_claude_native_session_relocation<'a>(
+pub async fn prepare_claude_native_session_relocation(
     previous_project_path: &str,
     next_project_path: &str,
     agent_session_id: &str,
     native_path: Option<&str>,
-    options: &ClaudeNativePathOptions<'a>,
-) -> ExecutorResult<ClaudeNativeSessionRelocation<'a>> {
+    options: &ClaudeNativePathOptions<'_>,
+) -> ExecutorResult<ClaudeNativeSessionRelocation> {
     if !is_safe_session_path_segment(agent_session_id) {
         return Err(transcript_unavailable(OUTSIDE_PROJECT_STATE).into());
     }
@@ -483,7 +483,7 @@ pub async fn prepare_claude_native_session_relocation<'a>(
         .ok_or_else(|| {
             transcript_unavailable("Claude session destination could not be resolved")
         })?;
-    let logger = options.logger;
+    let logger = options.logger.clone();
     if source_path == target_path {
         return Ok(ClaudeNativeSessionRelocation {
             native_path: target_path,
@@ -517,7 +517,7 @@ pub async fn prepare_claude_native_session_relocation<'a>(
     .await;
     if let Err(error) = prepared {
         if let Err(cleanup_error) = remove_claude_session_artifacts(&target).await
-            && let Some(logger) = logger
+            && let Some(logger) = &logger
         {
             logger.warn(
                 "Claude session relocation rollback failed",
@@ -527,7 +527,7 @@ pub async fn prepare_claude_native_session_relocation<'a>(
                 ])),
             );
         }
-        return Err(relocation_error(logger, "prepare", error).into());
+        return Err(relocation_error(logger.as_deref(), "prepare", error).into());
     }
     Ok(ClaudeNativeSessionRelocation {
         native_path: target_path,

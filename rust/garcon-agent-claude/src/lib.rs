@@ -14,6 +14,7 @@ pub mod config;
 pub mod context_window_control;
 pub mod disk_attachments;
 pub mod endpoint_runtime;
+pub mod execution;
 pub mod interrupt_receipt;
 pub mod model_context;
 pub mod native_path;
