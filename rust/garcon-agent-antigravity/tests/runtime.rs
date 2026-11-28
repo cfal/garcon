@@ -24,11 +24,15 @@ use garcon_agents_common::{
 };
 use garcon_contract::{
     agent_execution::{AgentAttachment, AgentAttachmentKind},
+    agent_integration::AgentSettingsEnvelope,
     chat_modes::{PermissionMode, ThinkingMode},
 };
 use garcon_interface::{
     integration::AgentIntegrationClass,
+    native_history::AgentHistoryImportRequest,
+    services::AgentSingleQueryRequest,
     testing::{AgentIntegrationConformanceOptions, run_agent_integration_conformance},
+    transcript::{AgentChatReference, AgentNativeSessionRef, AgentTranscriptSourceLocation},
 };
 use serde_json::{Value, json};
 use support::{bounded, environment, executable};
@@ -370,7 +374,7 @@ async fn reapplies_mode_after_resume_and_cancels_without_killing_a_live_process(
 }
 
 #[tokio::test]
-async fn steer_reuses_the_turn_and_the_terminal_answer_excludes_post_reply_text() {
+async fn steer_reuses_the_turn_and_late_text_does_not_hide_native_failure() {
     bounded(async {
         let peer = Peer::new(None);
         let (runtime, send, mut events) = peer.runtime();
@@ -416,6 +420,82 @@ async fn steer_reuses_the_turn_and_the_terminal_answer_excludes_post_reply_text(
         }));
         assert!(rows.iter().any(|row| row["content"] == "After the reply."));
         runtime.shutdown();
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn native_session_access_resolves_legacy_references_without_loading_history() {
+    bounded(async {
+        let peer = Peer::new(None);
+        let integration = AntigravityAgentIntegration.create(conformance_host("antigravity", peer.root.path()).unwrap());
+        let native = integration.native_sessions.unwrap();
+        let settings = integration.settings.defaults().unwrap();
+        let mut request = AgentHistoryImportRequest {
+            chat: AgentChatReference {
+                chat_id: "chat-1".into(), agent_id: "antigravity".into(), agent_session_id: None,
+                project_path: peer.work(), model: "default".into(), native_seed_receipt: None,
+                carry_over_revision: "0".into(), settings,
+                native_session: Some(AgentNativeSessionRef {
+                    owner_id: "antigravity".into(), schema_version: 1, value: json!({"path":"!antigravity:native-old"}).into(),
+                }),
+            },
+            signal: CancellationToken::new(),
+        };
+        let encoded = native.resolve_native_session(request.clone()).await.unwrap().unwrap();
+        assert_eq!(encoded.value.as_value(), &json!({"path":"!antigravity:native-old","agentSessionId":"native-old"}));
+        request.chat.agent_session_id = Some("preferred".into());
+        assert!(matches!(native.describe_source(request.clone()).await.unwrap(),
+            Some(AgentTranscriptSourceLocation::FilesystemPath { value }) if value.ends_with(".gemini/antigravity-cli/conversations/preferred.db")));
+        request.signal.cancel();
+        assert_eq!(native.resolve_native_session(request).await.unwrap_err().to_string(), "The operation was aborted.");
+        assert!(peer.frames().is_empty());
+    }).await;
+}
+
+#[tokio::test]
+async fn integration_queries_remove_their_isolated_directory_after_success_and_failure() {
+    bounded(async {
+        let peer = Peer::new(None);
+        let mut host = conformance_host("antigravity", peer.root.path()).unwrap();
+        host.environment = environment(&peer.binary, None, None);
+        let integration = AntigravityAgentIntegration.create(host);
+        let query = integration.single_query.unwrap();
+        let request = |prompt: &str| AgentSingleQueryRequest {
+            prompt: prompt.into(),
+            model: "default".into(),
+            thinking_mode: ThinkingMode::None,
+            timeout_ms: None,
+            endpoint: None,
+            signal: CancellationToken::new(),
+            settings: AgentSettingsEnvelope {
+                owner_id: "antigravity".into(),
+                schema_version: 1,
+                values: json!({}).into(),
+            },
+        };
+        assert_eq!(query.run(request("Title.")).await.unwrap(), "Title.");
+        let error = query.run(request("upstream-error")).await.unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Antigravity agent executor error: Error 429"
+        );
+        let dirs: Vec<_> = peer
+            .method_params("session/new")
+            .into_iter()
+            .map(|frame| PathBuf::from(frame["cwd"].as_str().unwrap()))
+            .collect();
+        assert_eq!(dirs.len(), 2);
+        assert_ne!(dirs[0], dirs[1]);
+        for dir in dirs {
+            assert!(
+                dir.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("garcon-single-query-")
+            );
+            assert!(!dir.exists());
+        }
     })
     .await;
 }

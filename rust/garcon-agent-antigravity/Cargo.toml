@@ -20,7 +20,6 @@ garcon-js.workspace = true
 indexmap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tempfile.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 url.workspace = true
@@ -32,3 +31,4 @@ libc = "0.2"
 [dev-dependencies]
 garcon-agents-common = { workspace = true, features = ["test-support"] }
 garcon-cases.workspace = true
+tempfile.workspace = true
