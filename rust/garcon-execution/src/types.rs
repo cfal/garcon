@@ -6,10 +6,13 @@
 
 use garcon_base::{
     domain_error::DomainError,
-    errors::{DiagnosticError, ErrorMetadata},
+    errors::{DiagnosticError, ErrorInput, ErrorMetadata},
 };
 use garcon_contract::{chat_stop::ChatStopOutcome, error_codes::ErrorCode};
-use std::rc::Rc;
+use std::{error::Error, rc::Rc};
+
+use async_trait::async_trait;
+use garcon_contract::ws_requests::AgentCommandImage;
 
 use serde::{Deserialize, Serialize};
 
@@ -141,6 +144,24 @@ impl DiagnosticError for ControlTransitionError {
     }
 }
 
+pub fn execution_error_input<'a>(error: &'a (dyn Error + 'static)) -> ErrorInput<'a> {
+    if let Some(error) = error.downcast_ref::<ControlTransitionError>() {
+        ErrorInput::Diagnostic(error)
+    } else if let Some(error) = error.downcast_ref::<QueueEntryMutationError>() {
+        ErrorInput::Diagnostic(error)
+    } else if let Some(error) = error.downcast_ref::<QueuePauseChangedError>() {
+        ErrorInput::Diagnostic(error)
+    } else if let Some(error) =
+        error.downcast_ref::<crate::queue_steer_error::QueueEntrySteerError>()
+    {
+        ErrorInput::Diagnostic(error)
+    } else if let Some(error) = error.downcast_ref::<crate::steering_errors::SteerDeliveryError>() {
+        ErrorInput::Diagnostic(error)
+    } else {
+        ErrorInput::Error(error)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueCommandMutationResult {
@@ -156,6 +177,25 @@ pub struct StopActiveTurnResult {
 }
 
 pub type ServerControlInput = StoredControlInput;
+
+pub type ExecutionOperationResult<T> = Result<T, Box<dyn Error>>;
+
+#[async_trait(?Send)]
+pub trait ProjectAdmissionPort {
+    async fn assert_available(
+        &self,
+        chat_id: &str,
+        deadline: Option<f64>,
+    ) -> ExecutionOperationResult<()>;
+}
+
+pub trait QueuedAttachmentAdmissionPort {
+    fn assert_supported(
+        &self,
+        chat_id: &str,
+        attachments: &[AgentCommandImage],
+    ) -> ExecutionOperationResult<()>;
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
