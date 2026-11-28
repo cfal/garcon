@@ -11,9 +11,14 @@ use garcon_contract::{
         ChatTransientControlAction, ChatTransientFeedMutation, ChatTransientFeedMutationBody,
         ChatTransientFeedSnapshot, TransientFeedRow, TransientFeedRowPosition,
     },
-    chat_types::PermissionRequestMessage,
+    chat_types::{ChatMessage, PermissionRequestMessage},
 };
 use garcon_js::collation::Collation;
+use garcon_ledger::{
+    contracts::{LedgerPermissionLifecycle, LedgerRowData},
+    presentation::ledger_row_to_message,
+    service::TranscriptCommitEvent,
+};
 use indexmap::IndexMap;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -120,6 +125,70 @@ impl ChatTransientFeedStore {
         self.feeds
             .borrow_mut()
             .insert(chat_id.into(), Feed::new(view_id));
+    }
+
+    pub fn apply_commit(
+        &self,
+        event: &TranscriptCommitEvent,
+    ) -> Result<Option<ChatTransientFeedMutation>, NamedError> {
+        use LedgerPermissionLifecycle::{Cancelled, Expired, Resolved};
+        use LedgerRowData::{PermissionCancelled, PermissionExpired, PermissionResolved};
+        match event {
+            TranscriptCommitEvent::Rows { .. } | TranscriptCommitEvent::Session { .. } => Ok(None),
+            TranscriptCommitEvent::ViewReplaced { chat_id, view, .. } => {
+                self.replace_view(chat_id, view.view_id.as_str());
+                Ok(None)
+            }
+            TranscriptCommitEvent::RunEnded {
+                chat_id,
+                view_id,
+                run_id,
+                ..
+            } => self.run_ended(chat_id, view_id.as_str(), run_id),
+            TranscriptCommitEvent::Permission {
+                chat_id,
+                view_id,
+                run_id,
+                row,
+            } => match &row.data {
+                PermissionCancelled {
+                    lifecycle:
+                        Cancelled {
+                            permission_occurrence_id,
+                            ..
+                        },
+                }
+                | PermissionResolved {
+                    lifecycle:
+                        Resolved {
+                            permission_occurrence_id,
+                            ..
+                        },
+                }
+                | PermissionExpired {
+                    lifecycle:
+                        Expired {
+                            permission_occurrence_id,
+                        },
+                } => self.permission_settled(chat_id, view_id.as_str(), permission_occurrence_id),
+                LedgerRowData::PermissionRequested { .. } => {
+                    if let Some(ChatMessage::PermissionRequest(message)) =
+                        ledger_row_to_message(chat_id, row)
+                    {
+                        self.permission_requested(
+                            chat_id,
+                            view_id.as_str(),
+                            run_id.as_deref(),
+                            row.ordinal,
+                            message,
+                        )
+                    } else {
+                        Ok(None)
+                    }
+                }
+                _ => Ok(None),
+            },
+        }
     }
 
     pub fn permission_requested(

@@ -22,9 +22,9 @@ use yawc::OpCode;
 use crate::websocket_auth::{BrowserAuth, BrowserClose, BrowserPrincipal};
 use crate::websocket_capacity::{Reservation, WebSocketAdmissionController};
 
-use super::primary::PrimaryHandler;
 use super::primary_delivery::{PrimaryPeer, PrimarySocketDelivery};
 use super::transport::{BrowserTransport, PrimaryTransport};
+use super::{chat_subscribe::ChatSubscriptions, primary::PrimaryHandler};
 
 // Bun applies the shared listener's Noise ceiling first, then the browser limit.
 const SHARED_MESSAGE_FLOOR: usize = 65_535;
@@ -117,6 +117,24 @@ impl BrowserSockets {
             options,
             auth,
             Rc::new(PrimaryHandler::new(instance_id, clock, unported_log)),
+        )
+    }
+
+    pub fn new_with_chat_subscriptions(
+        options: BrowserSocketOptions,
+        auth: Rc<AuthService>,
+        instance_id: String,
+        clock: Rc<dyn Clock>,
+        unported_log: Option<PathBuf>,
+        subscriptions: Rc<dyn ChatSubscriptions>,
+    ) -> Result<Rc<Self>, Box<dyn Error>> {
+        Self::with_handler(
+            options,
+            auth,
+            Rc::new(
+                PrimaryHandler::new(instance_id, clock, unported_log)
+                    .with_chat_subscriptions(subscriptions),
+            ),
         )
     }
 
