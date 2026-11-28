@@ -383,11 +383,58 @@ quadrant report lists outcome mismatches, including missing tests, and counts
 shared failures separately within the matching outcomes. It exits 1 on any
 mismatch.
 
-## Suite traces
+## SACS on a Rust worker
 
-For SACS black-box runs, `GARCON_SACS_DRIVERS=claude,codex` selects just those
-scripted drivers. Leave it unset to run all available drivers. An unknown or
+Use one scripted driver per JUnit report, since `compare-junit.ts` compares
+the same registered tests across runs. `GARCON_SACS_DRIVERS` accepts one name
+or a comma-separated list; unset means all available drivers. An unknown or
 unavailable driver name is an error.
+
+The worker lane needs `GARCON_TEST_EXECUTION_BACKEND=remote-controller-dials`
+(controller dials worker) or `remote-executor-dials` (worker dials controller).
+`in-process` does not start a worker binary. On the executor-dials lane the
+fixture sets `GARCON_CONTROLLER_URL`; do not set it yourself. Keep
+`GARCON_TEST_CONTROLLER=original` to test only the worker. With
+`GARCON_TEST_WORKER=rust` the fixture starts `GARCON_TEST_RUST_EXECUTOR_BINARY`
+and uses the same binary for `connection-url` on the controller-dials lane.
+Without the override it uses `rust/target/release/garcon-executor` relative to
+the repository root.
+
+From the repository root, with the pinned Bun on `PATH`, choose a driver and a
+directory for the reports. On the porting VM, fetch the release binary from
+the build machine using your worktree's `WORKTREE_LABEL` (for example `link`):
+
+```bash
+driver=direct-openai-compatible
+out="$HOME/tmp/garcon-sacs"
+"$HOME/bin/garcon-rs-remote" "$WORKTREE_LABEL" \
+  --fetch release/garcon-executor "$out/garcon-executor" -- \
+  env CARGO_BUILD_JOBS=1 cargo build -p garcon-executor --release
+```
+
+Run the selected driver's full SACS suite on the Rust worker:
+
+```bash
+(cd integration-tests && \
+  GARCON_SACS_DRIVERS="$driver" GARCON_TEST_CONTROLLER=original \
+  GARCON_TEST_EXECUTION_BACKEND=remote-controller-dials GARCON_TEST_WORKER=rust \
+  GARCON_TEST_RUST_EXECUTOR_BINARY="$out/garcon-executor" \
+  bun run test:sacs --reporter=junit --reporter-outfile="$out/$driver.rust-worker.xml")
+```
+
+Until the worker is ported, the command exits nonzero with the executor's
+`The native executor is not ported yet` diagnostic and still writes JUnit.
+Run the same driver and lane with the original worker for comparison:
+
+```bash
+(cd integration-tests && \
+  GARCON_SACS_DRIVERS="$driver" GARCON_TEST_CONTROLLER=original \
+  GARCON_TEST_EXECUTION_BACKEND=remote-controller-dials GARCON_TEST_WORKER=original \
+  bun run test:sacs --reporter=junit --reporter-outfile="$out/$driver.original.xml")
+bun rust/parity/compare-junit.ts "$out/$driver.original.xml" "$out/$driver.rust-worker.xml"
+```
+
+## Suite traces
 
 `GARCON_TEST_TRACE_DIR` writes one private JSONL file per test file. The
 test client records its HTTP exchanges, replies to its own WebSocket
