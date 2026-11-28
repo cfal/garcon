@@ -2,7 +2,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { delimiter, dirname, relative, resolve } from 'node:path';
 import { isObject, wildcardPaths, type Json } from '../wildcard.js';
 import { callKey, mergeCaptured, sameJson, type CaptureRecord, type Case, type Guard, type GuardSpec, type JsonArgument, type Manifest, type NotCaptured, type RecordedCase } from './cases.js';
-import type { EncodeFailure } from './encode.js';
+import { INSTANCES_VARIABLE, normalizeInputStrings, recordLine, type EncodeFailure } from './encode.js';
 import { runWithRecordStream, type StreamRun } from './process.js';
 import { candidateVariants, MAX_VARIANTS_PER_FUNCTION, type Variant } from './traps.js';
 
@@ -60,7 +60,7 @@ function childFailure(title: string, run: StreamRun): Error {
 
 // Runs each test file in its own process, as the repository runs them, and
 // returns every call the tests made to the module's function exports.
-export async function captureTests(repoRoot: string, modulePath: string, tests: string[]): Promise<CaptureRecord[]> {
+export async function captureTests(repoRoot: string, modulePath: string, tests: string[], instances = false): Promise<CaptureRecord[]> {
   const records: CaptureRecord[] = [];
   for (const test of tests) {
     const file = resolve(repoRoot, test);
@@ -69,6 +69,7 @@ export async function captureTests(repoRoot: string, modulePath: string, tests: 
       [MODULE_VARIABLE]: modulePath,
       [RECORD_STREAM_VARIABLE]: '3',
       [ROOT_VARIABLE]: repoRoot,
+      [INSTANCES_VARIABLE]: instances ? '1' : '0',
     }), {
       onRecord: (record) => {
         if (!isObject(record) || typeof record.seq !== 'number' || typeof record.fn !== 'string'
@@ -96,14 +97,18 @@ async function evaluateLines<T>(
   stallMs: number,
   read: (record: Json) => T,
   stalled: T,
+  instances = false,
 ): Promise<T[]> {
   const answers: T[] = [];
   while (answers.length < lines.length) {
     const remaining = lines.length - answers.length;
     const received: T[] = [];
     let open = true;
-    const run = await runWithRecordStream([process.execPath, EVALUATOR, modulePath], childEnvironment({ [EVALUATE_STREAM_VARIABLE]: '3' }), {
-      stdin: lines.slice(answers.length).join('\n'),
+    const run = await runWithRecordStream([process.execPath, EVALUATOR, modulePath], childEnvironment({
+      [EVALUATE_STREAM_VARIABLE]: '3',
+      [INSTANCES_VARIABLE]: instances ? '1' : '0',
+    }), {
+      stdin: lines.slice(answers.length).join(''),
       stallMs,
       onRecord: (record) => {
         if (open) received.push(read(record));
@@ -126,13 +131,15 @@ async function evaluateLines<T>(
 
 // Calls the module's exports with the inputs, in order, in a fresh process,
 // and returns each outcome.
-export async function evaluateInputs(modulePath: string, inputs: ReadonlyArray<EvaluationInput>, stallMs = EVALUATE_STALL_MS): Promise<Evaluation[]> {
-  return evaluateLines(modulePath, inputs.map((input) => JSON.stringify(input)), stallMs, (record) => {
+export async function evaluateInputs(
+  modulePath: string, inputs: ReadonlyArray<EvaluationInput>, stallMs = EVALUATE_STALL_MS, instances = false,
+): Promise<Evaluation[]> {
+  return evaluateLines(modulePath, inputs.map(recordLine), stallMs, (record) => {
     if (!isObject(record) || !['result', 'notCaptured', 'missing'].some((key) => key in record)) {
       throw new Error('malformed evaluation');
     }
     return record as unknown as Evaluation;
-  }, { timedOut: true });
+  }, { timedOut: true }, instances);
 }
 
 // What a guard did with a trap variant of its argument.
@@ -142,7 +149,7 @@ export type Verdict = 'kept' | 'dropped' | 'stalled';
 // original, and returns whether it kept or dropped the variant. A guard that
 // gives no answer in time counts as stalled.
 export async function askGuards(modulePath: string, inputs: ReadonlyArray<Input>, stallMs = EVALUATE_STALL_MS): Promise<Verdict[]> {
-  return evaluateLines(modulePath, inputs.map((input) => JSON.stringify({ ...input, guardOnly: true })), stallMs, (record) => {
+  return evaluateLines(modulePath, inputs.map((input) => recordLine({ ...input, guardOnly: true })), stallMs, (record) => {
     if (!isObject(record) || typeof record.guarded !== 'boolean') throw new Error('malformed evaluation');
     return record.guarded ? 'dropped' : 'kept';
   }, 'stalled');
@@ -157,7 +164,7 @@ async function readInputs(repoRoot: string, path: string): Promise<Input[]> {
     if (typeof entry.fn !== 'string' || !Array.isArray(entry.args)) {
       throw new Error(`${path}:${index + 1}: an input is a JSON line of { "fn": "...", "args": [...] }`);
     }
-    inputs.push({ fn: entry.fn, args: entry.args, kind: 'input', origin: `${relative(repoRoot, path)}:${index + 1}` });
+    inputs.push({ fn: entry.fn, args: entry.args.map(normalizeInputStrings), kind: 'input', origin: `${relative(repoRoot, path)}:${index + 1}` });
   }
   return inputs;
 }
@@ -197,6 +204,7 @@ export interface RecordOptions {
   // Arguments that reach a port as JSON even when they are a number: NaN and
   // the infinities are not made for them, since JSON cannot carry them.
   jsonArguments?: JsonArgument[];
+  instances?: true;
   // How long a call may take before it is given up and listed.
   stallMs?: number;
 }
@@ -333,8 +341,8 @@ export async function recordUnit(options: RecordOptions): Promise<Recording> {
   }
   const guards = await countedGuards(options.repoRoot, options.guards ?? []);
   const observed = mergeCaptured(
-    await captureTests(options.repoRoot, modulePath, options.tests),
-    await captureTests(options.repoRoot, modulePath, options.tests),
+    await captureTests(options.repoRoot, modulePath, options.tests, options.instances),
+    await captureTests(options.repoRoot, modulePath, options.tests, options.instances),
   );
   const inputsPath = options.inputs ? resolve(options.repoRoot, options.inputs) : null;
   const explicit = inputsPath ? await readInputs(options.repoRoot, inputsPath) : [];
@@ -380,8 +388,8 @@ export async function recordUnit(options: RecordOptions): Promise<Recording> {
     inputs.push(input);
   }
 
-  const first = await evaluateInputs(modulePath, inputs, stallMs);
-  const second = await evaluateInputs(modulePath, inputs, stallMs);
+  const first = await evaluateInputs(modulePath, inputs, stallMs, options.instances);
+  const second = await evaluateInputs(modulePath, inputs, stallMs, options.instances);
   const evaluated = inputs.map((input, index) => ({ input, ...mergeEvaluation(input, first[index]!, second[index]!, stallMs) }));
   const notCaptured = [...observed.notCaptured];
   // Inputs that could not be encoded have no call site to name, so they are
@@ -432,6 +440,7 @@ export async function recordUnit(options: RecordOptions): Promise<Recording> {
       inputs: inputsPath ? relative(options.repoRoot, inputsPath) : null,
       guards: manifestGuards,
       jsonArguments,
+      ...(options.instances ? { instances: true as const } : {}),
       bunVersion: Bun.version,
       notCaptured,
     },

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { mergeRecordings, wildcardPaths, type Json } from '../wildcard.js';
+import { childPath, isObject, mergeRecordings, wildcardPaths, type Json } from '../wildcard.js';
 
 export const CASES_FILE = 'cases.jsonl';
 export const MANIFEST_FILE = 'manifest.json';
@@ -69,6 +69,7 @@ export interface Manifest {
   inputs: string | null;
   guards: Guard[];
   jsonArguments: JsonArgument[];
+  instances?: true;
   // The Bun the original ran on while being recorded (ADR-026).
   bunVersion: string;
   cases: number;
@@ -85,9 +86,28 @@ export interface Merge {
 
 // The value of the first run, or the two merged where they differ.
 export function sameJson(first: Json | undefined, second: Json | undefined): Json {
-  return JSON.stringify(first) === JSON.stringify(second) && first !== undefined
-    ? first
-    : mergeRecordings(first, second);
+  if (JSON.stringify(first) === JSON.stringify(second) && first !== undefined) return first;
+  assertStableUnits(first, second, '$.result');
+  return mergeRecordings(first, second);
+}
+
+function assertStableUnits(first: Json | undefined, second: Json | undefined, path: string): void {
+  if ((isObject(first) && first.$ === 'utf16') || (isObject(second) && second.$ === 'utf16')) {
+    if (JSON.stringify(first) !== JSON.stringify(second)) throw new Error(`UTF-16 code units differ across runs at ${path}`);
+    return;
+  }
+  if (Array.isArray(first) || Array.isArray(second)) {
+    const a = Array.isArray(first) ? first : [];
+    const b = Array.isArray(second) ? second : [];
+    for (let i = 0; i < Math.max(a.length, b.length); i++) assertStableUnits(a[i], b[i], childPath(path, i));
+  }
+  if (isObject(first) || isObject(second)) {
+    const a = isObject(first) ? first : {};
+    const b = isObject(second) ? second : {};
+    for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+      assertStableUnits(Object.hasOwn(a, key) ? a[key] : undefined, Object.hasOwn(b, key) ? b[key] : undefined, childPath(path, key));
+    }
+  }
 }
 
 export function callKey(fn: string, args: Json[]): string {

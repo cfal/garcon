@@ -21,7 +21,7 @@ const repoRoot = resolve(import.meta.dir, '../..');
 const usage = `Usage:
   bun rust/parity/cli.ts record [--scenario <name>] [--any-bun]
   bun rust/parity/cli.ts replay [--build "<command>"] [--label <name>] [--scenario <name>] [--report <path>]
-  bun rust/parity/cli.ts unit record <module.ts> --tests <test file>... [--inputs <file.jsonl>] [--guard <function>:<argument index>=<guard>]... [--json <function>:<argument index>]... [--any-bun] --out <dir>
+  bun rust/parity/cli.ts unit record <module.ts> --tests <test file>... [--inputs <file.jsonl>] [--guard <function>:<argument index>=<guard>]... [--json <function>:<argument index>]... [--instances] [--any-bun] --out <dir>
   bun rust/parity/cli.ts unit replay <dir>
 
 record   Runs the original twice per scenario and writes rust/parity/golden/.

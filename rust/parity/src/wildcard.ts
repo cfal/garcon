@@ -117,9 +117,10 @@ export function mergeRecordings(left: Json | undefined, right: Json | undefined)
   }
   if (isObject(left) && isObject(right)) {
     const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
-    const merged: { [key: string]: Json } = {};
-    for (const key of [...keys].sort()) merged[key] = mergeRecordings(left[key], right[key]);
-    return merged;
+    return Object.fromEntries([...keys].sort().map((key) => [key, mergeRecordings(
+      Object.hasOwn(left, key) ? left[key] : undefined,
+      Object.hasOwn(right, key) ? right[key] : undefined,
+    )]));
   }
   return Object.is(left, right) ? left : WILDCARD;
 }

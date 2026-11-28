@@ -173,6 +173,14 @@ the calls that were not captured. Use the repository's pinned Bun (1.4.3):
   a bigint are `date`, `map`, `set`, `bytes`, and `bigint` markers; a thrown
   Error is `{"$":"error","name","message","properties"}` with its other own
   properties, and any other thrown value is a `throw` marker.
+- Strings with lone surrogates are `utf16` markers: `value` holds the
+  original 16-bit units and `text` holds the projected string with U+FFFD
+  for each lone unit. Objects with such keys use an `object-entries` marker
+  holding encoded key-value pairs. JavaScript replay reconstructs the
+  original string from the units. Rust JSON argument readers use the
+  projected text, but results compare the original units. Different units
+  across recording runs fail rather than becoming wildcards. Use
+  `garcon_cases::markers::utf16(&units)` to build such a result.
 - Trap variants follow the recorded calls. Each string leaf of a call's
   arguments is replaced in turn by an empty string, accented text, CJK, an
   astral emoji, a combining sequence, the dotless i, the Kelvin sign, a
@@ -209,9 +217,15 @@ the calls that were not captured. Use the repository's pinned Bun (1.4.3):
   trap variants. A result that differs becomes a `[..]` wildcard and is printed
   as `noise:`; review each one, and prefer a test or an input whose result is
   stable, since a wildcard lets a port return anything there.
-- A call whose arguments or result cannot be encoded, because they hold a
-  function or an instance of a class, is not recorded. It is printed and kept
-  in the manifest as `not captured`, with the test's `file:line:column`.
+- A call whose arguments or result cannot be encoded is printed and kept in
+  the manifest as `not captured`, with the test location. Custom class
+  arguments and functions are never encoded. Pass `--instances` to encode
+  returned class instances recursively as `{"$":"instance","name":"ClassName","fields":{...}}`,
+  where `fields` contains the encoded enumerable own properties. The
+  manifest records this flag for self-replay. Build these Rust results with
+  `garcon_cases::markers::instance("ClassName", fields)`, passing a
+  `serde_json::Map` of encoded fields. Fields set to `undefined` in the
+  original may be omitted from the Rust result.
 
 `record` then calls the original with every case in a fresh process. It writes
 the two files only when all of them answer as recorded, so a recording never
@@ -225,8 +239,8 @@ Shapes the interception does not reach take an inputs file instead, with
 - functions that live on instances, since only exports are replaced;
 - functions held in an exported object or registry rather than exported
   themselves;
-- calls that only ever return an instance or a function, which have nothing to
-  record; give the calls that return a plain value.
+- calls that only ever return a function; give the calls that return an
+  encodable value.
 
 A ported crate replays its recording from its tests. `garcon-cases` is a
 dev-dependency:
@@ -254,9 +268,13 @@ fn recorded_cases_match() {
 
 `replay` calls the dispatcher with each case's function and arguments, as
 recorded, and compares what it returns with the recorded result: object key
-order is not compared, numbers compare by value, markers match only the same
-marker, and wildcards match as in the scenario replay. A function the
-dispatcher does not handle fails whatever the recording holds. On a difference
+order is not compared, and numbers compare by mathematical value without
+rounding integers. The Rust replay compares results at the JSON boundary:
+recorded `undefined` matches an absent object property or `null` in an
+array, but at the root it still requires a marker. Recorded negative zero
+also matches a Rust integer zero; float outputs must preserve the sign.
+Wildcards match as in the scenario replay. A function the dispatcher does
+not handle fails whatever the recording holds. On a difference
 it prints the first one per case with its JSON path, then the distinct
 differences grouped by path, and panics unless every case matches.
 

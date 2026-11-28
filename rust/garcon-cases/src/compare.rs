@@ -80,6 +80,30 @@ fn is_negative_zero(number: &Number) -> bool {
         .is_some_and(|value| value == 0.0 && value.is_sign_negative())
 }
 
+fn integer(number: &Number) -> Option<i128> {
+    number
+        .as_i64()
+        .map(i128::from)
+        .or_else(|| number.as_u64().map(i128::from))
+}
+
+fn float_equals_integer(float: &Number, integer: i128) -> bool {
+    // All serde_json integers fit in i128; an out-of-range float saturates
+    // past every integer this comparison can receive.
+    float
+        .as_f64()
+        .is_some_and(|value| value.fract() == 0.0 && value as i128 == integer)
+}
+
+fn numbers_equal(left: &Number, right: &Number) -> bool {
+    match (integer(left), integer(right)) {
+        (Some(a), Some(b)) => a == b,
+        (Some(a), None) => float_equals_integer(right, a),
+        (None, Some(b)) => float_equals_integer(left, b),
+        (None, None) => left.as_f64() == right.as_f64(),
+    }
+}
+
 /// One piece of a pattern: a literal text, a wildcard that takes any run of
 /// characters, or one that takes exactly `length` characters of an alphabet.
 enum Part<'a> {
@@ -213,15 +237,34 @@ pub fn wildcard_paths(value: &Value, path: &str) -> Vec<String> {
 /// The first position where `actual` departs from `expected`, walking object
 /// keys in sorted order so reports are stable.
 pub fn first_difference(expected: &Value, actual: &Value) -> Option<Difference> {
-    difference(expected, actual, "$", true)
+    difference(expected, actual, "$", Comparison::RecordedResult)
 }
 
 pub fn first_difference_exact(expected: &Value, actual: &Value) -> Option<Difference> {
-    difference(expected, actual, "$", false)
+    difference(expected, actual, "$", Comparison::Exact)
 }
 
-fn difference(expected: &Value, actual: &Value, path: &str, wildcards: bool) -> Option<Difference> {
-    if wildcards && expected.as_str() == Some(WILDCARD) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Comparison {
+    RecordedResult,
+    Exact,
+}
+
+fn difference(
+    expected: &Value,
+    actual: &Value,
+    path: &str,
+    comparison: Comparison,
+) -> Option<Difference> {
+    let recorded = comparison == Comparison::RecordedResult;
+    if recorded && expected.as_str() == Some(WILDCARD) {
+        return None;
+    }
+    if recorded
+        && markers::kind(expected) == Some("number")
+        && expected["value"] == "-0"
+        && matches!(actual, Value::Number(number) if number.as_i64() == Some(0))
+    {
         return None;
     }
     // A port's negative zero is the recording's `-0` marker.
@@ -236,14 +279,11 @@ fn difference(expected: &Value, actual: &Value, path: &str, wildcards: bool) -> 
     }
     match (expected, actual) {
         (Value::String(pattern), Value::String(text)) => (!(pattern == text
-            || wildcards && wildcard_matches(pattern, text)))
+            || recorded && wildcard_matches(pattern, text)))
         .then(|| Difference::new(path, "value", expected, actual)),
-        (Value::Number(left), Value::Number(right)) => (if wildcards {
-            left.as_f64() != right.as_f64()
-        } else {
-            left != right
-        })
-        .then(|| Difference::new(path, "value", expected, actual)),
+        (Value::Number(left), Value::Number(right)) => {
+            (!numbers_equal(left, right)).then(|| Difference::new(path, "value", expected, actual))
+        }
         (Value::Array(items), Value::Array(others)) => {
             if items.len() != others.len() {
                 return Some(Difference {
@@ -258,11 +298,15 @@ fn difference(expected: &Value, actual: &Value, path: &str, wildcards: bool) -> 
                 .zip(others)
                 .enumerate()
                 .find_map(|(index, (item, other))| {
-                    difference(item, other, &array_path(path, index), wildcards)
+                    if recorded && markers::is_undefined(item) && other.is_null() {
+                        None
+                    } else {
+                        difference(item, other, &array_path(path, index), comparison)
+                    }
                 })
         }
         (Value::Object(entries), Value::Object(others)) => {
-            object_difference(entries, others, path, wildcards)
+            object_difference(entries, others, path, comparison)
         }
         _ => (expected != actual).then(|| Difference::new(path, "value", expected, actual)),
     }
@@ -272,7 +316,7 @@ fn object_difference(
     entries: &Map<String, Value>,
     others: &Map<String, Value>,
     path: &str,
-    wildcards: bool,
+    comparison: Comparison,
 ) -> Option<Difference> {
     let mut keys: Vec<&String> = entries.keys().chain(others.keys()).collect();
     keys.sort();
@@ -280,7 +324,12 @@ fn object_difference(
     keys.into_iter()
         .find_map(|key| match (entries.get(key), others.get(key)) {
             (Some(expected), Some(actual)) => {
-                difference(expected, actual, &child_path(path, key), wildcards)
+                difference(expected, actual, &child_path(path, key), comparison)
+            }
+            (Some(expected), None)
+                if comparison == Comparison::RecordedResult && markers::is_undefined(expected) =>
+            {
+                None
             }
             (Some(expected), None) => Some(Difference {
                 path: child_path(path, key),
@@ -361,6 +410,62 @@ mod tests {
             None
         );
         assert_eq!(difference(json!(-1), json!(-1.0)), None);
+    }
+
+    #[test]
+    fn recorded_negative_zero_matches_integer_zero_but_not_positive_float_zero() {
+        let expected = json!({"field": markers::number(-0.0)});
+        assert!(first_difference(&expected, &json!({"field": 0})).is_none());
+        assert!(first_difference(&expected, &json!({"field": -0.0})).is_none());
+        assert_eq!(
+            found(expected.clone(), json!({"field": 0.0})).path,
+            "$.field"
+        );
+        assert!(first_difference_exact(&expected, &json!({"field": 0})).is_some());
+    }
+
+    #[test]
+    fn compares_mixed_numeric_representations_without_rounding_integers() {
+        let base = json!(9_007_199_254_740_992_u64);
+        let neighbor = json!(9_007_199_254_740_993_u64);
+        let rounded = json!(9_007_199_254_740_992.0);
+        assert!(first_difference(&base, &neighbor).is_some());
+        assert!(first_difference(&rounded, &neighbor).is_some());
+        assert!(first_difference(&neighbor, &rounded).is_some());
+        assert!(first_difference(&base, &rounded).is_none());
+        assert!(first_difference(&json!(u64::MAX), &json!(18_446_744_073_709_551_616.0)).is_some());
+        assert!(first_difference(&json!(i64::MIN), &json!(-9_223_372_036_854_775_808.0)).is_none());
+        assert!(first_difference_exact(&json!(1), &json!(1.0)).is_none());
+        assert!(first_difference_exact(&json!(-1.0), &json!(-1)).is_none());
+        assert!(first_difference_exact(&json!(1), &json!(1.5)).is_some());
+    }
+
+    #[test]
+    fn compares_undefined_at_the_result_json_boundary_only() {
+        let undefined = markers::undefined();
+        let object = json!({"forgotten": undefined, "still_here": [1, undefined]});
+        let encoded = json!({"still_here": [1, null]});
+        assert!(first_difference(&object, &encoded).is_none());
+        assert!(first_difference_exact(&object, &encoded).is_some());
+        assert_eq!(found(json!({"field": null}), json!({})).kind, "missing");
+        assert_eq!(found(json!({"field": 7}), json!({})).kind, "missing");
+        assert_eq!(
+            found(json!({"field": undefined}), json!({"field": null})).path,
+            "$.field"
+        );
+        assert_eq!(found(json!({}), json!({"field": undefined})).kind, "extra");
+        assert_eq!(found(json!([null]), json!([undefined])).path, "$[0]");
+        assert_eq!(found(json!([undefined]), json!([])).kind, "length");
+        assert_eq!(found(undefined.clone(), Value::Null).kind, "type");
+        assert!(first_difference(&undefined, &undefined).is_none());
+    }
+
+    #[test]
+    fn surrogate_results_match_units_not_the_lossy_string() {
+        let first = markers::utf16(&[0xd800]);
+        assert!(first_difference(&first, &markers::utf16(&[0xd800])).is_none());
+        assert!(first_difference(&first, &markers::utf16(&[0xd801])).is_some());
+        assert!(first_difference(&first, &json!("\u{fffd}")).is_some());
     }
 
     #[test]

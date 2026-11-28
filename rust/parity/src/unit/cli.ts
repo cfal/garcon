@@ -11,7 +11,7 @@ const ANY_BUN = '--any-bun';
 export const UNIT_USAGE = `Usage:
   bun rust/parity/cli.ts unit record <module.ts> --tests <test file>... [--inputs <file.jsonl>]
                               [--guard <function>:<argument index>=<guard>]...
-                              [--json <function>:<argument index>]... [--any-bun] --out <dir>
+                              [--json <function>:<argument index>]... [--instances] [--any-bun] --out <dir>
   bun rust/parity/cli.ts unit replay <dir>
 
 record   Runs the module's tests twice with every call to its function exports
@@ -21,7 +21,8 @@ record   Runs the module's tests twice with every call to its function exports
          argument only when the original's own function for that type accepts
          the value; <guard> is an export of the recorded module or
          <file>#<export>. An argument declared with --json reaches the port as
-         JSON, so NaN and the infinities are not tried on it. It runs only on
+         JSON, so NaN and the infinities are not tried on it. --instances
+         records returned class names and their enumerable own fields. It runs only on
          the Bun the repository pins, unless --any-bun is given.
 replay   Calls the original with every recorded case and compares. It warns
          when the recording or this replay is on another Bun than the pinned one.`;
@@ -32,6 +33,7 @@ interface RecordArguments {
   inputs?: string;
   guards: GuardSpec[];
   jsonArguments: JsonArgument[];
+  instances?: true;
   out: string;
 }
 
@@ -65,6 +67,9 @@ export function parseRecord(args: string[]): RecordArguments {
     const argument = rest[index]!;
     if (argument === '--tests') {
       fillingTests = true;
+    } else if (argument === '--instances') {
+      fillingTests = false;
+      parsed.instances = true;
     } else if (['--inputs', '--out', '--guard', '--json'].includes(argument)) {
       fillingTests = false;
       const value = rest[index + 1];
@@ -108,7 +113,7 @@ export async function unitCli(args: string[], repoRoot: string): Promise<number>
       const options = parseRecord(operands);
       const recording = await recordUnit({ ...options, repoRoot });
       for (const line of recording.review) console.log(line);
-      const result = await replayCases(recording.modulePath, recording.cases, recording.manifest.module);
+      const result = await replayCases(recording.modulePath, recording.cases, recording.manifest.module, recording.manifest.instances);
       console.log(replaySummary([result], renderUnitReport(result)));
       if (!passed(result)) {
         console.error(`The original does not replay this recording; nothing was written to ${options.out}.`);

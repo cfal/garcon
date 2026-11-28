@@ -4,6 +4,15 @@ import { normalizeCapture } from '../normalize.js';
 import { firstDifference, mergeRecordings, mergeStrings, stringMatches, WILDCARD, wildcardPaths } from '../wildcard.js';
 
 describe('mergeRecordings', () => {
+  test('merges an own __proto__ field as data without setting the prototype', () => {
+    const left = JSON.parse('{"__proto__":{"changed":1},"a":1}');
+    const right = JSON.parse('{"__proto__":{"changed":2},"a":1}');
+    const merged = mergeRecordings(left, right) as Record<string, unknown>;
+    expect(Object.hasOwn(merged, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(merged)).toBe(Object.prototype);
+    expect(merged.__proto__).toEqual({ changed: WILDCARD });
+  });
+
   test('wildcards only the words that differ between runs', () => {
     // Both runs vary the same way, so the wildcard keeps the length and the alphabet.
     expect(mergeStrings('Chat not found: abc123', 'Chat not found: abd999')).toBe('Chat not found: [..hex:6]');

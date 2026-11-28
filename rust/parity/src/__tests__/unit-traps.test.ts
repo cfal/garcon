@@ -34,6 +34,13 @@ const kelvin = codePoints(0x212a);
 const nbsp = codePoints(0xa0);
 
 describe('trapVariants', () => {
+  test('walks own fields of a wrapped object even when its dollar key looks like a marker', () => {
+    const { variants } = generate([[{ $: 'object', value: { $: 'not a marker', nested: { title: 'label' } } }]]);
+    expect(variants.find((entry) => entry.origin === empty('$.args[0].value.$'))?.args)
+      .toEqual([{ $: 'object', value: { $: '', nested: { title: 'label' } } }]);
+    expect(variants.some((entry) => entry.origin === empty('$.args[0].value.nested.title'))).toBe(true);
+  });
+
   test('replaces each string and number leaf of a recorded call, one at a time', () => {
     const { origins, args } = generate([[{ a: 'x', b: [1, 'y'], c: true }]]);
     expect(origins.slice(0, 3)).toEqual([empty('$.args[0].a'), 'trap:zero@$.args[0].b[0]', empty('$.args[0].b[1]')]);
