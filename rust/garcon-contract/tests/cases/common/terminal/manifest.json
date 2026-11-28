@@ -4,7 +4,16 @@
     "server/runtime/terminals/__tests__/terminal-contracts.test.js"
   ],
   "inputs": "rust/garcon-contract/tests/inputs/common/terminal.jsonl",
+  "guards": [
+    {
+      "fn": "terminalIdForMessage",
+      "argument": 0,
+      "guard": "parseTerminalStreamServerMessage",
+      "dropped": 36,
+      "kept": 24
+    }
+  ],
   "notCaptured": [],
-  "cases": 912,
-  "sha256": "ebf649e6df9d4f1ae59cd5fb5e850fb87936cba112a1492d13dc6b24a23bc1f1"
+  "cases": 876,
+  "sha256": "9f99bbd595e8165c21efb6fa28b9a22b513f26a9e590011d711b5b76f6a7398d"
 }
