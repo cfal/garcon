@@ -1,4 +1,13 @@
-use garcon_interface::producer::AgentFinalResponse;
+use garcon_contract::{
+    chat_types::{AssistantMessage, ChatMessage, ThinkingMessage},
+    tool_result_message::ToolResultMessage,
+};
+use garcon_interface::{
+    native_message_source::{
+        NativeMessageSourceInput, NativeSourced, attach_native_message_source,
+    },
+    producer::AgentFinalResponse,
+};
 use garcon_js::{
     Number,
     json::{Opaque, as_number},
@@ -6,6 +15,10 @@ use garcon_js::{
 };
 use serde::Serialize;
 use serde_json::Value;
+
+use crate::{
+    tool_result_converter::claude_tool_result_content, tool_use_converter::convert_claude_tool_use,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -421,6 +434,85 @@ impl ClaudeTurnState {
 pub fn is_claude_subagent_content(message: &Value) -> bool {
     matches!(message["type"].as_str(), Some("assistant" | "user"))
         && text(&message["parent_tool_use_id"]).is_some()
+}
+
+pub fn convert_cli_message_to_chat_messages(
+    message: &Value,
+    timestamp: &str,
+) -> Vec<NativeSourced<ChatMessage>> {
+    if is_claude_subagent_content(message) {
+        return Vec::new();
+    }
+    let assistant = match message["type"].as_str() {
+        Some("assistant") => true,
+        Some("user") => false,
+        _ => return Vec::new(),
+    };
+    let Some(parts) = message["content"]
+        .as_array()
+        .or_else(|| message["message"]["content"].as_array())
+    else {
+        return Vec::new();
+    };
+    let record_uuid = text(&message["uuid"]);
+    let result_metadata = message
+        .get("tool_use_result")
+        .filter(|value| !value.is_null())
+        .or_else(|| message.get("toolUseResult"))
+        .cloned()
+        .map(Opaque::from_value);
+    let mut rows = Vec::new();
+    for part in parts.iter().filter(|part| part.is_object()) {
+        let row = match part["type"].as_str() {
+            Some("text") if assistant => {
+                let Some(content) = part["text"].as_str().filter(|text| !trim(text).is_empty())
+                else {
+                    continue;
+                };
+                ChatMessage::Assistant(AssistantMessage {
+                    timestamp: timestamp.to_owned(),
+                    content: content.to_owned(),
+                    questions: None,
+                })
+            }
+            Some("thinking") if assistant => {
+                let Some(content) = text(&part["thinking"]) else {
+                    continue;
+                };
+                ChatMessage::Thinking(ThinkingMessage {
+                    timestamp: timestamp.to_owned(),
+                    content: content.to_owned(),
+                })
+            }
+            Some("tool_use") if assistant => {
+                ChatMessage::ToolUse(convert_claude_tool_use(timestamp, part))
+            }
+            Some("tool_result") => {
+                let content = part.get("content").cloned().map(Opaque::from_value);
+                ChatMessage::ToolResult(ToolResultMessage::new(
+                    timestamp.to_owned(),
+                    part["tool_use_id"].as_str().unwrap_or_default().to_owned(),
+                    claude_tool_result_content(content.as_ref(), result_metadata.as_ref()),
+                    truthy(&part["is_error"]),
+                    None,
+                ))
+            }
+            _ => continue,
+        };
+        let mut row = NativeSourced::new(row);
+        if let Some(entry_id) = record_uuid {
+            attach_native_message_source(
+                &mut row,
+                Some(NativeMessageSourceInput {
+                    entry_id: Some(entry_id),
+                    within_source_ordinal: Some(rows.len() as f64),
+                    ..Default::default()
+                }),
+            );
+        }
+        rows.push(row);
+    }
+    rows
 }
 
 #[cfg(test)]

@@ -1,0 +1,8 @@
+{"fn":"describeSourceTrace","args":["missing"]}
+{"fn":"describeSourceTrace","args":["unsupported"]}
+{"fn":"describeSourceTrace","args":["none"]}
+{"fn":"describeSourceTrace","args":["path"]}
+{"fn":"describeSourceTrace","args":["reference"]}
+{"fn":"describeSourceTrace","args":["empty"]}
+{"fn":"describeSourceTrace","args":["failure"]}
+{"fn":"describeSourceTrace","args":["owner"]}

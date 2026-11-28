@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-ledger/tests/imported-drafts-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-ledger/tests/inputs/imported-drafts.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 11,
+  "sha256": "79a70bc0aac13bccd1a0774e63e5ab87a75ea4c4405a6c88b2739fe3ba997bd3"
+}

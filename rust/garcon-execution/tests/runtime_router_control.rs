@@ -10,10 +10,11 @@ use garcon_base::{
 use garcon_cases::{CaseError, replay, text, unknown};
 use garcon_contract::{
     chat_command_contracts::PermissionDecisionPayload,
-    chat_transient_feed::ChatTransientControlAction,
+    chat_transient_feed::ChatTransientControlAction, executors::AgentExecutionTarget,
 };
 use garcon_execution::{
-    agent_registry::AgentRegistry,
+    agent_registry::{AgentRegistry, AgentRegistryOptions},
+    directory::{AgentDirectory, ExecutionIntegrationDirectory},
     runtime_router::{
         AgentRuntimeRouter, AgentRuntimeRouterOptions, RouterPermissionClaim, RoutingChat,
         RuntimeRouterChats, RuntimeRouterIntegrations, RuntimeRouterLedger,
@@ -23,6 +24,7 @@ use garcon_execution::{
 };
 use garcon_interface::{
     errors::{AgentCallError, AgentDeliveryOutcome},
+    integration::AgentIntegration,
     producer::{AgentPermissionRespondRequest, AgentPermissions},
     resources::{
         AgentPermissionResponseKind, AgentPermissionResponseRef, AgentResourceRef,
@@ -362,9 +364,41 @@ async fn steer_trace(mode: &str) -> Value {
     json!({"value":value,"effects":&*ports.effects.borrow()})
 }
 
+struct NoTranscriptSource;
+
+impl ExecutionIntegrationDirectory for NoTranscriptSource {
+    fn require_integration(
+        &self,
+        _: &AgentExecutionTarget,
+    ) -> ExecutionOperationResult<Rc<AgentIntegration>> {
+        Err("transcript source is not read by the running projection".into())
+    }
+
+    fn known_integration(&self, _: &AgentExecutionTarget) -> Option<Rc<AgentIntegration>> {
+        None
+    }
+
+    fn integrations_for(&self, _: &str) -> ExecutionOperationResult<Vec<Rc<AgentIntegration>>> {
+        Ok(vec![])
+    }
+
+    fn is_ready(&self, _: &str) -> bool {
+        false
+    }
+}
+
+fn registry_with_running_fixture(mode: &str) -> AgentRegistry {
+    let (runtime, _) = router_options(mode);
+    AgentRegistry::new(AgentRegistryOptions {
+        runtime,
+        directory: Rc::new(AgentDirectory::new(Rc::new(NoTranscriptSource))),
+        get_carry_over_revision: Rc::new(|_| "frozen-revision".into()),
+        logger: Rc::new(create_logger("test")),
+    })
+}
+
 fn running_trace(active: bool) -> Value {
-    let (options, _) = router_options(if active { "running" } else { "idle" });
-    let registry = AgentRegistry::new(options);
+    let registry = registry_with_running_fixture(if active { "running" } else { "idle" });
     json!({
         "chat":registry.is_chat_running(CHAT),
         "agent":registry.is_agent_session_running("test",Some("session-1"),Some(REMOTE)),
@@ -378,8 +412,7 @@ fn running_trace(active: bool) -> Value {
 
 #[test]
 fn registry_snapshot_is_sorted_and_not_filtered_by_chat_lookup() {
-    let (options, _) = router_options("several-running");
-    let registry = AgentRegistry::new(options);
+    let registry = registry_with_running_fixture("several-running");
     let mut chats = registry.get_running_chat_ids_snapshot();
     assert_eq!(chats, [CHAT, "chat-2", "chat-3"]);
     chats.clear();

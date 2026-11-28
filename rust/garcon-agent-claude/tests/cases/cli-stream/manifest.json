@@ -1,0 +1,19 @@
+{
+  "module": "rust/garcon-agent-claude/tests/oracles/cli-stream.ts",
+  "tests": [
+    "rust/garcon-agent-claude/tests/oracles/cli-stream.suite.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "convertCliStreamFrame",
+      "argument": 0
+    }
+  ],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 89,
+  "sha256": "0c754a0a9cf3d34b0123bce17ce616bf7336373c935c96de85a6b6e68ebf8b74"
+}

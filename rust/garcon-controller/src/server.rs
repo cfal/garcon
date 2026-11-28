@@ -1,3 +1,4 @@
+mod catalog_configuration;
 mod runtime_environment;
 
 use std::cell::Cell;
@@ -313,6 +314,11 @@ async fn bind_controller(
     )
     .await?;
     TelegramSettingsStore::open(&config.config_dir, clock.clone()).await?;
+    let catalog_routes = catalog_configuration::initialize_catalog_routes(
+        &lease.workspace_dir().to_string_lossy(),
+        clock.as_ref(),
+    )
+    .await?;
     let title_settings = settings.clone();
     let edge_routes = create_edge_routes(
         Rc::clone(&runtime),
@@ -378,6 +384,7 @@ async fn bind_controller(
         ),
         &create_ticket_routes(&tickets),
         &providers.routes(&browser_sockets),
+        &catalog_routes,
     ])?;
     let router = HttpRouter::new(
         routes,

@@ -2,4 +2,5 @@
 //! one module per TypeScript file, under `agents::opencode`.
 
 pub mod agents;
+pub mod config;
 pub mod js;

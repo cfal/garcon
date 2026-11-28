@@ -3,7 +3,7 @@ pub mod attachments;
 pub mod file_mention_context;
 pub mod history_loader_utils;
 pub mod idle_session_purger;
-pub(crate) mod json_response;
+pub mod json_response;
 pub mod native_message_source;
 pub mod normalize_util;
 pub mod provider_http;

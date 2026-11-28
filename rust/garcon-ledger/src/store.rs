@@ -32,14 +32,15 @@ use crate::{
         AppendChatRowRequest, AppendChatRowResult, AppendInputRequest,
         AppendSelectionChangeNoticeResult, InputComposition, LedgerCheckpoint, LedgerNoticeDetail,
         LedgerPreambleSelectionChangedNoticeDetail, LedgerRow, LedgerRowData, LedgerRowDraft,
-        LedgerUserInputDetail, PREAMBLES_UPDATED_MESSAGE, TranscriptPage, TranscriptView,
-        TranscriptViewId, TranscriptViewStatus, transcript_view_id,
+        LedgerUserInputDetail, PREAMBLES_UPDATED_MESSAGE, TranscriptNativeActivityState,
+        TranscriptPage, TranscriptView, TranscriptViewId, TranscriptViewStatus, transcript_view_id,
     },
     errors::{LedgerCodecError, LedgerError},
     failure_fences::{LedgerFailureFences, SharedLedgerFailure},
     file_stat::stat_size_if_exists,
     input_composition::{compose_input_prompt, read_resend_candidates},
     input_submission::{matching_input_submission, read_submission},
+    native_activity_query::read_provider_activity_watermark,
     preamble_application::{has_preamble_boundary_proof, prepare_preamble_input},
     raw_page::read_raw_page,
     session_query::find_current_session,
@@ -47,8 +48,10 @@ use crate::{
     staging_views::{StagingViews, encode_drafts, insert_encoded_rows, materialize_rows},
 };
 
+mod activity;
 mod anchors;
 mod bulk;
+mod cleanup;
 mod read_pages;
 pub use anchors::{TranscriptReadSignal, TranscriptWatermark};
 pub use bulk::StageViewInput;
@@ -75,6 +78,7 @@ pub struct TranscriptLedgerStore {
     state: RefCell<StoreState>,
     staging: Rc<StagingViews>,
     anchor_read_epoch: Cell<u64>,
+    activity_reads: activity::ActivityReads,
     create_view_id: Rc<dyn Fn() -> LedgerResult<TranscriptViewId>>,
     now: Rc<dyn Fn() -> LedgerResult<String>>,
 }
@@ -117,6 +121,7 @@ impl TranscriptLedgerStore {
             }),
             staging,
             anchor_read_epoch: Cell::new(0),
+            activity_reads: activity::ActivityReads::default(),
             create_view_id,
             now: options
                 .now
@@ -408,6 +413,26 @@ impl TranscriptLedgerStore {
         })
     }
 
+    pub fn native_activity_state(
+        &self,
+        chat_id: &str,
+    ) -> LedgerResult<TranscriptNativeActivityState> {
+        self.read(chat_id, |entry| {
+            let view = require_current(entry)?;
+            let session = find_current_session(&entry.db, view)?;
+            let provider_watermark = read_provider_activity_watermark(
+                &entry.db,
+                &view.view_id,
+                view.content_start_ordinal,
+            )?;
+            Ok(TranscriptNativeActivityState {
+                view_id: view.view_id.clone(),
+                session,
+                provider_watermark,
+            })
+        })
+    }
+
     pub fn find_submission_row(
         &self,
         chat_id: &str,
@@ -513,6 +538,7 @@ impl TranscriptLedgerStore {
     }
 
     pub fn close_chat(&self, chat_id: &str) -> LedgerResult<()> {
+        self.activity_reads.retire(chat_id);
         self.staging.abandon(chat_id);
         let mut state = self.state.borrow_mut();
         let cache = &mut state.connections;
@@ -526,6 +552,7 @@ impl TranscriptLedgerStore {
 
     pub fn close(&self) -> LedgerResult<()> {
         self.anchor_read_epoch.set(self.anchor_read_epoch.get() + 1);
+        self.activity_reads.close();
         self.staging.abandon_all();
         let mut state = self.state.borrow_mut();
         let cache = &mut state.connections;
@@ -689,14 +716,17 @@ pub(crate) fn assert_current<'a>(
 }
 
 fn validate_chat_directory_name(chat_id: &str) -> LedgerResult<()> {
-    if chat_id.is_empty()
-        || !chat_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-    {
+    if !is_chat_directory_name(chat_id) {
         return Err(type_error("Chat ID is not a safe ledger directory name"));
     }
     Ok(())
+}
+
+fn is_chat_directory_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 pub(crate) fn validate_content_start_ordinal(value: u64, row_count: usize) -> LedgerResult<()> {
