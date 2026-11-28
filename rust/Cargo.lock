@@ -865,6 +865,8 @@ dependencies = [
  "http-body",
  "http-body-util",
  "libc",
+ "rustls",
+ "rustls-pki-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -874,6 +876,7 @@ dependencies = [
  "tokio-util",
  "url",
  "uuid",
+ "webpki-roots 1.0.12",
  "windows-sys 0.61.2",
 ]
 
@@ -1104,7 +1107,6 @@ dependencies = [
  "tokio-util",
  "url",
  "uuid",
- "webpki-roots 1.0.12",
  "x25519-dalek",
  "zeroize",
 ]
