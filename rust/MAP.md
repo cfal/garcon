@@ -7,7 +7,7 @@ after which the fallback is removed (the lift). The SPA in `web/` stays Svelte.
 Decisions are in [`DECISIONS.md`](DECISIONS.md). A session claims one unit here
 before starting it and marks it done with its gate results.
 
-Plan accepted 2026-11-27 (ADR-012 to ADR-025). A new session reads this file,
+Plan accepted 2026-11-27 (ADR-012 to ADR-026). A new session reads this file,
 then `DECISIONS.md`, `RULES.md`, and `GLOSSARY.md`.
 
 ## Where the port stands
@@ -257,8 +257,9 @@ report the remaining mismatches to the manager instead of editing further.
 - Controller logic runs on one core thread, as it runs on one event loop today.
   SQLite, rendering, token fitting, search, compression, and other work
   proportional to a transcript run off it.
-- Build with `CARGO_BUILD_JOBS=1` and a target directory of your own. Never
-  kill a server you did not start; start test servers on port 0.
+- Compile no Rust on the development machine; build and test on the build
+  machine (ADR-026, `RULES.md` "Build"). Never kill a server you did not
+  start; start test servers on port 0.
 - Work in your own worktree and branch (ADR-025) and commit there when a part
   is complete and green. Never push, rebase, or touch another worktree; the
   manager merges your reported commit into `rust-server` and pushes.
@@ -353,6 +354,7 @@ runs.
 | 023 | Three binaries |
 | 024 | The shared crates mirror the original's packages |
 | 025 | Each session works in its own worktree |
+| 026 | Bun 1.4.3 is the reference runtime, and Rust builds leave the development machine |
 
 ## Open questions
 

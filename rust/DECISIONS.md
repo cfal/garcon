@@ -533,3 +533,29 @@ workspace manifest, `garcon-server`, `MAP.md`, and this file stand. Two
 sessions that add modules to one crate both edit its `lib.rs`, and the manager
 resolves that file in the merge. `rust-server` is rebased onto `main` only
 with every session paused.
+
+## ADR-026: Bun 1.4.3 is the reference runtime, and Rust builds leave the development machine
+
+Status: accepted (2026-11-28)
+
+Context: CI and the release build pin Bun 1.4.3, while the development machine
+ran 1.4.5. The original behaves differently on the two: a refused WebSocket
+upgrade reports another close code to its client, a project path ending in a
+backslash is found on 1.4.5 and not on 1.4.3, and `bun:sqlite` differs in
+twelve probed behaviors, among them the SQLite version and the range of
+integers bound as INTEGER. Recordings made on 1.4.5 failed two cases in CI.
+Separately, six sessions compiling Rust beside their Bun work overloaded the
+development machine until the Garcon server on it crashed.
+
+Decision: The behavior to mirror is the original on the Bun that CI and the
+release build pin. Recordings, replays, and oracle tests run with that
+version. No Rust is compiled on the development machine: sessions and the
+manager run every building command on a separate build machine, which has the
+pinned Bun and Rust toolchain, through one wrapper that copies a worktree's
+sources there. Formatting, which compiles nothing, stays local.
+
+Consequences: A recording that differs between Bun versions is rerecorded on
+the pinned one, and the difference is noted where a port could meet it. When
+the pin moves, the recordings are replayed on the new version before it is
+adopted. Files a remote command writes do not come back, except the lock file,
+so recordings are produced locally and only compiled and tested remotely.
