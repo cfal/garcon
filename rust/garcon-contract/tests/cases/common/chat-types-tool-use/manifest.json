@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-contract/tests/support/tool_use_oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-types-tool-use.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 120,
+  "sha256": "c9e2f43d7cde54c68f02c2e0752f5f80049731de3523014e9ea43d1db3465526"
+}

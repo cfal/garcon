@@ -1,0 +1,11 @@
+{
+  "module": "server/runtime/projects/file-mentions.ts",
+  "tests": [],
+  "inputs": "rust/garcon-runtime/tests/inputs/file-mentions.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 7,
+  "sha256": "b74b775a35a7d40b4c0e85075ec3b7123801ca7ef1da941885a20abfb002c835"
+}

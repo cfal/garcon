@@ -1,0 +1,7 @@
+{"fn":"parseFileMentionTokens","args":["read @src/main.ts and @\"docs/design note.md\""]}
+{"fn":"parseFileMentionTokens","args":["email alex@example.com and branch@{upstream}"]}
+{"fn":"parseFileMentionTokens","args":["😀 @😀 @'é 文'"]}
+{"fn":"parseFileMentionTokens","args":["@@double @ @\"\" @'unterminated @end"]}
+{"fn":"parseFileMentionTokens","args":["@\"\" @\"two\\\"words\" @'back\\\\slash'"]}
+{"fn":"parseFileMentionTokens","args":["before\u00a0@one\u0085@two\ufeff@three"]}
+{"fn":"parseFileMentionTokens","args":["@src/main.ts, then @path?!"]}
