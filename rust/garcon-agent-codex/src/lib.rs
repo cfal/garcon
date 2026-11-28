@@ -1,8 +1,10 @@
 pub mod app_server;
+pub mod async_questions;
 pub mod build;
 mod code_mode_command_expressions;
 pub mod code_mode_command_parser;
 pub mod code_mode_command_projection;
+pub mod jsonl_tool_use_converter;
 pub mod message_source_identity;
 pub mod runtime_types;
 pub mod service_tier;
