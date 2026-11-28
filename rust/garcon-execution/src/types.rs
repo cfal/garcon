@@ -1,8 +1,7 @@
 //! State-facing and operation-facing contracts from the controller types.ts.
 //!
-//! Coordinator option composition, turn runner wiring, delivery
-//! envelopes for assembled commands, and the coordinator's
-//! command/lifecycle/query facets belong to the wave 2 execution unit.
+//! The coordinator module owns its options and event subscriptions. The
+//! composition root supplies the concrete owners and runs native-fork cleanup.
 
 use garcon_base::{
     domain_error::DomainError,
@@ -182,6 +181,10 @@ pub fn execution_error_input<'a>(error: &'a (dyn Error + 'static)) -> ErrorInput
         ErrorInput::Diagnostic(error)
     } else if let Some(error) =
         error.downcast_ref::<crate::accepted_input_handler::ExecutionAggregateError>()
+    {
+        ErrorInput::Diagnostic(error)
+    } else if let Some(error) =
+        error.downcast_ref::<crate::chat_execution_coordinator::SharedCoordinatorError>()
     {
         ErrorInput::Diagnostic(error)
     } else {
@@ -484,6 +487,19 @@ pub enum CapturedControlOffer {
     AfterTurn { attempt: Rc<QueueExecutionAttempt> },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ServerControlDisposition {
+    Delivered,
+    Queued,
+}
+
+pub enum ServerControlOffer {
+    Delivered,
+    AfterTurn { attempt: Rc<QueueExecutionAttempt> },
+    Queued,
+}
+
 pub struct AcceptedSteerInput<EntryId = Option<String>> {
     pub question_reply: Option<AsyncQuestionReply>,
     pub command: AcceptedExecutionCommand<EntryId>,
@@ -568,6 +584,145 @@ pub struct DirectTurnReservation {
 pub struct TranscriptSnapshotReservation {
     pub chat_id: String,
     pub reservation_id: String,
+}
+
+#[async_trait(?Send)]
+pub trait ChatExecutionCommands {
+    async fn delete_chat_queue_file(&self, chat_id: &str) -> ExecutionOperationResult<()>;
+    async fn schedule_direct_input(
+        &self,
+        input: AcceptedDirectInput,
+    ) -> ExecutionOperationResult<DirectInputScheduleOutcome>;
+    async fn run_initial_input(&self, input: AcceptedDirectInput) -> ExecutionOperationResult<()>;
+    async fn schedule_direct_operation(
+        &self,
+        input: AcceptedDirectOperation,
+    ) -> ExecutionOperationResult<()>;
+    async fn enqueue_accepted(
+        &self,
+        input: AcceptedQueueCreate,
+    ) -> ExecutionOperationResult<crate::chat_execution_control_operations::QueueEntryMutationResult>;
+    async fn replace_accepted(
+        &self,
+        input: AcceptedQueueReplace,
+    ) -> ExecutionOperationResult<crate::chat_execution_control_operations::QueueEntryMutationResult>;
+    async fn delete_accepted(
+        &self,
+        input: AcceptedQueueDelete,
+    ) -> ExecutionOperationResult<QueueCommandMutationResult>;
+    async fn move_accepted(
+        &self,
+        input: AcceptedQueueMove,
+    ) -> ExecutionOperationResult<crate::chat_execution_control_operations::QueueMoveResult>;
+    async fn capture_steer_target(
+        &self,
+        chat_id: &str,
+        deadline: f64,
+    ) -> ExecutionOperationResult<Option<CapturedSteerTarget>>;
+    async fn deliver_accepted_steer(
+        &self,
+        input: AcceptedSteerInput,
+    ) -> ExecutionOperationResult<AcceptedSteerOutcome>;
+    async fn deliver_accepted_queue_entry_steer(
+        &self,
+        input: AcceptedQueueEntrySteer,
+    ) -> ExecutionOperationResult<AcceptedQueueEntrySteerOutcome>;
+    async fn enqueue_accepted_steer(
+        &self,
+        input: AcceptedQueueSteerCreate,
+    ) -> ExecutionOperationResult<QueueCommandMutationResult>;
+    async fn mark_accepted_queue_entry_steer(
+        &self,
+        input: AcceptedQueueEntrySteerMark,
+    ) -> ExecutionOperationResult<StoredChatExecutionControlState>;
+    async fn recover_queue_entry_steer(
+        &self,
+        chat_id: &str,
+        entry_id: &str,
+    ) -> ExecutionOperationResult<StoredChatExecutionControlState>;
+    async fn stop_active_turn(
+        &self,
+        chat_id: &str,
+    ) -> ExecutionOperationResult<StopActiveTurnResult>;
+    async fn interrupt_active_turn(
+        &self,
+        chat_id: &str,
+    ) -> ExecutionOperationResult<ChatStopOutcome>;
+    async fn abort_for_chat_deletion(&self, chat_id: &str) -> ExecutionOperationResult<bool>;
+    fn rollback_chat_deletion(&self, chat_id: &str) -> ExecutionOperationResult<()>;
+    fn reserve_transcript_snapshot(
+        &self,
+        chat_id: &str,
+    ) -> ExecutionOperationResult<TranscriptSnapshotReservation>;
+    fn replace_turn_with_transcript_snapshot_reservation(
+        &self,
+        chat_id: &str,
+        turn: &TurnIdentity,
+    ) -> Option<TranscriptSnapshotReservation>;
+    async fn release_transcript_snapshot(
+        &self,
+        reservation: &TranscriptSnapshotReservation,
+    ) -> ExecutionOperationResult<()>;
+    async fn wait_for_dispatches(&self) -> ExecutionOperationResult<()>;
+    fn owns_execution(&self, chat_id: &str) -> bool;
+    async fn read_chat_execution_control(
+        &self,
+        chat_id: &str,
+    ) -> ExecutionOperationResult<StoredChatExecutionControlState>;
+    fn with_chat_execution_control<'a, T: 'a>(
+        &'a self,
+        chat_id: &'a str,
+        operation: impl FnOnce(StoredChatExecutionControlState) -> LocalExecutionFuture<'a, T> + 'a,
+    ) -> LocalExecutionFuture<'a, T>
+    where
+        Self: Sized;
+    async fn clear_chat_queue(
+        &self,
+        chat_id: &str,
+    ) -> ExecutionOperationResult<StoredChatExecutionControlState>;
+    async fn discard_pending_chat_input(
+        &self,
+        chat_id: &str,
+    ) -> ExecutionOperationResult<StoredChatExecutionControlState>;
+    async fn pause_chat_queue(
+        &self,
+        chat_id: &str,
+    ) -> ExecutionOperationResult<StoredChatExecutionControlState>;
+    async fn resume_chat_queue(
+        &self,
+        chat_id: &str,
+        pause_id: &str,
+    ) -> ExecutionOperationResult<StoredChatExecutionControlState>;
+    async fn resume_and_drain(
+        &self,
+        chat_id: &str,
+        pause_id: &str,
+    ) -> ExecutionOperationResult<StoredChatExecutionControlState>;
+}
+
+#[async_trait(?Send)]
+pub trait ChatExecutionLifecycle {
+    fn begin_shutdown(&self) -> Vec<String>;
+    async fn abort_for_shutdown(&self, chat_id: &str) -> ExecutionOperationResult<bool>;
+    async fn wait_for_execution_owners(&self);
+    async fn wait_for_dispatches(&self) -> ExecutionOperationResult<()>;
+    fn get_queued_turn_finalization(
+        &self,
+        chat_id: &str,
+        turn_id: Option<&str>,
+    ) -> Option<crate::turn_finalization_tracker::QueuedTurnFinalization>;
+}
+
+#[async_trait(?Send)]
+pub trait ChatExecutionQueries {
+    async fn read_chat_execution_control(
+        &self,
+        chat_id: &str,
+    ) -> ExecutionOperationResult<StoredChatExecutionControlState>;
+    fn owns_execution(&self, chat_id: &str) -> bool;
+    fn is_chat_turn_reserved(&self, chat_id: &str) -> bool;
+    fn get_turn_reserved_chat_ids(&self) -> Vec<String>;
+    fn is_chat_stop_in_flight(&self, chat_id: &str) -> bool;
 }
 
 pub fn execution_turn_identity(turn: &TurnIdentity) -> Option<TurnIdentity> {

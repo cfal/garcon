@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod catalog;
+pub mod cli_update;
 pub mod direct;
 pub mod execution;
 pub mod forking;
@@ -8,3 +9,4 @@ pub mod migration;
 pub mod native_session;
 pub mod settings;
 pub mod shared;
+pub mod which;

@@ -1,0 +1,13 @@
+{
+  "module": "server-agents/common/src/cli-update/cli-version.ts",
+  "tests": [
+    "server-agents/common/src/cli-update/__tests__/cli-version.test.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 133,
+  "sha256": "b844a2a2a232e86ea3dfa69334b76411d0b40a607af0578a5ced5cd8cd7b4852"
+}

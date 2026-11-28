@@ -1,0 +1,21 @@
+[package]
+name = "garcon-agent-direct-anthropic-compatible"
+version = "0.0.0"
+description = "The direct Anthropic-compatible Messages integration."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+garcon-agents-common.workspace = true
+garcon-contract.workspace = true
+garcon-interface.workspace = true
+garcon-js.workspace = true
+
+[dev-dependencies]
+garcon-agents-common = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true
+tokio.workspace = true

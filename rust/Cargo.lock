@@ -919,21 +919,48 @@ dependencies = [
 ]
 
 [[package]]
-name = "garcon-agent-direct-openai-compatible"
+name = "garcon-agent-codex"
+version = "0.1.0"
+dependencies = [
+ "garcon-cases",
+ "garcon-js",
+ "serde_json",
+]
+
+[[package]]
+name = "garcon-agent-direct-anthropic-compatible"
 version = "0.0.0"
 dependencies = [
- "async-trait",
  "garcon-agents-common",
- "garcon-base",
  "garcon-contract",
  "garcon-interface",
  "garcon-js",
- "indexmap",
- "serde_json",
  "tempfile",
  "tokio",
- "tokio-util",
- "uuid",
+]
+
+[[package]]
+name = "garcon-agent-direct-openai-compatible"
+version = "0.0.0"
+dependencies = [
+ "garcon-agents-common",
+ "garcon-contract",
+ "garcon-interface",
+ "garcon-js",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "garcon-agent-direct-openai-responses-compatible"
+version = "0.0.0"
+dependencies = [
+ "garcon-agents-common",
+ "garcon-contract",
+ "garcon-interface",
+ "garcon-js",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -1024,6 +1051,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "garcon-chats"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "garcon-base",
+ "garcon-cases",
+ "garcon-contract",
+ "garcon-interface",
+ "garcon-js",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
 name = "garcon-contract"
 version = "0.0.0"
 dependencies = [
@@ -1068,6 +1117,7 @@ name = "garcon-execution"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "futures",
  "garcon-base",
  "garcon-cases",
  "garcon-contract",
@@ -1090,7 +1140,9 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "futures",
+ "garcon-agent-direct-anthropic-compatible",
  "garcon-agent-direct-openai-compatible",
+ "garcon-agent-direct-openai-responses-compatible",
  "garcon-base",
  "garcon-contract",
  "garcon-interface",

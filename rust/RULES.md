@@ -101,16 +101,6 @@ the user corrects how a port behaves, the correction is added under
 
 - `serde_json` is built with `preserve_order`. Declare struct fields in the
   order the original writes its object literal.
-- When a provider constructs a shared question prompt with a different key
-  order from the shared parser, keep the parser's order in the shared type.
-  Readers apply that parser before using the row. Scope the converter replay's
-  `ResultOrderException` to the question elements so its values and the rest
-  of the row still match.
-- When a provider passes raw `changes` or `allowedPrompts` arrays through but
-  readers always coerce them with the shared parser, call the same contract
-  coercion in the port. List exact converter-case differences with the reason
-  "raw array read as the shared parser reads it"; this class is provisional
-  pending user confirmation.
 - A property the original leaves `undefined` is absent:
   `#[serde(skip_serializing_if = "Option::is_none")]`. A property it sets to
   `null` is `null`. Where the original distinguishes the two on input, keep
@@ -146,6 +136,24 @@ the user corrects how a port behaves, the correction is added under
   their formatting.
 - `JSON.stringify(value, null, 2)` is `serde_json::to_string_pretty`. Add a
   trailing newline only where the original does.
+- A message type has one field order in the port, the shared parser's
+  (`common/chat-message-coercion.ts`), also where a provider converter of the
+  original writes the same keys in another order (the Claude and opencode
+  converters write `allowMultiple` before `header` in an ask-user-question
+  prompt). Every reader re-parses a message with the shared parser
+  (`server/remote/client/remote-agent-integration.ts`,
+  `server/controller/ledger/codec.ts`, the web projection), so the
+  converter's order is never read. The converter's replay names that subtree,
+  and only it, in a `ResultOrderException` with the reason. The contract type
+  does not change and gains no order switch.
+- A converter of the original that hands a raw array from the model to a
+  message (`changes`, `allowedPrompts`) becomes a call of the contract's
+  coercion for that field (`as_optional_changes`, `as_allowed_prompts`), the
+  function the shared parser applies on every read, never a normalization of
+  the converter's own. A recorded case whose raw array holds members that
+  function drops is listed in `known-differences.jsonl` with the reason "raw
+  array read as the shared parser reads it". Provisional until the user
+  confirms it (MAP.md, open questions).
 
 ## Strings
 
@@ -287,14 +295,27 @@ the user corrects how a port behaves, the correction is added under
 
 ## Build
 
-- No Rust is compiled on the development machine (ADR-026). Every command
-  that builds, `cargo check`, `clippy`, `test`, `build`, `run`, `doc`, and
-  `rustc` itself, runs on the build machine through
-  `garcon-rs-remote <lane> -- <command>`, which copies your worktree's sources
-  there, runs the command in `rust/` with a target directory per lane, and
-  copies `rust/Cargo.lock` back when the command changed it. Nothing else the
-  command writes comes back. `cargo fmt -p <crate>` compiles nothing and runs
-  locally.
+- Nothing intensive runs on the development machine (ADR-026): it has been
+  overloaded into a restart twice. No Rust is compiled there, and no Bun test
+  suite, recorder, replay, oracle, `tsc`, or server runs there either. What
+  runs locally is reading, git, `cargo fmt`, and
+  `bun test ./scripts/__tests__/test-inventory.test.js`.
+- Everything else runs on the build machine through
+  `garcon-rs-remote <label> [--pull <repo path>]... -- <command>`. It mirrors
+  your worktree's sources (`rust`, `common`, `server`, `server-agents`,
+  `cli`, `scripts`, `patches`, `integration-tests`, `docs`, `.github`, and
+  the package files) by content, installs dependencies when a lockfile
+  changed, and runs the command as an unprivileged user in the copy's
+  `rust/` directory (`cd ..` for the repository root) with a target directory
+  per label and Bun 1.4.3 on `PATH`. `rust/Cargo.lock` comes back when the
+  command changed it; anything else the command writes comes back only when
+  named with `--pull` (a recorded case directory, a report). One call costs
+  about 40 seconds before the command starts, and every session shares one
+  four-core machine: put a unit's commands in one call, build one crate
+  (`-p`), and never the workspace.
+- Only `/garcon`, `~/bin`, and the agent configuration directories survive a
+  restart of the development machine. Keep nothing you need in `~/tmp` or
+  anywhere else under the home directory.
 - `cargo fmt -p <crate>`, then `cargo clippy -p <crate> --all-targets --
   -D warnings`, then `cargo test -p <crate>`.
 - The reference runtime of the original is the Bun that CI and the release
