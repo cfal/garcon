@@ -1,0 +1,18 @@
+{
+  "module": "common/user-message-presentation.ts",
+  "tests": [
+    "common/__tests__/user-message-presentation.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/user-message-presentation.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseUserMessagePresentation",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 82,
+  "sha256": "c39d0ebed653c4a45c715af64aaef3b9bf83cb5b6cc43187d243fa56ad416060"
+}

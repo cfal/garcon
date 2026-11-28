@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { captureStep, type CapturedSocket } from '../capture.js';
+import { captureStep, isUnported, type CapturedSocket } from '../capture.js';
 import type { StartedServer } from '../environment.js';
 import { normalizeCapture } from '../normalize.js';
 import { resolvePlaceholders } from '../placeholders.js';
@@ -15,6 +15,7 @@ function standIn(): StartedServer {
     fetch(request, server) {
       const path = new URL(request.url).pathname;
       if (['/ws-accept', '/ws-keep'].includes(path) && server.upgrade(request, { data: path })) return;
+      if (path === '/ws-unported') return new Response('Not implemented', { status: 501, headers: { 'X-Garcon-Rs-Unported': '1' } });
       return new Response('Sign in first', { status: 401, headers: { 'Content-Type': 'text/plain' } });
     },
     websocket: {
@@ -64,7 +65,8 @@ async function capture(step: ScenarioStep): Promise<{ raw: CapturedSocket; recor
 describe('captureStep on a WebSocket step', () => {
   test('records the raw HTTP response to a refused upgrade, and no close code', async () => {
     const { raw, recorded } = await capture({ name: 'refused', ws: { path: '/ws-refuse', auth: 'none' } });
-    expect(raw).toEqual({
+    expect(isUnported(raw)).toBe(false);
+    expect(recorded).toEqual({
       request: { path: '/ws-refuse', auth: 'none', protocols: ['(default)'] },
       opened: false,
       protocol: '',
@@ -73,7 +75,13 @@ describe('captureStep on a WebSocket step', () => {
       close: null,
       refusal: { status: 401, contentType: 'text/plain', body: 'Sign in first' },
     });
-    expect(recorded).toEqual(raw);
+  });
+
+  test('a refused upgrade can be unported without recording the control header', async () => {
+    const { raw, recorded } = await capture({ name: 'unported', ws: { path: '/ws-unported', auth: 'none' } });
+    expect(isUnported(raw)).toBe(true);
+    expect(recorded).toMatchObject({ opened: false, refusal: { status: 501 } });
+    expect(recorded).not.toHaveProperty('rawHeaders');
   });
 
   test('records the replies and the close code of a connection the server accepted and closed', async () => {

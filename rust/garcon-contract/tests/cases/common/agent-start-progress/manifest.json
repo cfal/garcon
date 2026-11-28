@@ -1,0 +1,18 @@
+{
+  "module": "common/agent-start-progress.ts",
+  "tests": [
+    "common/__tests__/transcript-notice-contract.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/agent-start-progress.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseAgentStartProgressNotice",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 104,
+  "sha256": "5e8cb310acf90db5de1b9b691dd9b127492534a03d9ccb090ef07f3473cadbf7"
+}

@@ -20,10 +20,11 @@ use tokio::time::{Instant, sleep, sleep_until};
 use tokio_util::io::ReaderStream;
 use tokio_util::sync::CancellationToken;
 
+use crate::cancellation::abort_error;
+
 use super::operation_context::{
-    ScopedGitOptions, assert_git_working_path, git_abort_error, git_operation_options,
-    is_git_cancellation, mark_git_mutation_dispatched, mark_git_output_truncated,
-    track_git_process,
+    ScopedGitOptions, assert_git_working_path, git_operation_options, is_git_cancellation,
+    mark_git_mutation_dispatched, mark_git_output_truncated, track_git_process,
 };
 use super::types::{GitCommandOptions, GitCommandResult, GitCommandTrace, GitProcessError};
 
@@ -533,7 +534,7 @@ pub fn read_git_blob_prefix(
     track_git_process(async move {
         let options = options?;
         if signals_aborted(&options) {
-            return Err(git_abort_error("The operation was aborted").into());
+            return Err(abort_error("The operation was aborted").into());
         }
         let mut command = Command::new("git");
         command

@@ -15,7 +15,7 @@ use serde_json::Value;
 use tokio::time::{Instant, sleep_until};
 use tokio_util::sync::CancellationToken;
 
-use crate::files::errors::check_cancelled;
+use crate::cancellation::check_cancelled;
 use crate::git::run::{read_only_git_options, run_git};
 use crate::git::types::{GitCommandOptions, GitCommandResult, GitProcessError};
 
@@ -279,6 +279,8 @@ async fn resolve_with_git(
 mod tests {
     use std::cell::{Cell, RefCell};
 
+    use garcon_base::errors::{ErrorInput, diagnostic_error_code};
+
     use super::*;
 
     fn root() -> &'static str {
@@ -387,7 +389,14 @@ mod tests {
         })
         .await
         .unwrap_err();
-        assert!(aborted.is::<crate::files::errors::AbortError>());
+        assert_eq!(
+            diagnostic_error_code(ErrorInput::Error(aborted.as_ref())),
+            "AbortError"
+        );
+        assert!(crate::git::operation_context::is_git_cancellation(
+            aborted.as_ref()
+        ));
+        assert_eq!(aborted.to_string(), "The operation was aborted.");
     }
 
     #[cfg(unix)]
