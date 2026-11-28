@@ -1,0 +1,9 @@
+{"fn":"npmGlobalPrefixFromCommandPath","args":["/usr/local/lib/node_modules/@openai/codex/bin/codex.js","@openai/codex"]}
+{"fn":"npmGlobalPrefixFromCommandPath","args":["/repo/node_modules/x/lib/node_modules/@openai/codex/bin/codex.js","@openai/codex"]}
+{"fn":"npmGlobalPrefixFromCommandPath","args":["/home/u/.local/share/mise/installs/codex/1.0.0/lib/node_modules/@openai/codex/bin/codex.js","@openai/codex"]}
+{"fn":"npmGlobalPrefixFromCommandPath","args":["/home/u/.local/share/mise/installs/node/22.0.0/lib/node_modules/@openai/codex/bin/codex.js","@openai/codex"]}
+{"fn":"npmGlobalPrefixFromCommandPath","args":["C:\\Synthetic\\Lib\\node_modules\\@OpenAI\\Codex\\bin\\codex.exe","@openai/codex"]}
+{"fn":"npmGlobalPrefixFromCommandPath","args":["/lib/node_modules/@openai/codex/bin/codex.js","@openai/codex"]}
+{"fn":"homebrewKegFromCommandPath","args":["/opt/homebrew/Cellar/codex/0.169.0/bin/codex"]}
+{"fn":"homebrewKegFromCommandPath","args":["/usr/local/bin/codex"]}
+{"fn":"homebrewKegFromCommandPath","args":["/Caskroom/codex/0.169.0/bin/codex"]}

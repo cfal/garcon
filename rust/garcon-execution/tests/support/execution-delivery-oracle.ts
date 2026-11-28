@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { AgentCallError } from '../../../../server-agents/interface/src/index.ts';
 import { DomainError, ProjectUnavailableError } from '../../../../server/common/domain-error.ts';
+import { ExecutorSessionLostError } from '../../../../server/common/executor-disconnect.ts';
 import { KeyedPromiseLock } from '../../../../server/common/keyed-lock.ts';
 import { ChatExecutionControlOperations } from '../../../../server/controller/chat-execution/chat-execution-control-operations.ts';
 import { InMemoryChatExecutionControlRepository } from '../../../../server/controller/chat-execution/chat-execution-control-repository.ts';
@@ -69,6 +70,7 @@ export function steerDeliveryTrace(spec: any) {
             effects.push(['prepared']);
           }
           if (spec.agentError) throw new AgentCallError(spec.agentError, 'send failed');
+          if (spec.sessionLost) throw new ExecutorSessionLostError(spec.sessionLost, 'send failed');
           if (spec.failure) return { kind: 'failed', outcome: spec.failure, message: 'send failed' };
           return { kind: 'accepted' };
         },

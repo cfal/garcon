@@ -1,0 +1,11 @@
+{
+  "module": "server-agents/common/src/cli-update/bounded-command.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/cli-output-lines.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 6,
+  "sha256": "ea1fd42f7bfa5e690258bbfda0a1ab7b55aaa6ff81d2044fd872b7420a04400d"
+}

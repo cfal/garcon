@@ -1,0 +1,6 @@
+{"id":"outputLines#0","fn":"outputLines","args":["a\r\n\u001b[1G b  c \n\n"],"result":["a","b c"],"origin":"rust/garcon-agents-common/tests/inputs/cli-output-lines.jsonl:1"}
+{"id":"outputLines#1","fn":"outputLines","args":["one\r\u001b[32mtwo\u001b[0m\nthree"],"result":["one","two","three"],"origin":"rust/garcon-agents-common/tests/inputs/cli-output-lines.jsonl:2"}
+{"id":"outputLines#2","fn":"outputLines","args":["one\u001b[999Dtwo\u001b[000Gthree"],"result":["one","two","three"],"origin":"rust/garcon-agents-common/tests/inputs/cli-output-lines.jsonl:3"}
+{"id":"outputLines#3","fn":"outputLines","args":["a  b   c\u000b\t"],"result":["a  b c"],"origin":"rust/garcon-agents-common/tests/inputs/cli-output-lines.jsonl:4"}
+{"id":"outputLines#4","fn":"outputLines","args":["\u001b]0;synthetic\u0007first\u001b[2J31msecond\u001b[0m"],"result":["firstsecond"],"origin":"rust/garcon-agents-common/tests/inputs/cli-output-lines.jsonl:5"}
+{"id":"outputLines#5","fn":"outputLines","args":["\u001b]8;;https://example.test\u001b\\link\u001b]8;;\u001b\\"],"result":["link"],"origin":"rust/garcon-agents-common/tests/inputs/cli-output-lines.jsonl:6"}
