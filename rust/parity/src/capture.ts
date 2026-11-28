@@ -49,6 +49,8 @@ export interface CapturedExchange {
   request: { method: string; path: string; auth: RequestAuth };
   status: number;
   headers: Record<string, string>;
+  // Available to later request placeholders, not part of the golden.
+  rawHeaders?: Headers;
   body: CapturedBody;
 }
 
@@ -172,6 +174,7 @@ async function captureHttp(server: StartedServer, step: HttpStep, placeholders: 
     request: { method: step.method, path: step.originPath ?? step.path ?? '/', auth },
     status: response.status,
     headers: contractHeaders(response.headers),
+    rawHeaders: response.headers,
     body: textOrBytes(bytes, response.headers.get('content-type') ?? ''),
   };
 }

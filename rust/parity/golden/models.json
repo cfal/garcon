@@ -821,11 +821,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -858,7 +853,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "W/\"model-catalog:Jxf1L1myQHAC3l4JCvDub9GAhGYA8vBgpXhDrfh_8yk\"",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{uuid}}"
         },
@@ -1691,11 +1686,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -1728,7 +1718,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "W/\"model-catalog:Jxf1L1myQHAC3l4JCvDub9GAhGYA8vBgpXhDrfh_8yk\"",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{uuid}}"
         },
@@ -2186,11 +2176,6 @@
                       "isLocal": true,
                       "label": "Bash",
                       "value": "bash"
-                    },
-                    {
-                      "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
                     },
                     {
                       "isLocal": true,
@@ -3335,11 +3320,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -3372,7 +3352,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "W/\"model-catalog:Jxf1L1myQHAC3l4JCvDub9GAhGYA8vBgpXhDrfh_8yk\"",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{uuid}}"
         },
@@ -3524,7 +3504,7 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "W/\"model-catalog:Jxf1L1myQHAC3l4JCvDub9GAhGYA8vBgpXhDrfh_8yk\"",
           "x-garcon-executor-instance": "{{uuid}}"
         },
         "request": {
@@ -4356,11 +4336,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -4393,7 +4368,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "W/\"model-catalog:Jxf1L1myQHAC3l4JCvDub9GAhGYA8vBgpXhDrfh_8yk\"",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{uuid}}"
         },
@@ -4414,7 +4389,7 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "x-garcon-executor-instance": "{{uuid}}"
         },
         "request": {
@@ -5475,11 +5450,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -5512,7 +5482,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -6345,11 +6315,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -6382,7 +6347,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -7243,11 +7208,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -7280,7 +7240,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -8207,11 +8167,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -8275,7 +8230,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:T_QHLsTtzhKVDYE1hNf2KJ-7iydmgdjutS6UmMZ1xhU\"",
+          "etag": "W/\"model-catalog:urdB3v54BWFHXeCD6e1mjzVYZq2MtTSO-Yi7jFF9dc4\"",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -9260,11 +9215,6 @@
                     "isLocal": true,
                     "label": "Bash",
                     "value": "bash"
-                  },
-                  {
-                    "isLocal": true,
-                    "label": "Zsh",
-                    "value": "zsh"
                   },
                   {
                     "isLocal": true,
@@ -10314,11 +10264,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -10351,7 +10296,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -11183,11 +11128,6 @@
                   },
                   {
                     "isLocal": true,
-                    "label": "Zsh",
-                    "value": "zsh"
-                  },
-                  {
-                    "isLocal": true,
                     "label": "Notes",
                     "value": "notes"
                   },
@@ -11309,9 +11249,9 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "content-length": "13816",
+          "content-length": "13771",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
         "request": {
@@ -12163,11 +12103,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -12200,7 +12135,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -13073,11 +13008,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -13110,7 +13040,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -13183,9 +13113,9 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "content-length": "13816",
+          "content-length": "13771",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
         "request": {
@@ -14121,11 +14051,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -14158,7 +14083,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -15675,7 +15600,7 @@
           "kind": "empty"
         },
         "headers": {
-          "content-length": "973",
+          "content-length": "928",
           "content-type": "application/json;charset=utf-8",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -15820,11 +15745,6 @@
                       "isLocal": true,
                       "label": "Bash",
                       "value": "bash"
-                    },
-                    {
-                      "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
                     },
                     {
                       "isLocal": true,
@@ -16881,9 +16801,9 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "content-length": "13816",
+          "content-length": "13771",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
         "request": {
@@ -17811,11 +17731,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -17848,7 +17763,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -18648,7 +18563,7 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
         "request": {
@@ -18688,7 +18603,7 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
         "request": {
@@ -18748,7 +18663,7 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
         "request": {
@@ -18820,9 +18735,9 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "content-length": "13816",
+          "content-length": "13771",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
         "request": {
@@ -19674,11 +19589,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -19711,7 +19621,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -20584,11 +20494,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -20621,7 +20526,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -20694,7 +20599,7 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
         "request": {
@@ -20734,7 +20639,7 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
         "request": {
@@ -20794,7 +20699,7 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
         "request": {
@@ -21791,9 +21696,9 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "content-length": "13816",
+          "content-length": "13771",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
         "request": {
@@ -22729,11 +22634,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -22766,7 +22666,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -22839,9 +22739,9 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "content-length": "13816",
+          "content-length": "13771",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
         "request": {
@@ -23673,11 +23573,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -23710,7 +23605,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -24543,11 +24438,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -24580,7 +24470,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -25413,11 +25303,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -25450,7 +25335,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -26283,11 +26168,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -26320,7 +26200,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -27153,11 +27033,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -27190,7 +27065,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -27466,9 +27341,9 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "content-length": "13816",
+          "content-length": "13771",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
         "request": {
@@ -28320,11 +28195,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -28357,7 +28227,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -29230,11 +29100,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -29267,7 +29132,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -29392,9 +29257,9 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "content-length": "13816",
+          "content-length": "13771",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
         "request": {
@@ -30246,11 +30111,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -30283,7 +30143,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -31156,11 +31016,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -31193,7 +31048,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -31515,7 +31370,7 @@
           "kind": "empty"
         },
         "headers": {
-          "content-length": "13804",
+          "content-length": "13759",
           "content-type": "application/json;charset=utf-8"
         },
         "request": {
@@ -32363,11 +32218,6 @@
                     "isLocal": true,
                     "label": "Bash",
                     "value": "bash"
-                  },
-                  {
-                    "isLocal": true,
-                    "label": "Zsh",
-                    "value": "zsh"
                   },
                   {
                     "isLocal": true,
@@ -33271,11 +33121,6 @@
                   },
                   {
                     "isLocal": true,
-                    "label": "Zsh",
-                    "value": "zsh"
-                  },
-                  {
-                    "isLocal": true,
                     "label": "Notes",
                     "value": "notes"
                   },
@@ -33748,9 +33593,9 @@
         },
         "headers": {
           "cache-control": "private, no-cache",
-          "content-length": "13816",
+          "content-length": "13771",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
         "request": {
@@ -34602,11 +34447,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -34639,7 +34479,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -35512,11 +35352,6 @@
                     },
                     {
                       "isLocal": true,
-                      "label": "Zsh",
-                      "value": "zsh"
-                    },
-                    {
-                      "isLocal": true,
                       "label": "Notes",
                       "value": "notes"
                     },
@@ -35549,7 +35384,7 @@
           "cache-control": "private, no-cache",
           "content-encoding": "gzip",
           "content-type": "application/json;charset=utf-8",
-          "etag": "W/\"model-catalog:xhbGg9sqaNC7cOvJp7RtumdZFg27o218soxHTO1sg0o\"",
+          "etag": "{{catalog-empty-provider-list.headers.etag}}",
           "vary": "Accept-Encoding",
           "x-garcon-executor-instance": "{{list-executors.body.executors[0].instanceId}}"
         },
@@ -35621,7 +35456,7 @@
           "kind": "empty"
         },
         "headers": {
-          "content-length": "13804",
+          "content-length": "13759",
           "content-type": "application/json;charset=utf-8"
         },
         "request": {
@@ -36469,11 +36304,6 @@
                     "isLocal": true,
                     "label": "Bash",
                     "value": "bash"
-                  },
-                  {
-                    "isLocal": true,
-                    "label": "Zsh",
-                    "value": "zsh"
                   },
                   {
                     "isLocal": true,
@@ -37374,11 +37204,6 @@
                     "isLocal": true,
                     "label": "Bash",
                     "value": "bash"
-                  },
-                  {
-                    "isLocal": true,
-                    "label": "Zsh",
-                    "value": "zsh"
                   },
                   {
                     "isLocal": true,

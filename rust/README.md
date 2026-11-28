@@ -54,9 +54,9 @@ Unit names for the kill switch are listed in [`MAP.md`](MAP.md).
 
 A scenario is a sequence of HTTP and WebSocket steps run against a fresh server
 in an isolated config, workspace, project, and home directory, with seeded
-credentials. The server is started with the PATH `/usr/bin:/bin`, whatever the
-machine's own, so an agent CLI installed on it does not change a catalog
-response. `"account": "none"` in `server` starts it without a provisioned
+credentials. The server's PATH is a private directory containing links to
+`sh`, `bash`, and `git` only. Optional shells and provider CLIs installed on
+the host cannot change catalog responses. `"account": "none"` in `server` starts it without a provisioned
 account, for `POST /api/v1/auth/register` and the setup-required states; no
 session token is taken, and `auth: "token"` then sends none. `"auth":
 "disabled"` in `server` starts it with `--disable-auth`, as a user behind
@@ -119,14 +119,16 @@ A request can hold these placeholders, in a path, a query, a header, or a body:
   day the scenario names shows it under the same placeholder.
 - `{{<step>.body.<path>}}`: the value at `path` in the JSON body of another
   step's response, for example `{{bootstrap.body.storeId}}` or
-  `{{create.body.endpoints[0].id}}`. It is read from that step's response when
+  `{{create.body.endpoints[0].id}}`. Use `{{<step>.headers.<name>}}` for a
+  response header, with a lowercase name, for example
+  `{{catalog.headers.etag}}`. Both are read from that step's response when
   the step runs, so the recorded request keeps the placeholder and the golden
   stays machine independent. A later response that repeats the value shows it
   under the placeholder too, so the golden checks that an update answers with
   the same identifier. In a JSON body, a field whose whole value is the
   placeholder takes the value with its type, so a number stays a number. A
   value that cannot be had, because the step did not run before or the response
-  has no such path, fails the scenario.
+  has no such path or header, fails the scenario.
 
 `replay` reports passed and total cases, the share served without falling back
 to the original, a table of distinct differences grouped by field, and the
