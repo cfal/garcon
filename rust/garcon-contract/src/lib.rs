@@ -50,6 +50,7 @@ pub mod slash_commands;
 pub mod tags;
 pub mod terminal;
 pub mod terminal_error;
+pub mod ticket_validation;
 pub mod tickets;
 pub mod tool_schedule;
 pub mod transcript_projection;
