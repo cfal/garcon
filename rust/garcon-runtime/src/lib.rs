@@ -9,6 +9,7 @@ pub mod files;
 pub mod gh;
 pub mod git;
 pub mod projects;
+pub mod providers;
 pub mod terminals;
 
 pub type ChildEnvironment = Rc<[(OsString, OsString)]>;
