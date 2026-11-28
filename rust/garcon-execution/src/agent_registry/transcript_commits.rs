@@ -41,10 +41,27 @@ impl AgentRegistry {
         command_ledger: Rc<CommandLedger>,
     ) -> Box<dyn Fn()> {
         let owner = Rc::downgrade(self);
-        ledger.subscribe(Rc::new(move |event| {
+        let off_abandoned = ledger.subscribe_run_abandoned(Rc::new({
+            let owner = owner.clone();
+            move |run| {
+                if let Some(registry) = owner.upgrade() {
+                    registry
+                        .sessions
+                        .abort_publication(&run.chat_id, &run.run_id);
+                }
+                TranscriptCommitWork::Complete(Ok(()))
+            }
+        }));
+        let off_transcript = ledger.subscribe(Rc::new(move |event| {
             let Some(registry) = owner.upgrade() else {
                 return TranscriptCommitWork::Complete(Ok(()));
             };
+            if let TranscriptCommitEvent::RunEnded {
+                chat_id, run_id, ..
+            } = event.as_ref()
+            {
+                registry.sessions.run_terminal_committed(chat_id, run_id);
+            }
             let mut fanout = Box::pin({
                 let (registry, event) = (registry.clone(), event.clone());
                 async move { registry.dispatch_transcript_listeners(&event).await }
@@ -100,7 +117,11 @@ impl AgentRegistry {
                 }
                 Ok(())
             }))
-        }))
+        }));
+        Box::new(move || {
+            off_transcript();
+            off_abandoned();
+        })
     }
 
     async fn dispatch_transcript_listeners(&self, event: &Rc<TranscriptCommitEvent>) {

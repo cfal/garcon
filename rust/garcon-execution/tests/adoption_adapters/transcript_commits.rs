@@ -43,6 +43,7 @@ async fn committed_terminal_waits_for_transcript_fanout_and_command_result() {
                 registry: Rc::new(IdleFacets), directory: directory.clone(), ledger: Rc::new(IdleFacets),
                 unhandled_rejections: Rc::new(install_unhandled_rejection_policy(logger.clone())),
             }, directory, get_carry_over_revision: Rc::new(|_| String::new()), logger,
+            ownership_transfer_pending: Rc::new(|_| false),
         }));
         let commands = Rc::new(CommandLedger::new(CommandLedgerOptions::default(), Rc::new(SystemClock)).unwrap());
         commands.accept(&LedgerAcceptInput {

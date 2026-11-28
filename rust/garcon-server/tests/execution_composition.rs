@@ -29,7 +29,6 @@ use garcon_execution::{
     },
     agent_registry::AdoptionChatRegistry,
     control_state::StoredControlInputEntry,
-    executor_availability_wiring::ExecutorAvailabilitySessions,
     queued_steer_delivery::QueuedSteerContent,
     session_types::{AgentSteerOptions, RunAgentTurnOptions},
     turn_terminal_settlement::{
@@ -97,11 +96,6 @@ impl OwnershipLedger for Idle {
     async fn delete_chat(&self, _: &str) -> ExecutionOperationResult<()> {
         unexpected()
     }
-}
-
-impl ExecutorAvailabilitySessions for Idle {
-    fn execution_session_lost(&self, _: &str) {}
-    fn execution_session_resumed(&self, _: &str) {}
 }
 
 #[async_trait(?Send)]
@@ -310,7 +304,6 @@ async fn bind_stores(
             Ok(ExecutionRuntimeBindings {
                 turn_runner: fixture.clone(),
                 input_transcript: fixture.clone(),
-                sessions: fixture.clone(),
                 commands: fixture.clone(),
                 project_admission: fixture.clone(),
                 attachment_admission: fixture.clone(),

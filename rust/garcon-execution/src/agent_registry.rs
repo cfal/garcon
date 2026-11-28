@@ -1,13 +1,14 @@
 //! Controller-facing registry queries. The router owns the live-run projection.
 //! Chat processing consumes `get_running_chat_ids_snapshot` without loading
 //! provider state or using execution ownership as a proxy for a running turn.
-//! The registry mutations and runtime lifecycle methods are ported separately.
+//! Native launch and registry mutations are ported separately.
 
 mod adoption;
 mod transcript_commits;
 mod transcript_source;
 
 pub use adoption::AdoptionChatRegistry;
+pub(crate) use adoption::registered_transcript_chat;
 pub use transcript_commits::RegistryTranscriptListener;
 
 use std::{cell::RefCell, rc::Rc};
@@ -19,7 +20,12 @@ use indexmap::IndexMap;
 use crate::{
     directory::AgentDirectory,
     event_bus::AgentEventBus,
-    runtime_router::{AgentRuntimeRouter, AgentRuntimeRouterOptions, RunningSession},
+    execution_aborts::ExecutionAborts,
+    executor_availability_wiring::ExecutorAvailabilitySessions,
+    runtime_router::{
+        AgentRuntimeRouter, AgentRuntimeRouterOptions, RunningSession,
+        session_lifecycle::{OwnershipTransferPending, RuntimeSessions},
+    },
     types::ExecutionOperationResult,
 };
 
@@ -29,11 +35,13 @@ pub struct AgentRegistryOptions {
     pub runtime: AgentRuntimeRouterOptions,
     pub directory: Rc<AgentDirectory>,
     pub get_carry_over_revision: Rc<RegistryCarryOverRevision>,
+    pub ownership_transfer_pending: Rc<OwnershipTransferPending>,
     pub logger: Rc<dyn Logger>,
 }
 
 pub struct AgentRegistry {
     runtime: AgentRuntimeRouter,
+    sessions: RuntimeSessions,
     directory: Rc<AgentDirectory>,
     get_carry_over_revision: Rc<RegistryCarryOverRevision>,
     logger: Rc<dyn Logger>,
@@ -44,6 +52,13 @@ pub struct AgentRegistry {
 impl AgentRegistry {
     pub fn new(options: AgentRegistryOptions) -> Self {
         Self {
+            sessions: RuntimeSessions::new(
+                options.runtime.registry.clone(),
+                options.runtime.ledger.clone(),
+                Rc::new(ExecutionAborts::new(options.directory.clone())),
+                options.ownership_transfer_pending,
+                options.logger.clone(),
+            ),
             runtime: AgentRuntimeRouter::new(options.runtime),
             directory: options.directory,
             get_carry_over_revision: options.get_carry_over_revision,
@@ -79,5 +94,30 @@ impl AgentRegistry {
 
     pub fn get_running_session_count(&self) -> usize {
         self.runtime.get_running_session_count()
+    }
+
+    pub fn execution_session_lost(&self, executor_id: &str) {
+        self.sessions.execution_session_lost(executor_id);
+    }
+
+    pub fn execution_session_resumed(&self, executor_id: &str) {
+        self.sessions.execution_session_resumed(executor_id);
+    }
+
+    pub fn reopen_transcript_producer(&self, chat_id: &str) -> ExecutionOperationResult<()> {
+        self.sessions.reopen_producer(chat_id)
+    }
+
+    pub fn runtime_sessions(&self) -> &RuntimeSessions {
+        &self.sessions
+    }
+}
+
+impl ExecutorAvailabilitySessions for AgentRegistry {
+    fn execution_session_lost(&self, executor_id: &str) {
+        Self::execution_session_lost(self, executor_id);
+    }
+    fn execution_session_resumed(&self, executor_id: &str) {
+        Self::execution_session_resumed(self, executor_id);
     }
 }
