@@ -39,3 +39,27 @@ conversion. Model local time independently of the injected wall clock.
 No native legacy parser was verified in this probe. Sources: original
 call sites, the pinned runtime, and
 [ECMAScript Date.parse](https://tc39.es/ecma262/#sec-date.parse).
+
+## Time zone data
+
+`garcon-js` uses bundled IANA tzdb 2026b for offsets and transitions; Bun
+1.4.3 uses ICU. The manager accepts following current IANA data under
+ADR-028. A comparison of 597 zones found these differences:
+
+- `America/Vancouver` and `Canada/Pacific` from 2026-11-01T09:00Z:
+  tzdb follows British Columbia's permanent UTC-7; Bun 1.4.3 returns UTC-8
+  through the winter.
+- `Asia/Gaza` and `Asia/Hebron` around 2025-03-29.
+- Offsets differ for 164 zones in 1900 and 36 in 1950. For example,
+  `Europe/Amsterdam` at `1900-01-01T00:00Z` is 00:19:32 in tzdb and
+  00:00:00 in Bun.
+
+The discrepancy can change usage day buckets, the
+`{{current_date_local}}` template token, and offset-less timestamp parsing.
+Recordings in affected zones at affected instants will differ; use a zone
+with matching transition data for parity recordings.
+
+When `TZ` is unset, the host's detected IANA zone name is cached on first
+use, falling back to UTC if unavailable. IANA names are case-insensitive,
+but the additional ICU aliases for the process default require their exact
+case: Bun accepts `PST` and `IST`, not `pst`, `pSt`, `ist`, or `iSt`.
