@@ -894,6 +894,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "garcon-agent-codex"
+version = "0.1.0"
+dependencies = [
+ "garcon-cases",
+ "garcon-js",
+ "serde_json",
+]
+
+[[package]]
 name = "garcon-agent-direct-openai-compatible"
 version = "0.0.0"
 dependencies = [
