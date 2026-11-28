@@ -22,6 +22,7 @@ use header::{
 };
 
 static CLIENT: OnceCell<Client> = OnceCell::const_new();
+static PUBLIC_CLIENT: OnceCell<Client> = OnceCell::const_new();
 
 #[derive(Clone)]
 pub struct ProviderHttpEndpoint {
@@ -92,7 +93,9 @@ fn redirect_policy() -> reqwest::redirect::Policy {
     })
 }
 
-fn create_client() -> Result<Client, Box<dyn Error + Send + Sync>> {
+fn create_client(
+    redirects: reqwest::redirect::Policy,
+) -> Result<Client, Box<dyn Error + Send + Sync>> {
     #[derive(Deserialize)]
     struct Release {
         version: String,
@@ -120,7 +123,7 @@ fn create_client() -> Result<Client, Box<dyn Error + Send + Sync>> {
         .default_headers(headers)
         .referer(false)
         .retry(reqwest::retry::never())
-        .redirect(redirect_policy())
+        .redirect(redirects)
         .build()?)
 }
 
@@ -133,7 +136,7 @@ pub async fn send(
 ) -> ExecutorResult<Response> {
     let client = CLIENT
         .get_or_try_init(|| async {
-            tokio::task::spawn_blocking(create_client)
+            tokio::task::spawn_blocking(|| create_client(redirect_policy()))
                 .await?
                 .map_err(|error| -> Box<dyn Error> { error })
         })
@@ -158,6 +161,26 @@ pub(crate) async fn post_json(
         Some(serde_json::to_vec(request)?),
     )
     .await
+}
+
+/// Fetches public metadata without credentials and permits redirects across origins.
+pub(crate) async fn get_public_metadata(
+    url: &str,
+    accept: Option<&str>,
+    timeout: Duration,
+) -> ExecutorResult<Response> {
+    let client = PUBLIC_CLIENT
+        .get_or_try_init(|| async {
+            tokio::task::spawn_blocking(|| create_client(reqwest::redirect::Policy::limited(20)))
+                .await?
+                .map_err(|error| -> Box<dyn Error> { error })
+        })
+        .await?;
+    let mut request = client.get(url).timeout(timeout);
+    if let Some(accept) = accept {
+        request = request.header(ACCEPT, accept);
+    }
+    request.send().await.map_err(client_error)
 }
 
 pub fn json_headers() -> HeaderMap {
