@@ -21,6 +21,7 @@ pub mod execution_attempt;
 pub mod execution_errors;
 pub mod execution_ownership;
 pub mod execution_planning;
+pub mod executor_availability_wiring;
 pub mod executor_config_guards;
 pub mod executor_manager;
 pub mod executor_manager_ports;
