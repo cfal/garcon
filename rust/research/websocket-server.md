@@ -85,7 +85,7 @@ probe's application, which used the controller's plain-text fallback.
 | --- | --- |
 | Protocol offer `garcon-auth.abc, garcon-v1`, explicit response `garcon-v1` | 101 selects `garcon-v1`. Without an explicit response the probe selected `garcon-v1` for that offer, but selected `garcon-auth.abc` for its single-token offer. Do not infer a general selection rule from these inputs. |
 | Version 12 or missing version; valid version with no key | First two return 426 with `Sec-WebSocket-Version: 13` and empty body. Missing key returns false from upgrade and the app returns 400 `WebSocket upgrade failed`. |
-| Client WebSocket upgrade refused with HTTP 401 | No open event; Bun 1.4.3 reports close 1002, Bun 1.4.5 reports 1006. This is a client event, not a close frame sent by the HTTP server. |
+| Client WebSocket upgrade refused with HTTP 401 | No open event; Bun 1.4.3 reports close 1002, `Expected 101 status code`, while 1.4.5 reports 1006 with no reason. This is a client event, not a close frame sent by the HTTP server. |
 | Offer `permessage-deflate; client_max_window_bits=12` | Negotiates `permessage-deflate; client_no_context_takeover; server_no_context_takeover`. |
 | Limit 1024, text of 1024 or 1025 bytes; fragmented text 600 + 600 bytes | 1024 delivered. 1025 and 600 + 600 end the transport without a close frame or message callback. |
 | Limit 1024, negotiated compressed text inflating to 1024 or 1025 bytes | 1024 delivered; 1025 ends the transport without a close frame. Count inflated bytes too. |
@@ -101,10 +101,11 @@ probe's application, which used the controller's plain-text fallback.
 - Bun [WebSocket API](https://bun.com/docs/runtime/http/websockets);
   installed `bun-types@1.4.3/serve.d.ts` (`ServerWebSocket`, `WebSocketHandler`).
 - Bun 1.4.3 vendored uWebSockets:
-  [upgrade and option plumbing](https://github.com/oven-sh/bun/blob/bun-v1.4.3/src/uws/App.h),
-  [receive, drain and timeout](https://github.com/oven-sh/bun/blob/bun-v1.4.3/src/uws/WebSocketContext.h),
-  [timeout split](https://github.com/oven-sh/bun/blob/bun-v1.4.3/src/uws/WebSocketContextData.h),
-  [compression negotiation](https://github.com/oven-sh/bun/blob/bun-v1.4.3/src/uws/PerMessageDeflate.h).
+  [upgrade and option plumbing](https://github.com/oven-sh/bun/blob/bun-v1.4.3/packages/bun-uws/src/App.h),
+  [receive, drain and timeout](https://github.com/oven-sh/bun/blob/bun-v1.4.3/packages/bun-uws/src/WebSocketContext.h),
+  [timeout split](https://github.com/oven-sh/bun/blob/bun-v1.4.3/packages/bun-uws/src/WebSocketContextData.h),
+  [compression negotiation](https://github.com/oven-sh/bun/blob/bun-v1.4.3/packages/bun-uws/src/PerMessageDeflate.h),
+  and [uSockets timer sweep](https://github.com/oven-sh/bun/blob/bun-v1.4.3/packages/bun-usockets/src/loop.c).
 - [hyper upgrade](https://docs.rs/hyper/1.13.0/hyper/upgrade/),
   [tokio-tungstenite stream](https://docs.rs/tokio-tungstenite/0.27.0/tokio_tungstenite/struct.WebSocketStream.html),
   [tungstenite protocol config and frame handling](https://docs.rs/tungstenite/0.27.0/src/tungstenite/protocol/mod.rs.html),

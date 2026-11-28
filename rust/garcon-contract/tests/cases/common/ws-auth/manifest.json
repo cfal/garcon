@@ -1,0 +1,11 @@
+{
+  "module": "common/ws-auth.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/ws-auth.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 17,
+  "sha256": "61e8f98fdf4b707e323498e63744ad449a8d3deab097fbb060366ef52514cf72"
+}

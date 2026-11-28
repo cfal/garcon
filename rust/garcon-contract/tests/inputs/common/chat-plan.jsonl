@@ -1,0 +1,12 @@
+{"fn":"coerceTodoItems","args":[[{"content":null,"text":"alias","status":"in-progress"},{"content":false,"step":"not used"},{"step":"kept","status":"skipped","completed":true}]]}
+{"fn":"coerceTodoItems","args":[[]]}
+{"fn":"coerceTodoItems","args":[null]}
+{"fn":"coercePlanSteps","args":[[{"step":"skipped","status":"skipped","completed":true},{"content":"failed","status":"failed"},{"content":"done","status":"done"},{"content":"blank"},{"content":"","step":"not used"}]]}
+{"fn":"coercePlanSteps","args":[[]]}
+{"fn":"coercePlanSteps","args":[[false,null,{"text":42}]]}
+{"fn":"asCursorPlanTodos","args":[[{"content":"","status":"cancelled","id":"id"},{"content":"next","status":"in-progress","id":42},{"text":"not a Cursor todo"}]]}
+{"fn":"asCursorPlanTodos","args":[[]]}
+{"fn":"asCursorPlanTodos","args":[[null,false,{}]]}
+{"fn":"asCursorPlanPhases","args":[[{"name":"empty"},{"name":"phase","todos":[{"content":"a","status":"completed"},{"content":"b","status":"in_progress"}]},{"name":false}]]}
+{"fn":"asCursorPlanPhases","args":[[]]}
+{"fn":"asCursorPlanPhases","args":[[{},null]]}

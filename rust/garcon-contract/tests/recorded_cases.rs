@@ -4,6 +4,8 @@
 //! writes each recording, and every case must match here. Arguments are read
 //! with the readers of `garcon_cases`.
 
+use std::borrow::Cow;
+
 use garcon_cases::{
     CaseError, Stats, bigint, javascript_number, markers, replay, round_tripped, text, unknown,
 };
@@ -44,9 +46,110 @@ use garcon_contract::project_resolution::{
     ProjectTarget, is_project_unavailable_reason, parse_project_resolution_response,
     project_target_key,
 };
+use garcon_contract::{chat_plan, chat_stop, cli_presentation, tool_schedule};
 use garcon_js::OptionalNullable;
 use serde_json::{Map, Value, json};
-use std::borrow::Cow;
+
+#[test]
+fn chat_plan_cases_match() {
+    let stats = replay(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cases/common/chat-plan"),
+        |function, args| {
+            let value = unknown(function, args.first())?;
+            let to_result = |value: Option<Value>| value.unwrap_or_else(markers::undefined);
+            let result = match function {
+                "coerceTodoItems" => chat_plan::coerce_todo_items(&value).map(as_json_value),
+                "coercePlanSteps" => chat_plan::coerce_plan_steps(&value).map(as_json_value),
+                "asCursorPlanTodos" => chat_plan::as_cursor_plan_todos(&value).map(as_json_value),
+                "asCursorPlanPhases" => chat_plan::as_cursor_plan_phases(&value).map(as_json_value),
+                _ => return Err(CaseError::unhandled(function)),
+            };
+            Ok(to_result(result))
+        },
+    );
+    assert_all_match("common/chat-plan.ts", stats);
+}
+
+#[test]
+fn chat_stop_cases_match() {
+    let stats = replay(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cases/common/chat-stop"),
+        |function, args| {
+            let outcome: chat_stop::ChatStopOutcome =
+                serde_json::from_value(args.first().cloned().unwrap_or(Value::Null))
+                    .map_err(|_| CaseError::unhandled(function))?;
+            match function {
+                "isStopSatisfied" => Ok(json!(chat_stop::is_stop_satisfied(outcome))),
+                "isAbortAcknowledged" => Ok(json!(chat_stop::is_abort_acknowledged(outcome))),
+                _ => Err(CaseError::unhandled(function)),
+            }
+        },
+    );
+    assert_all_match("common/chat-stop.ts", stats);
+}
+
+#[test]
+fn cli_presentation_cases_match() {
+    let stats = replay(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/cases/common/cli-presentation"
+        ),
+        |function, args| {
+            use cli_presentation::*;
+            if function == "normalizeCliHexColor" {
+                let value = required_text(function, args.first())?;
+                return Ok(json!(normalize_cli_hex_color(value)));
+            }
+            let value = unknown(function, args.first())?;
+            Ok(match function {
+                "isCliPresentationStyle" => json!(is_cli_presentation_style(&value).is_some()),
+                "isCliPresetPresentationStyle" => {
+                    json!(is_cli_preset_presentation_style(&value).is_some())
+                }
+                "isHexColor" => json!(is_hex_color(&value)),
+                "isCliCustomStyle" => json!(is_cli_custom_style(&value).is_some()),
+                "isCliPresentation" => json!(is_cli_presentation(&value).is_some()),
+                "isCliRowFormat" => json!(is_cli_row_format(&value).is_some()),
+                "isCliBodyDisclosure" => json!(is_cli_body_disclosure(&value).is_some()),
+                "coerceDurableCliBodyDisclosure" => {
+                    json!(coerce_durable_cli_body_disclosure(&value))
+                }
+                "coerceDurableCliPresentation" => json!(coerce_durable_cli_presentation(&value)),
+                _ => return Err(CaseError::unhandled(function)),
+            })
+        },
+    );
+    assert_all_match("common/cli-presentation.ts", stats);
+}
+
+#[test]
+fn tool_schedule_cases_match() {
+    let stats = replay(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/cases/common/tool-schedule"
+        ),
+        |function, args| {
+            use tool_schedule::*;
+            let value = unknown(function, args.first())?;
+            let request = parse_tool_schedule_request(&value);
+            if function == "parseToolScheduleRequest" {
+                return Ok(json!(request));
+            }
+            let request = request.ok_or_else(|| CaseError::unhandled(function))?;
+            Ok(match function {
+                "hasSchedulePrompt" => json!(has_schedule_prompt(&request)),
+                "toolScheduleTitle" => json!(tool_schedule_title(&request)),
+                "toolScheduleOptions" => json!(tool_schedule_options(&request)),
+                "toolScheduleDetails" => json!(tool_schedule_details(&request)),
+                "describeToolSchedule" => json!(describe_tool_schedule(&request)),
+                _ => return Err(CaseError::unhandled(function)),
+            })
+        },
+    );
+    assert_all_match("common/tool-schedule.ts", stats);
+}
 
 fn assert_all_match(module: &str, stats: Stats) {
     // A wildcard would let the port return anything for that case.

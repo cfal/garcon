@@ -4,7 +4,23 @@
     "common/__tests__/chat-id.test.js"
   ],
   "inputs": "rust/garcon-contract/tests/inputs/common/chat-id.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "new InvalidChatIdError",
+      "argument": 0
+    },
+    {
+      "fn": "parseChatId",
+      "argument": 0
+    },
+    {
+      "fn": "legacyChatIdToCanonical",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
   "notCaptured": [],
-  "cases": 146,
-  "sha256": "8001b8a44c260c54650b792692d2e4f0c3bfbf9f8d470f7036f0fdb92d39973e"
+  "cases": 325,
+  "sha256": "12ecc40d53d6b4a536202ecfc3b58ea0bc052188ac5c4584c36e6c57e01d498f"
 }

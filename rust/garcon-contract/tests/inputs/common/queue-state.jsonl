@@ -1,0 +1,15 @@
+{"fn":"parseQueuePause","args":[null]}
+{"fn":"parseQueuePause","args":[]}
+{"fn":"parseQueuePause","args":[{"id":" pause ","kind":"manual","pausedAt":"2026-07-22T00:00:00.000Z"}]}
+{"fn":"parseQueuePause","args":[{"id":"pause","kind":"unknown","entryId":"  ","pausedAt":null}]}
+{"fn":"parseQueuePause","args":[{"id":"pause","kind":"unknown","entryId":"","pausedAt":null}]}
+{"fn":"parseQueuePause","args":[{"id":"pause","kind":"queued-turn-failed","entryId":" entry ","pausedAt":"2026-07-22T00:00:00.000Z"}]}
+{"fn":"parseQueuePause","args":[{"id":"pause","kind":"completion-uncertain","entryId":" entry ","pausedAt":"-271821-04-20T00:00:00.000Z"}]}
+{"fn":"parseQueuePause","args":[{"id":"pause","kind":"completion-uncertain","entryId":" entry ","pausedAt":"-271821-04-19T23:59:59.999Z"}]}
+{"fn":"parseQueuePause","args":[{"id":"pause","kind":"turn-failed","turnId":"  ","pausedAt":"+275760-09-13T00:00:00.000Z"}]}
+{"fn":"parseQueuePause","args":[{"id":"pause","kind":"manual","pausedAt":"+275760-09-13T00:00:00.001Z"}]}
+{"fn":"parseQueuePause","args":[{"id":"pause","kind":"manual","pausedAt":"2024-02-30T00:00:00.000Z"}]}
+{"fn":"parseQueuePause","args":[{"id":"pause","kind":"manual","pausedAt":"2024-02-29T00:00:00Z"}]}
+{"fn":"parseQueuePause","args":[{"id":"pause","kind":"manual","pausedAt":"2024-02-29T24:00:00.000Z"}]}
+{"fn":"parseQueuePause","args":[{"id":"pause","kind":"manual","pausedAt":"2024-02-29T00:00:00.000Z"}]}
+{"fn":"parseChatQueueState","args":[{"entries":[],"steeringEntryId":" entry ","recentlyDispatched":[],"pause":null,"reorderRevision":{"$":"number","value":"-0"}}]}

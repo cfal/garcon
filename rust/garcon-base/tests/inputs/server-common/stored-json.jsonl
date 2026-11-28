@@ -1,0 +1,5 @@
+{"fn":"parseStoredJson","args":["[null,1.0,9007199254740993,1e21]","state.json"]}
+{"fn":"parseStoredJson","args":[" true \n","state.json"]}
+{"fn":"parseStoredJson","args":["","state.json"]}
+{"fn":"parseStoredJson","args":["{}{}","state.json"]}
+{"fn":"parseStoredJson","args":["\ufeffnull","state.json"]}

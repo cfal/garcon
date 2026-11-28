@@ -1,0 +1,17 @@
+{"fn":"webSocketProtocolsForAuth","args":["jwt-token"]}
+{"fn":"webSocketProtocolsForAuth","args":["bad token"]}
+{"fn":"webSocketProtocolsForAuth","args":["  a.b-_\t"]}
+{"fn":"webSocketProtocolsForAuth","args":["x/y"]}
+{"fn":"webSocketProtocolsForAuth","args":[null]}
+{"fn":"webSocketProtocolsForAuth","args":[]}
+{"fn":"parseWebSocketProtocolHeader","args":["  garcon-v1,, garcon-auth.token ,garcon-v1  "]}
+{"fn":"parseWebSocketProtocolHeader","args":[null]}
+{"fn":"parseWebSocketProtocolHeader","args":[]}
+{"fn":"webSocketProtocolHeaderContains","args":["other, garcon-v1","garcon-v1"]}
+{"fn":"webSocketProtocolHeaderContains","args":["GARCON-V1","garcon-v1"]}
+{"fn":"webSocketProtocolHeaderContains","args":[null,"garcon-v1"]}
+{"fn":"bearerTokenFromWebSocketProtocolHeader","args":["garcon-v1, garcon-auth.jwt-token"]}
+{"fn":"bearerTokenFromWebSocketProtocolHeader","args":["garcon-auth., garcon-auth.second"]}
+{"fn":"bearerTokenFromWebSocketProtocolHeader","args":["garcon-auth.a b, garcon-auth.second"]}
+{"fn":"bearerTokenFromWebSocketProtocolHeader","args":["Garcon-auth.first"]}
+{"fn":"bearerTokenFromWebSocketProtocolHeader","args":[]}

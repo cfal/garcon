@@ -1,0 +1,5 @@
+{"fn":"toExecutorPath","args":["C:\\work\\literal","\\"]}
+{"fn":"toExecutorPath","args":["/work/literal\\name"]}
+{"fn":"toNativePath","args":["C:/work/place","\\"]}
+{"fn":"toNativePath","args":["/work/literal\\name","/"]}
+{"fn":"toNativePath","args":["/work/literal\\name"]}

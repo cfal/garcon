@@ -1,0 +1,50 @@
+{
+  "module": "common/cli-presentation.ts",
+  "tests": [
+    "common/__tests__/cli-presentation.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/cli-presentation.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isCliPresentationStyle",
+      "argument": 0
+    },
+    {
+      "fn": "isCliPresetPresentationStyle",
+      "argument": 0
+    },
+    {
+      "fn": "isHexColor",
+      "argument": 0
+    },
+    {
+      "fn": "isCliCustomStyle",
+      "argument": 0
+    },
+    {
+      "fn": "isCliPresentation",
+      "argument": 0
+    },
+    {
+      "fn": "isCliRowFormat",
+      "argument": 0
+    },
+    {
+      "fn": "isCliBodyDisclosure",
+      "argument": 0
+    },
+    {
+      "fn": "coerceDurableCliBodyDisclosure",
+      "argument": 0
+    },
+    {
+      "fn": "coerceDurableCliPresentation",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 499,
+  "sha256": "c98f2ca2c138165f0826f95d6afb027f3b25a5731d9e3f0ce12c7bb1ebe1fa8e"
+}

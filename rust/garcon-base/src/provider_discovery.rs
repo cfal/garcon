@@ -1,0 +1,1 @@
+pub const MODEL_DISCOVERY_TIMEOUT_MS: u64 = 10_000;

@@ -2,8 +2,8 @@
 
 Build: `garcon-server`
 
-Passed: 11877/11877 cases
-Served without falling back to the original: 120/11877 (fallback rate 99.0%)
+Passed: 12231/12231 cases
+Served without falling back to the original: 120/12231 (fallback rate 99.0%)
 
 ## Scenarios
 
@@ -15,6 +15,8 @@ Served without falling back to the original: 120/11877 (fallback rate 99.0%)
 | api-session | 196/196 | 0/196 |
 | auth-count-limit | 71/71 | 0/71 |
 | auth-credentials | 28/28 | 0/28 |
+| auth-disabled-provisioned | 48/48 | 0/48 |
+| auth-disabled | 48/48 | 0/48 |
 | auth-login | 19/19 | 0/19 |
 | auth-logout | 4/4 | 0/4 |
 | auth-password | 13/13 | 0/13 |
@@ -32,6 +34,7 @@ Served without falling back to the original: 120/11877 (fallback rate 99.0%)
 | chat-tags | 547/547 | 0/547 |
 | executors-seeded | 271/271 | 0/271 |
 | executors | 600/600 | 0/600 |
+| exhausted-revisions | 243/243 | 0/243 |
 | folders-seeded | 81/81 | 0/81 |
 | folders | 112/112 | 0/112 |
 | models | 299/299 | 0/299 |
@@ -55,6 +58,7 @@ Served without falling back to the original: 120/11877 (fallback rate 99.0%)
 | static-assets-base-path | 77/77 | 9/77 |
 | static-assets | 367/367 | 111/367 |
 | telegram-seeded | 62/62 | 0/62 |
+| telegram-token-test | 15/15 | 0/15 |
 | telegram | 87/87 | 0/87 |
 | terminals | 243/243 | 0/243 |
 | tickets-mutations | 857/857 | 0/857 |
