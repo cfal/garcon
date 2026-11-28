@@ -28,6 +28,9 @@ use garcon_interface::{
     },
 };
 use garcon_js::json::Opaque;
+use garcon_stores::api_providers::endpoint_resolver::{
+    ApiProviderEndpointResolver, ModelSelectionInput,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -67,6 +70,32 @@ pub trait CatalogEndpointResolver {
         agent_id: &str,
         executor_id: &str,
     ) -> ExecutionOperationResult<Vec<AgentModelOption>>;
+}
+
+impl CatalogEndpointResolver for ApiProviderEndpointResolver {
+    fn model_supports_images(
+        &self,
+        input: ModelImageSupport<'_>,
+    ) -> ExecutionOperationResult<bool> {
+        ApiProviderEndpointResolver::model_supports_images(
+            self,
+            ModelSelectionInput {
+                executor_id: input.executor_id,
+                agent_id: Some(input.agent_id),
+                model: input.model,
+                api_provider_id: input.api_provider_id,
+                model_endpoint_id: input.model_endpoint_id,
+            },
+        )
+    }
+
+    fn get_model_options(
+        &self,
+        agent_id: &str,
+        executor_id: &str,
+    ) -> ExecutionOperationResult<Vec<AgentModelOption>> {
+        ApiProviderEndpointResolver::get_model_options(self, agent_id, Some(executor_id))
+    }
 }
 
 pub struct CatalogCapabilities<'a> {
