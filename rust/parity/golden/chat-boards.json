@@ -1639,6 +1639,327 @@
       "noise": []
     },
     {
+      "name": "update-created-board",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "catalog": {
+              "boards": [
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+                },
+                {
+                  "columns": [
+                    {
+                      "id": "{{uuid}}",
+                      "match": "all",
+                      "name": "To do",
+                      "tags": [
+                        "todo"
+                      ]
+                    }
+                  ],
+                  "id": "{{create-second.body.boardId}}",
+                  "name": "Board two"
+                }
+              ],
+              "revision": 3
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-update",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{uuid}}",
+                "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+              },
+              {
+                "columns": [
+                  {
+                    "id": "{{uuid}}",
+                    "match": "all",
+                    "name": "To do",
+                    "tags": [
+                      "todo"
+                    ]
+                  }
+                ],
+                "id": "{{create-second.body.boardId}}",
+                "name": "Board two"
+              }
+            ],
+            "revision": 3
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "update-created-board-with-stale-revision",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "catalog": {
+              "boards": [
+                {
+                  "columns": [],
+                  "id": "{{uuid}}",
+                  "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+                },
+                {
+                  "columns": [
+                    {
+                      "id": "{{uuid}}",
+                      "match": "all",
+                      "name": "To do",
+                      "tags": [
+                        "todo"
+                      ]
+                    }
+                  ],
+                  "id": "{{create-second.body.boardId}}",
+                  "name": "Board two"
+                }
+              ],
+              "revision": 3
+            },
+            "error": "Chat boards changed in another client; review the latest catalog",
+            "errorCode": "CHAT_BOARD_REVISION_CONFLICT",
+            "retryable": true,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 409
+      },
+      "noise": []
+    },
+    {
+      "name": "order-created-boards",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "catalog": {
+              "boards": [
+                {
+                  "columns": [
+                    {
+                      "id": "{{uuid}}",
+                      "match": "all",
+                      "name": "To do",
+                      "tags": [
+                        "todo"
+                      ]
+                    }
+                  ],
+                  "id": "{{create-second.body.boardId}}",
+                  "name": "Board two"
+                },
+                {
+                  "columns": [],
+                  "id": "{{create-name-80-code-points.body.boardId}}",
+                  "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+                }
+              ],
+              "revision": 4
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards/order"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-order",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [
+                  {
+                    "id": "{{uuid}}",
+                    "match": "all",
+                    "name": "To do",
+                    "tags": [
+                      "todo"
+                    ]
+                  }
+                ],
+                "id": "{{create-second.body.boardId}}",
+                "name": "Board two"
+              },
+              {
+                "columns": [],
+                "id": "{{create-name-80-code-points.body.boardId}}",
+                "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+              }
+            ],
+            "revision": 4
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-created-board",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "catalog": {
+              "boards": [
+                {
+                  "columns": [],
+                  "id": "{{create-name-80-code-points.body.boardId}}",
+                  "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+                }
+              ],
+              "revision": 5
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-remove",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{create-name-80-code-points.body.boardId}}",
+                "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+              }
+            ],
+            "revision": 5
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "update-removed-board",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Chat board not found",
+            "errorCode": "CHAT_BOARD_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
       "name": "order-wrong-method",
       "expected": {
         "body": {
@@ -1737,7 +2058,7 @@
           "kind": "empty"
         },
         "headers": {
-          "content-length": "332",
+          "content-length": "254",
           "content-type": "application/json;charset=utf-8"
         },
         "request": {
@@ -1778,16 +2099,11 @@
             "boards": [
               {
                 "columns": [],
-                "id": "{{uuid}}",
+                "id": "{{create-name-80-code-points.body.boardId}}",
                 "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
-              },
-              {
-                "columns": [],
-                "id": "{{uuid}}",
-                "name": "Board two"
               }
             ],
-            "revision": 2
+            "revision": 5
           }
         },
         "headers": {
@@ -1853,16 +2169,11 @@
             "boards": [
               {
                 "columns": [],
-                "id": "{{uuid}}",
+                "id": "{{create-name-80-code-points.body.boardId}}",
                 "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
-              },
-              {
-                "columns": [],
-                "id": "{{uuid}}",
-                "name": "Board two"
               }
             ],
-            "revision": 2
+            "revision": 5
           }
         },
         "headers": {
@@ -3394,7 +3705,7 @@
           "kind": "empty"
         },
         "headers": {
-          "content-length": "332",
+          "content-length": "254",
           "content-type": "application/json;charset=utf-8"
         },
         "request": {
@@ -3435,16 +3746,11 @@
             "boards": [
               {
                 "columns": [],
-                "id": "{{uuid}}",
+                "id": "{{create-name-80-code-points.body.boardId}}",
                 "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
-              },
-              {
-                "columns": [],
-                "id": "{{uuid}}",
-                "name": "Board two"
               }
             ],
-            "revision": 2
+            "revision": 5
           }
         },
         "headers": {
@@ -3510,16 +3816,11 @@
             "boards": [
               {
                 "columns": [],
-                "id": "{{uuid}}",
+                "id": "{{create-name-80-code-points.body.boardId}}",
                 "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
-              },
-              {
-                "columns": [],
-                "id": "{{uuid}}",
-                "name": "Board two"
               }
             ],
-            "revision": 2
+            "revision": 5
           }
         },
         "headers": {
@@ -8003,6 +8304,1099 @@
           "auth": "token",
           "method": "PUT",
           "path": "/api/v1/chat-boards/order"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-created-board~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-created-board~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-created-board~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-created-board~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and a valid board are required",
+            "errorCode": "CHAT_BOARD_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-update~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-update~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-update~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "254",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-update~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-update~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{create-name-80-code-points.body.boardId}}",
+                "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+              }
+            ],
+            "revision": 5
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/../chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-update~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-update~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-update~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{create-name-80-code-points.body.boardId}}",
+                "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+              }
+            ],
+            "revision": 5
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "update-created-board-with-stale-revision~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-created-board-with-stale-revision~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-created-board-with-stale-revision~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-created-board-with-stale-revision~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and a valid board are required",
+            "errorCode": "CHAT_BOARD_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "order-created-boards~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards/order"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "order-created-boards~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards/order"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "order-created-boards~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards/order"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "order-created-boards~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and orderedBoardIds are required",
+            "errorCode": "CHAT_BOARD_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards/order"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-order~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-order~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-order~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "254",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-order~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-order~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{create-name-80-code-points.body.boardId}}",
+                "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+              }
+            ],
+            "revision": 5
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/../chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-order~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-order~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-order~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{create-name-80-code-points.body.boardId}}",
+                "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+              }
+            ],
+            "revision": 5
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-created-board~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-created-board~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-created-board~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-created-board~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and boardId are required",
+            "errorCode": "CHAT_BOARD_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-remove~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-remove~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-remove~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "254",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-remove~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-remove~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{create-name-80-code-points.body.boardId}}",
+                "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+              }
+            ],
+            "revision": 5
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/../chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-remove~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-remove~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/chat-boards/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "boards-after-remove~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "boards": [
+              {
+                "columns": [],
+                "id": "{{create-name-80-code-points.body.boardId}}",
+                "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+              }
+            ],
+            "revision": 5
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/chat-boards"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "update-removed-board~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-removed-board~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-removed-board~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-removed-board~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "expectedRevision and a valid board are required",
+            "errorCode": "CHAT_BOARD_VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/chat-boards"
         },
         "status": 400
       },
