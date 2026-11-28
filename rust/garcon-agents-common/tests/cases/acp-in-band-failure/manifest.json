@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agents-common/tests/oracles/acp-in-band-failure.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/acp-in-band-failure.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 171,
+  "sha256": "85d79b7ce7e5a072eed251fae9383d67268e3e589c23e73b9516fcad8cc50af2"
+}

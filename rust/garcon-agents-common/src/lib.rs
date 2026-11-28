@@ -1,3 +1,4 @@
+pub mod acp;
 pub mod auth;
 pub mod catalog;
 pub mod cli_update;
