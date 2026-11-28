@@ -1,0 +1,6 @@
+{"fn":"isGitRpcMethod","args":["git.getQuickSummary"]}
+{"fn":"isGitRpcMethod","args":["git.getStatus"]}
+{"fn":"isGitRpcMethod","args":["gh.getPullRequestReviewTarget"]}
+{"fn":"isGitRpcMethod","args":["git.unknown"]}
+{"fn":"isGitRpcMethod","args":["gh.unknown"]}
+{"fn":"isGitRpcMethod","args":["files.list"]}

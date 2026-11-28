@@ -1,30 +1,49 @@
 use garcon_base::domain_error::DomainError;
-use garcon_cases::{CaseError, replay, round_tripped, text, unknown};
+use garcon_cases::{CaseError, markers::undefined, replay, round_tripped, text, unknown};
+use garcon_contract::terminal_error::TerminalError;
+use garcon_interface::errors::AgentCallError;
+use garcon_link::cli_protocol::{
+    CliOperation, cli_operation, cli_policy, cli_reply_bytes, cli_request_bytes,
+    cli_request_too_large, cli_route, parse_cli_http_response, parse_controller_cli_request,
+};
 use garcon_link::connection_url::{
     ExecutorSocketUrlOptions, create_executor_secret, executor_connection_url, is_executor_secret,
     parse_connection_url, validate_executor_socket_url,
 };
 use garcon_link::failure_reason::{Failure, failure_reason};
+use garcon_link::file_protocol::{decode_file_data, decode_file_text, validate_file_rpc_request};
+use garcon_link::git_protocol::is_git_rpc_method;
 use garcon_link::limits::*;
 use garcon_link::message_queue_budget::{MessageQueueBudget, MessageQueueLimits};
 use garcon_link::rpc_lane::{RpcLane, is_session_id, parse_bulk_control};
+use garcon_link::rpc_protocol::rpc_continuity;
+use garcon_link::rpc_routing::rpc_lane;
+use garcon_link::terminal_protocol::{parse_terminal_notification, validate_terminal_rpc};
 use serde::Serialize;
 use serde_json::{Value, json};
 
 fn validation<T: Serialize>(result: Result<T, DomainError>) -> Value {
     match result {
-        Ok(value) => json!(value),
-        Err(error) => json!({
-            "$": "error",
-            "name": error.kind.name(),
-            "message": error.message,
-            "properties": {
-                "code": error.code.as_str(),
-                "status": error.status,
-                "retryable": error.retryable,
-            }
-        }),
+        Ok(value) => serialized(value),
+        Err(error) => domain_failure(&error),
     }
+}
+
+fn serialized(value: impl Serialize) -> Value {
+    garcon_js::json::parse(&serde_json::to_string(&value).unwrap()).unwrap()
+}
+
+fn domain_failure(error: &DomainError) -> Value {
+    json!({
+        "$": "error",
+        "name": error.kind.name(),
+        "message": error.message,
+        "properties": {
+            "code": error.code.as_str(),
+            "status": error.status,
+            "retryable": error.retryable,
+        }
+    })
 }
 
 #[test]
@@ -206,4 +225,189 @@ fn queue_budget() -> Value {
     control.release();
     second.release();
     json!({ "full": full, "counts": counts, "freed": freed, "final": budget.snapshot() })
+}
+
+#[test]
+fn recorded_rpc_routing_cases_match() {
+    replay(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/cases/transport/rpc-routing"
+        ),
+        |function, args| {
+            if function != "rpcLane" {
+                return Err(CaseError::unhandled(function));
+            }
+            let method = text(function, args.first())?.unwrap_or_default();
+            let request = unknown(function, args.get(1))?;
+            let lane = match text(function, args.get(2))? {
+                Some("bulk") => RpcLane::Bulk,
+                Some("primary") | None => RpcLane::Primary,
+                Some(other) if method == "calls.reconcile" => return Ok(json!(other)),
+                Some(_) => RpcLane::Primary,
+            };
+            Ok(match rpc_lane(method, &request, lane) {
+                Ok(lane) => serialized(lane),
+                Err(error) => {
+                    if let Some(domain) = error.downcast_ref::<DomainError>() {
+                        domain_failure(domain)
+                    } else if let Some(agent) = error.downcast_ref::<AgentCallError>() {
+                        json!({
+                            "$": "error", "name": "AgentCallError", "message": agent.message,
+                            "properties": {
+                                "code": agent.code.as_str(), "retryable": agent.retryable,
+                                "details": undefined(), "outcome": agent.outcome.as_str(),
+                            }
+                        })
+                    } else {
+                        panic!("unhandled error: {error}");
+                    }
+                }
+            })
+        },
+    );
+}
+
+#[test]
+fn recorded_rpc_continuity_matches_every_classified_method() {
+    replay(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/cases/transport/rpc-continuity"
+        ),
+        |function, args| {
+            if function != "rpcContinuity" {
+                return Err(CaseError::unhandled(function));
+            }
+            Ok(serialized(rpc_continuity(
+                text(function, args.first())?.unwrap_or_default(),
+            )))
+        },
+    );
+}
+
+#[test]
+fn recorded_cli_protocol_cases_match() {
+    replay(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/cases/transport/cli-protocol"
+        ),
+        |function, args| {
+            if matches!(function, "cliOperation" | "cliRoute") {
+                let method = text(function, args.first())?.unwrap_or_default();
+                let path = text(function, args.get(1))?.unwrap_or_default();
+                return Ok(if function == "cliRoute" {
+                    validation(cli_route(method, path))
+                } else {
+                    validation(cli_operation(method, path))
+                });
+            }
+            let value = unknown(function, args.first())?;
+            let lane = if value.as_str() == Some("primary") {
+                RpcLane::Primary
+            } else {
+                RpcLane::Bulk
+            };
+            Ok(match function {
+                "cliPolicy" => value["operation"]
+                    .as_str()
+                    .and_then(CliOperation::parse)
+                    .map_or_else(undefined, |operation| {
+                        serialized(cli_policy(operation, &value["body"]))
+                    }),
+                "cliRequestBytes" => json!(cli_request_bytes(lane)),
+                "cliReplyBytes" => json!(cli_reply_bytes(lane)),
+                "cliRequestTooLarge" => domain_failure(&cli_request_too_large(lane)),
+                "parseControllerCliRequest" => validation(parse_controller_cli_request(&value)),
+                "parseCliHttpResponse" => validation(parse_cli_http_response(&value)),
+                _ => return Err(CaseError::unhandled(function)),
+            })
+        },
+    );
+}
+
+#[test]
+fn recorded_file_protocol_cases_match() {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+
+    replay(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/cases/transport/file-protocol"
+        ),
+        |function, args| {
+            let value = unknown(function, args.first())?;
+            Ok(match function {
+                "decodeFileData" => match decode_file_data(&value) {
+                    Ok(data) => {
+                        json!({ "$": "bytes", "value": STANDARD.encode(data), "buffer": true })
+                    }
+                    Err(error) => domain_failure(&error),
+                },
+                "decodeFileText" => validation(decode_file_text(&value)),
+                "validateFileRpcRequest" => {
+                    let method = value.as_str().unwrap_or_default();
+                    let input = unknown(function, args.get(1))?;
+                    match validate_file_rpc_request(method, &input) {
+                        Ok(()) => undefined(),
+                        Err(error) => domain_failure(&error),
+                    }
+                }
+                _ => return Err(CaseError::unhandled(function)),
+            })
+        },
+    );
+}
+
+#[test]
+fn recorded_git_protocol_cases_match() {
+    replay(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/cases/transport/git-protocol"
+        ),
+        |function, args| {
+            if function != "isGitRpcMethod" {
+                return Err(CaseError::unhandled(function));
+            }
+            Ok(json!(is_git_rpc_method(
+                text(function, args.first())?.unwrap_or_default()
+            )))
+        },
+    );
+}
+
+fn terminal_failure(error: &TerminalError) -> Value {
+    json!({
+        "$": "error", "name": "TerminalError", "message": error.message,
+        "properties": { "code": error.code.as_str(), "status": error.status },
+    })
+}
+
+#[test]
+fn recorded_terminal_protocol_cases_match() {
+    replay(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/cases/transport/terminal-protocol"
+        ),
+        |function, args| {
+            let value = unknown(function, args.first())?;
+            Ok(match function {
+                "validateTerminalRpc" => match validate_terminal_rpc(
+                    value["method"].as_str().unwrap_or_default(),
+                    &value["request"],
+                ) {
+                    Ok(()) => undefined(),
+                    Err(error) => terminal_failure(&error),
+                },
+                "parseTerminalNotification" => match parse_terminal_notification(&value) {
+                    Ok(notification) => serialized(notification),
+                    Err(error) => terminal_failure(&error),
+                },
+                _ => return Err(CaseError::unhandled(function)),
+            })
+        },
+    );
 }

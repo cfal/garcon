@@ -1,0 +1,9 @@
+{
+  "module": "server/remote/transport/file-protocol.ts",
+  "tests": [],
+  "inputs": "rust/garcon-link/tests/inputs/file-protocol.jsonl",
+  "guards": [],
+  "notCaptured": [],
+  "cases": 17,
+  "sha256": "b63d3be3d7e5d92b623315fc85cc4397992cba11fe55f70c790117e4074e7304"
+}

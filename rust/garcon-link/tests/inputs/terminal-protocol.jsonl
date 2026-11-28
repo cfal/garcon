@@ -1,0 +1,5 @@
+{"fn":"parseTerminalNotification","args":[{"type":"terminal","attachmentId":"synthetic","message":{"type":"terminal-detached","terminalId":"synthetic"}}]}
+{"fn":"parseTerminalNotification","args":[{"attachmentId":"synthetic","message":{"type":"terminal-output","terminalId":"synthetic","sequence":1,"dataBase64":"AA=="}}]}
+{"fn":"parseTerminalNotification","args":[{"attachmentId":"","message":{"type":"terminal-detached","terminalId":"synthetic"}}]}
+{"fn":"parseTerminalNotification","args":[{"attachmentId":"synthetic","message":{"type":"terminal-output","dataBase64":"invalid"}}]}
+{"fn":"parseTerminalNotification","args":[{"attachmentId":"synthetic","message":{"type":"terminal-output","terminalId":"synthetic","sequence":1,"data":"output","ignored":true}}]}
