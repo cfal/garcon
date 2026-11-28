@@ -1,0 +1,4 @@
+{"fn":"normalizeRefinePromptRequest","args":[{"draft":{"$":"utf16","value":[55296],"text":"�"},"target":"ticket-description"}],"result":{"draft":"�","target":"ticket-description"},"reason":"lone surrogate replaced at the JSON boundary"}
+{"fn":"normalizeRefinePromptRequest","args":[{"draft":{"$":"utf16","value":[55296],"text":"�"},"target":"ticket-comment"}],"result":{"draft":"�","target":"ticket-comment"},"reason":"lone surrogate replaced at the JSON boundary"}
+{"fn":"normalizeRefinePromptResponse","args":[{"success":true,"refinedPrompt":{"$":"utf16","value":[55296],"text":"�"}},"ticket-description"],"result":{"success":true,"refinedPrompt":"�"},"reason":"lone surrogate replaced at the JSON boundary"}
+{"fn":"normalizeRefinePromptResponse","args":[{"success":true,"refinedPrompt":{"$":"utf16","value":[55296],"text":"�"}},"ticket-comment"],"result":{"success":true,"refinedPrompt":"�"},"reason":"lone surrogate replaced at the JSON boundary"}

@@ -1,0 +1,38 @@
+{
+  "module": "common/chat-preamble-selection-contracts.ts",
+  "tests": [
+    "common/__tests__/chat-preamble-selection-contracts.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-preamble-selection-contracts.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseChatPreambleSelectionTargetResponse",
+      "argument": 0
+    },
+    {
+      "fn": "parsePreambleSelectionPartialError",
+      "argument": 0
+    },
+    {
+      "fn": "parsePreambleSelectionPreviewRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parsePreambleSelectionPreviewResponse",
+      "argument": 0
+    },
+    {
+      "fn": "parseUpdateChatPreambleSelectionRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseUpdateChatPreambleSelectionResponse",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 403,
+  "sha256": "b48938ae5c9fe9d86b740e358d4b69ef72e45a57003812a77f76a33d994f1a2a"
+}
