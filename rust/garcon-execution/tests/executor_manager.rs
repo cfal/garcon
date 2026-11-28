@@ -61,6 +61,9 @@ const ID: &str = "11111111-1111-4111-8111-111111111111";
 const SECRET: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 type AvailabilityListener = Rc<dyn Fn(ExecutorAvailability)>;
 
+#[path = "executor_manager/availability.rs"]
+mod availability;
+
 struct Runtime {
     id: String,
     info: RefCell<ExecutorInfo>,
