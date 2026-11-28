@@ -29,15 +29,19 @@ test('a live marked 501 is unported, not a match, and fails the strict replay', 
   expect(result.stdout.toString()).toContain('UNPORTED duplicate-http-headers: 5 cases');
 });
 
-test('the replay option permits unported cases, not an unmarked 501', () => {
+test('the replay option permits differences after an unported write', () => {
   const allowed = replayUnported(true);
   expect(allowed.exitCode).toBe(0);
   expect(allowed.stdout.toString()).toContain('Matched natively: 0/5 cases');
   expect(allowed.stdout.toString()).toContain('Unported: 5/5 cases');
 
   const mixed = replayUnported(true, true);
-  expect(mixed.exitCode).toBe(1);
+  expect(mixed.exitCode).toBe(0);
   expect(mixed.stdout.toString()).toContain('Unported: 4/5 cases');
-  expect(mixed.stdout.toString()).toContain('Mismatching: 1/5 cases');
-  expect(mixed.stdout.toString()).toContain('FAIL duplicate-http-headers/reads-the-write-with-joined-content-type at $.body.kind');
+  expect(mixed.stdout.toString()).toContain('After an unported write: 1/5 cases');
+  expect(mixed.stdout.toString()).toContain('Mismatching: 0/5 cases');
+  expect(mixed.stdout.toString()).toContain(
+    'AFTER UNPORTED WRITE duplicate-http-headers/reads-the-write-with-joined-content-type after write-with-single-authorization-and-content-type',
+  );
+  expect(replayUnported(false, true).exitCode).toBe(1);
 });

@@ -84,14 +84,20 @@ A WebSocket reply with `"garconRsUnported": true` has the same meaning. The
 step captures a reply matched by `clientRequestId` or a marked `ws-fault`
 without an ID; an unmarked reply compares normally.
 A step is blocked if an unavailable earlier response supplies a required
-placeholder, directly or through another blocked step. It is not sent. Any
-other missing response placeholder is a mismatch. Unported and blocked
-cases are not matches and do not use known differences. The report counts
-native matches, unported cases, blocked cases, and mismatches per scenario and
-in total, and names each blocked case's supplying step. A partial port may
-use `replay --build "<command>" --allow-unported` to accept unported and
-blocked cases; mismatches still fail. The lift gate omits the flag and
-requires zero unported or blocked cases.
+placeholder, directly or through another blocked step. It is not sent.
+If an unported or blocked step is a write (any HTTP method other than GET,
+HEAD, or OPTIONS, or a WebSocket request), subsequent differing steps in
+that scenario are counted as after an unported write. Matching steps still
+count as matches. This includes missing placeholders that are not directly
+blocked; otherwise a missing placeholder is a mismatch.
+
+The report counts native matches, unported cases, blocked cases, differences
+after an unported write, and mismatches per scenario and in total. It names
+the supplier of each blocked step and the first unavailable write for each
+affected later step. These cases are not matches and do not use known
+differences. A partial port may use `replay --build "<command>" --allow-unported`
+to accept all three unavailable categories. Mismatches still fail. The lift
+gate omits the flag and requires zero in all three categories.
 
 What is compared, per case:
 
@@ -100,7 +106,9 @@ What is compared, per case:
   structurally, text exactly, binary by SHA-256. A textual body over 64 KB is
   recorded as `text-digest`, the SHA-256 and byte length of its text after the
   placeholders below are applied, so a large body that holds a value of the
-  server start is still compared.
+  server start is still compared. Use the standard replay invocation without
+  overriding `TMPDIR`: HEAD content lengths can include the length of the
+  original's temporary workspace path.
 - WebSocket: whether the upgrade succeeded, the negotiated subprotocol, the
   replies to the step's own requests (matched by `clientRequestId`), the close
   code and reason of a connection the server accepted and then closed, and for

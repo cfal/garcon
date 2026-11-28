@@ -111,7 +111,7 @@ pub fn has_node_error_code(error: ErrorInput<'_>, code: &str) -> bool {
 
 pub fn diagnostic_error_code(error: ErrorInput<'_>) -> &str {
     match error {
-        ErrorInput::Error(error) => diagnostic_name(erased_metadata(error)),
+        ErrorInput::Error(error) => diagnostic_name(error_metadata(error)),
         ErrorInput::Diagnostic(error) => diagnostic_name(error.diagnostic_metadata()),
         _ => structured_error_code(error).unwrap_or("UNKNOWN"),
     }
@@ -124,13 +124,14 @@ fn diagnostic_name(metadata: ErrorMetadata<'_>) -> &str {
 fn structured_error_code(error: ErrorInput<'_>) -> Option<&str> {
     match error {
         ErrorInput::Json(value) => value.get("code").and_then(Value::as_str),
-        ErrorInput::Error(error) => erased_metadata(error).code,
+        ErrorInput::Error(error) => error_metadata(error).code,
         ErrorInput::Diagnostic(error) => error.diagnostic_metadata().code,
         ErrorInput::Undefined => None,
     }
 }
 
-fn erased_metadata<'a>(error: &'a (dyn Error + 'static)) -> ErrorMetadata<'a> {
+/// Reads a shared error's original class name and code independently.
+pub fn error_metadata<'a>(error: &'a (dyn Error + 'static)) -> ErrorMetadata<'a> {
     if let Some(error) = error.downcast_ref::<io::Error>() {
         return ErrorMetadata {
             name: "Error",
@@ -174,27 +175,27 @@ fn erased_metadata<'a>(error: &'a (dyn Error + 'static)) -> ErrorMetadata<'a> {
     // These Rust enums transparently hold the error that the original throws.
     if let Some(error) = error.downcast_ref::<ProjectPathError>() {
         return match error {
-            ProjectPathError::Io(error) => erased_metadata(error),
-            ProjectPathError::Boundary(error) => erased_metadata(error),
+            ProjectPathError::Io(error) => error_metadata(error),
+            ProjectPathError::Boundary(error) => error_metadata(error),
         };
     }
     if let Some(error) = error.downcast_ref::<AcquireWorkspaceLeaseError>() {
         return match error {
-            AcquireWorkspaceLeaseError::Io(error) => erased_metadata(error),
-            AcquireWorkspaceLeaseError::InUse(error) => erased_metadata(error),
+            AcquireWorkspaceLeaseError::Io(error) => error_metadata(error),
+            AcquireWorkspaceLeaseError::InUse(error) => error_metadata(error),
         };
     }
     if let Some(error) = error.downcast_ref::<ReadJsonStateError>() {
         return match error {
-            ReadJsonStateError::Io(error) => erased_metadata(error),
-            ReadJsonStateError::Corrupt(error) => erased_metadata(error),
-            ReadJsonStateError::Clock(error) => erased_metadata(error),
+            ReadJsonStateError::Io(error) => error_metadata(error),
+            ReadJsonStateError::Corrupt(error) => error_metadata(error),
+            ReadJsonStateError::Clock(error) => error_metadata(error),
         };
     }
     if let Some(error) = error.downcast_ref::<WriteFileError>() {
         return match error {
-            WriteFileError::Io(error) => erased_metadata(error),
-            WriteFileError::Atomic(error) => erased_metadata(error),
+            WriteFileError::Io(error) => error_metadata(error),
+            WriteFileError::Atomic(error) => error_metadata(error),
             WriteFileError::Json(_) => ErrorMetadata::named("TypeError"),
         };
     }
@@ -230,7 +231,8 @@ pub(crate) fn as_agent_call_error<'a>(
     })
 }
 
-pub(crate) fn js_string(error: ErrorInput<'_>) -> Cow<'_, str> {
+/// Formats a diagnostic value, using JavaScript's string form for JSON.
+pub fn js_string(error: ErrorInput<'_>) -> Cow<'_, str> {
     match error {
         ErrorInput::Error(error) => Cow::Owned(error.to_string()),
         ErrorInput::Diagnostic(error) => Cow::Owned(error.to_string()),

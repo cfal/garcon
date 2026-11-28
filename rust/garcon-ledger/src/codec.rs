@@ -1,4 +1,7 @@
-use garcon_base::stored_json::parse_stored_json;
+use garcon_base::{
+    errors::{ErrorInput, js_string},
+    stored_json::parse_stored_json,
+};
 use garcon_contract::{
     agent_execution::{AgentAttachment, AgentAttachmentKind},
     chat_command_contracts::{PermissionDecisionPayload, PermissionDecisionResponse},
@@ -111,7 +114,7 @@ pub fn encode_ledger_draft(draft: &LedgerRowDraft) -> Result<EncodedLedgerDraft,
 struct RowFields<'a> {
     view_id: &'a str,
     ordinal: Option<f64>,
-    kind: &'a str,
+    kind: Result<&'a str, Option<&'a Value>>,
     at: Option<&'a str>,
     client_message_id: Option<Option<&'a str>>,
 }
@@ -122,7 +125,7 @@ pub fn decode_ledger_row(row: &StoredLedgerRow) -> Result<LedgerRow, LedgerCodec
         RowFields {
             view_id: &row.view_id,
             ordinal: Some(row.ordinal.0),
-            kind: &row.kind,
+            kind: Ok(&row.kind),
             at: Some(&row.at),
             client_message_id: Some(row.client_message_id.as_deref()),
         },
@@ -133,8 +136,12 @@ fn decode_row(payload_json: &str, fields: RowFields<'_>) -> Result<LedgerRow, Le
     let (provider_meta, value) = parse_payload(payload_json)?;
     let ordinal = positive_integer(fields.ordinal, "ordinal")?;
     let at = non_empty_string(fields.at, "row timestamp")?;
+    let kind = fields.kind.map_err(|kind| {
+        let value = kind.map_or(ErrorInput::Undefined, ErrorInput::Json);
+        type_error(format!("Unknown transcript row kind: {}", js_string(value)))
+    })?;
     let data = decode_row_data(
-        fields.kind,
+        kind,
         &value,
         fields.client_message_id,
         provider_meta.is_none(),
@@ -281,6 +288,7 @@ pub fn decode_cloned_stored_rows(
             else {
                 return Err(DecodeClonedStoredRowsError::InvalidInput);
             };
+            let kind = value.get("kind");
             let row = decode_row(
                 payload_json,
                 RowFields {
@@ -289,10 +297,7 @@ pub fn decode_cloned_stored_rows(
                         .and_then(Value::as_str)
                         .unwrap_or_default(),
                     ordinal: value.get("ordinal").and_then(as_number),
-                    kind: value
-                        .get("kind")
-                        .and_then(Value::as_str)
-                        .unwrap_or("undefined"),
+                    kind: kind.and_then(Value::as_str).ok_or(kind),
                     at: value.get("at").and_then(Value::as_str),
                     client_message_id: value.get("client_message_id").and_then(|value| {
                         if value.is_null() {

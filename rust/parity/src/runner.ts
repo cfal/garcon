@@ -3,7 +3,7 @@ import { captureStep, isUnported, type Capture } from './capture.js';
 import { startServer, type ServerBuild } from './environment.js';
 import { normalizeCapture } from './normalize.js';
 import { BlockedPlaceholder, dayPlaceholders, resolvePlaceholders, type Placeholders } from './placeholders.js';
-import type { Scenario } from './scenario.js';
+import type { Scenario, ScenarioStep } from './scenario.js';
 import { expandTraps } from './traps.js';
 import type { Json } from './wildcard.js';
 
@@ -15,9 +15,14 @@ export interface CaseRun {
   name: string;
   capture: Json;
   unavailable?: UnavailableCase;
+  afterUnportedWrite?: string;
   unresolvedPlaceholder?: string;
   // Requests the build handed to the original instead of serving natively.
   fallbacks: string[];
+}
+
+function isWrite(step: ScenarioStep): boolean {
+  return !step.http || !['GET', 'HEAD', 'OPTIONS'].includes(step.http.method.toUpperCase());
 }
 
 // Reads the fallback lines appended since `offset`, returning them and the
@@ -35,6 +40,12 @@ export async function runScenario(repoRoot: string, build: ServerBuild, scenario
   const server = await startServer(repoRoot, build, scenario.server);
   try {
     const runs: CaseRun[] = [];
+    let firstUnportedWrite: string | undefined;
+    const append = (step: ScenarioStep, run: CaseRun) => {
+      if (firstUnportedWrite !== undefined) run.afterUnportedWrite = firstUnportedWrite;
+      else if (run.unavailable && isWrite(step)) firstUnportedWrite = step.name;
+      runs.push(run);
+    };
     let offset = (await fallbacksSince(server.fallbackLogPath, 0)).offset;
     // Each step's capture before normalization, for later response placeholders.
     const captures = new Map<string, Capture>();
@@ -51,10 +62,10 @@ export async function runScenario(repoRoot: string, build: ServerBuild, scenario
       } catch (error) {
         if (error instanceof BlockedPlaceholder) {
           unavailable.add(step.name);
-          runs.push({ name: step.name, capture: null, fallbacks: [], unavailable: { kind: 'blocked', supplier: error.supplier } });
+          append(step, { name: step.name, capture: null, fallbacks: [], unavailable: { kind: 'blocked', supplier: error.supplier } });
         } else {
           const message = error instanceof Error ? error.message : String(error);
-          runs.push({ name: step.name, capture: null, fallbacks: [], unresolvedPlaceholder: message });
+          append(step, { name: step.name, capture: null, fallbacks: [], unresolvedPlaceholder: message });
         }
         continue;
       }
@@ -71,7 +82,7 @@ export async function runScenario(repoRoot: string, build: ServerBuild, scenario
       }
       const added = await fallbacksSince(server.fallbackLogPath, offset);
       if (unported) unavailable.add(step.name);
-      runs.push({ name: step.name, capture, fallbacks: added.lines, ...(unported ? { unavailable: { kind: 'unported' } } : {}) });
+      append(step, { name: step.name, capture, fallbacks: added.lines, ...(unported ? { unavailable: { kind: 'unported' } } : {}) });
       offset = added.offset;
     }
     return runs;

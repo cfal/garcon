@@ -7,6 +7,7 @@ pub mod bounded_text_stream;
 pub mod concurrency;
 pub mod domain_error;
 pub mod errors;
+pub mod event_loop;
 pub mod event_loop_stalls;
 pub mod executor_disconnect;
 pub mod executor_path;

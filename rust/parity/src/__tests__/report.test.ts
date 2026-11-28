@@ -29,8 +29,27 @@ test('a marked response does not consume a known difference or count as a native
   expect(replayPassed([result], true)).toBe(true);
   const report = renderReport('native', [result], true);
   expect(report).toContain('Matched via fallback: 1/3 cases');
-  expect(report).toContain('| s | 2/3 | 1/3 | 1 | 0 | 0 |');
+  expect(report).toContain('| s | 2/3 | 1/3 | 1 | 0 | 0 | 0 |');
   expect(report).toContain('- s/unported: unported');
+});
+
+test('compares downstream cases with the golden rather than applying known differences', () => {
+  const known = parseKnownDifferences(['approved', 'matched'].map((name) => ({
+    scenario: 's', case: name, path: '$.status', result: 404, reason: 'synthetic known difference',
+  })));
+  const golden = { scenario: 's', cases: ['approved', 'matched'].map((name) => ({
+    name, expected: { status: 200 }, noise: [],
+  })) };
+  const result = compareScenario(golden, [
+    { name: 'approved', capture: { status: 404 }, fallbacks: [], afterUnportedWrite: 'put' },
+    { name: 'matched', capture: { status: 200 }, fallbacks: [], afterUnportedWrite: 'put' },
+  ], 's', known);
+  expect(result.cases[0]).toMatchObject({ difference: null, native: false, unavailable: {
+    kind: 'after-unported-write', write: 'put', difference: { path: '$.status', expected: '200', actual: '404' },
+  } });
+  expect(result.cases[1]).toMatchObject({ difference: null, native: true });
+  expect(replayPassed([result])).toBe(false);
+  expect(replayPassed([result], true)).toBe(true);
 });
 
 test('names each failing case with its first difference', () => {
