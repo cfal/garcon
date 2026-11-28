@@ -1,6 +1,6 @@
 # Edge recording coverage gaps
 
-The pinned Bun 1.4.3 replay covers 12,231 cases over 58 scenarios. Every
+The pinned Bun 1.4.3 replay covers 12,236 cases over 59 scenarios. Every
 declared method and path in the assigned edge route groups has a scenario
 step. That is not a claim that every branch behind those routes is covered.
 This inventory records what needs a unit test, an integration fixture, or a
@@ -72,6 +72,7 @@ separate scenario. The [replay report](replay-report.md) has per-scenario counts
 
 ## Runtime dependencies
 
+- Native response bodies are buffered; demand-driven range reads and cancellation belong to the first live-stream route.
 - Telegram is offline in these recordings. Configured token verification/save,
   delivery success and `telegram_delivery_failed`, and resolving a link
   with no matching recipient, a matching recipient, or a concurrent link
@@ -101,7 +102,7 @@ separate scenario. The [replay report](replay-report.md) has per-scenario counts
 
 ## Recorded runtime behavior
 
-These are observations, not approved differences. See
+These are observations, except for the proposed 431 difference below. See
 [ADR-015](../DECISIONS.md#adr-015-accidental-behavior-becomes-a-listed-difference) and the
 [HTTP listener note](../research/http-listener.md).
 
@@ -134,3 +135,21 @@ These are observations, not approved differences. See
   segments and doubled leading slashes) in the generic traps exercise
   client/router behavior. The existing static asset exceptions are
   documented in ADR-004.
+
+### Native 431 framing (pending)
+
+Approved by the manager on 2026-11-28; pending user confirmation. For the
+18 runtime cases below, Bun omits `Content-Length` and Hyper sends
+`Content-Length: 0`. Both close the connection with no body, so these are
+equivalent messages to clients. This is listener framing, not route
+behavior. The only proposed exception is the native replay field
+`$.headers["content-length"]` with the exact string value `"0"`; the
+recorded 431 status, empty body, and every other compared field still stand.
+
+The cases are `request-target-over-listener-limit` and
+`header-over-listener-limit`, plus each of their
+`~unauthenticated`, `~forged-token`, `~head`, `~trailing-slash`,
+`~dot-segment`, `~encoded-traversal`, `~non-ascii`, and
+`~double-slash` variants. These entries in
+[`known-differences.json`](known-differences.json) only apply to
+`--label native`. The front door still compares with the original's framing.

@@ -1,19 +1,22 @@
 //! Response compression for natively served routes. Ports the compression
 //! half of `server/controller/lib/http-compression.ts`; rules and their order
-//! match the original so recorded headers replay exactly. Requests with a
-//! `Range` header are never served natively (see ADR-005), so the original's
-//! byte-range handling has no counterpart here.
+//! match the original so recorded headers replay exactly. The front door
+//! proxies requests with a `Range` header (see ADR-005).
 
 use std::io::{Read, Write};
 
 use bytes::Bytes;
-use hyper::header::{
-    ACCEPT_ENCODING, AsHeaderName, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE,
-    ETAG, HeaderMap, HeaderValue, VARY,
+use garcon_base::http_body::fetch_header_value;
+use garcon_js::js::{trim, trim_end, trim_start};
+use http::header::{
+    ACCEPT_ENCODING, ACCEPT_RANGES, AsHeaderName, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH,
+    CONTENT_RANGE, CONTENT_TYPE, ETAG, HeaderMap, HeaderValue, IF_RANGE, RANGE, TRANSFER_ENCODING,
+    VARY,
 };
-use hyper::{Method, StatusCode};
+use http::{Method, Response, StatusCode};
 
 const MIN_COMPRESSED_BYTES: usize = 1024;
+const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 
 /// Preference order for equal-quality encodings; Brotli is intentionally
 /// unsupported, as in the original.
@@ -42,7 +45,7 @@ pub enum Encoding {
 }
 
 impl Encoding {
-    fn token(self) -> &'static str {
+    pub fn token(self) -> &'static str {
         match self {
             Encoding::Gzip => "gzip",
             Encoding::Zstd => "zstd",
@@ -127,8 +130,8 @@ fn parse_quality(text: &str) -> f64 {
 }
 
 fn quality_param(param: &str) -> Option<&str> {
-    let rest = param.strip_prefix(['q', 'Q'])?.trim_start();
-    let value = rest.strip_prefix('=')?.trim_start();
+    let rest = trim_start(param.strip_prefix(['q', 'Q'])?);
+    let value = trim_start(rest.strip_prefix('=')?);
     (!value.is_empty()
         && value
             .bytes()
@@ -142,12 +145,8 @@ pub fn negotiate_encoding(accept_encoding: Option<&str>) -> Option<Encoding> {
     // earlier one, as the original's map does.
     let mut explicit: [Option<f64>; ENCODING_PREFERENCE.len()] = [None; ENCODING_PREFERENCE.len()];
     let mut wildcard: Option<f64> = None;
-    for part in header
-        .split(',')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-    {
-        let mut pieces = part.split(';').map(str::trim);
+    for part in header.split(',').map(trim).filter(|part| !part.is_empty()) {
+        let mut pieces = part.split(';').map(trim);
         let token = pieces.next().unwrap_or_default();
         let quality = pieces
             .filter_map(quality_param)
@@ -182,7 +181,7 @@ fn is_compressible(content_type: Option<&str>) -> bool {
     let Some(content_type) = content_type else {
         return true;
     };
-    let mime = content_type.split(';').next().unwrap_or_default().trim();
+    let mime = trim(content_type.split(';').next().unwrap_or_default());
     let is = |candidate: &str| mime.eq_ignore_ascii_case(candidate);
     if mime.is_empty() || COMPRESSIBLE_MIME_EXCEPTIONS.into_iter().any(is) {
         return true;
@@ -196,9 +195,19 @@ fn is_compressible(content_type: Option<&str>) -> bool {
 
 fn has_no_transform(cache_control: Option<&str>) -> bool {
     cache_control.is_some_and(|value| {
-        value
-            .split(',')
-            .any(|directive| directive.trim().eq_ignore_ascii_case("no-transform"))
+        let mut parts = value.split(',').enumerate().peekable();
+        while let Some((index, part)) = parts.next() {
+            let part = if index == 0 { part } else { trim_start(part) };
+            let part = if parts.peek().is_none() {
+                part
+            } else {
+                trim_end(part)
+            };
+            if part.eq_ignore_ascii_case("no-transform") {
+                return true;
+            }
+        }
+        false
     })
 }
 
@@ -207,8 +216,30 @@ pub fn header<K: AsHeaderName>(headers: &HeaderMap, name: K) -> Option<&str> {
     headers.get(name).and_then(|value| value.to_str().ok())
 }
 
-fn declared_length(headers: &HeaderMap) -> Option<usize> {
-    header(headers, CONTENT_LENGTH).and_then(|value| value.parse().ok())
+fn declared_length(headers: &HeaderMap) -> Option<f64> {
+    let value = trim(header(headers, CONTENT_LENGTH)?);
+    if value.is_empty() {
+        return Some(0.0);
+    }
+    // Number() also recognizes unsigned hexadecimal, octal, and binary.
+    if let Some((radix, digits)) =
+        [("0x", 16), ("0o", 8), ("0b", 2)]
+            .into_iter()
+            .find_map(|(prefix, radix)| {
+                let start = value.get(..2)?;
+                start
+                    .eq_ignore_ascii_case(prefix)
+                    .then_some((radix, &value[2..]))
+            })
+    {
+        if digits.is_empty() {
+            return None;
+        }
+        return digits.chars().try_fold(0.0, |acc, digit| {
+            Some(acc * f64::from(radix) + f64::from(digit.to_digit(radix)?))
+        });
+    }
+    value.parse::<f64>().ok()
 }
 
 fn should_skip(method: &Method, response: &NativeResponse, enabled: bool) -> bool {
@@ -218,7 +249,8 @@ fn should_skip(method: &Method, response: &NativeResponse, enabled: bool) -> boo
         || response.headers.contains_key(CONTENT_ENCODING)
         || has_no_transform(header(&response.headers, CACHE_CONTROL))
         || !is_compressible(header(&response.headers, CONTENT_TYPE))
-        || declared_length(&response.headers).is_some_and(|length| length < MIN_COMPRESSED_BYTES)
+        || declared_length(&response.headers)
+            .is_some_and(|length| length.is_finite() && length < MIN_COMPRESSED_BYTES as f64)
 }
 
 fn header_value(text: String) -> HeaderValue {
@@ -226,14 +258,14 @@ fn header_value(text: String) -> HeaderValue {
 }
 
 fn append_vary_accept_encoding(headers: &mut HeaderMap) {
-    let Some(existing) = header(headers, VARY).map(str::to_string) else {
+    let Some(existing) = header(headers, VARY).filter(|value| !value.is_empty()) else {
         headers.insert(VARY, HeaderValue::from_static("Accept-Encoding"));
         return;
     };
-    if existing.trim() == "*"
+    if trim(existing) == "*"
         || existing
             .split(',')
-            .any(|part| part.trim().eq_ignore_ascii_case("accept-encoding"))
+            .any(|part| trim(part).eq_ignore_ascii_case("accept-encoding"))
     {
         return;
     }
@@ -242,7 +274,7 @@ fn append_vary_accept_encoding(headers: &mut HeaderMap) {
 
 fn weaken_strong_etag(headers: &mut HeaderMap) {
     if let Some(etag) = header(headers, ETAG)
-        .filter(|etag| !etag.starts_with("W/"))
+        .filter(|etag| !etag.is_empty() && !etag.starts_with("W/"))
         .map(str::to_string)
     {
         headers.insert(ETAG, header_value(format!("W/{etag}")));
@@ -271,14 +303,179 @@ pub fn finish(
         Ok(compressed) => compressed,
         Err(_) => return response,
     };
+    apply_encoding(&mut response, encoding, compressed);
+    response
+}
+
+fn apply_encoding(response: &mut NativeResponse, encoding: Encoding, body: Bytes) {
     response
         .headers
         .insert(CONTENT_ENCODING, HeaderValue::from_static(encoding.token()));
     response.headers.remove(CONTENT_LENGTH);
     append_vary_accept_encoding(&mut response.headers);
     weaken_strong_etag(&mut response.headers);
-    response.body = compressed;
+    response.body = body;
+}
+
+enum ByteRange {
+    Satisfiable { start: u64, end: u64 },
+    Unsatisfiable,
+}
+
+fn safe_unsigned(digits: &str) -> Option<u64> {
+    if !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    digits
+        .parse::<u64>()
+        .ok()
+        .filter(|value| *value <= MAX_SAFE_INTEGER)
+}
+
+fn parse_single_range(value: &str, total: u64) -> Option<ByteRange> {
+    let value = trim(value);
+    if !value.get(..6)?.eq_ignore_ascii_case("bytes=") {
+        return None;
+    }
+    let (start, end) = value[6..].split_once('-')?;
+    if start.is_empty() {
+        let suffix = safe_unsigned(end)?;
+        return Some(if suffix == 0 || total == 0 {
+            ByteRange::Unsatisfiable
+        } else {
+            ByteRange::Satisfiable {
+                start: total.saturating_sub(suffix),
+                end: total - 1,
+            }
+        });
+    }
+    let start = safe_unsigned(start)?;
+    let end = if end.is_empty() {
+        total.saturating_sub(1)
+    } else {
+        let end = safe_unsigned(end)?;
+        if end < start {
+            return None;
+        }
+        end
+    };
+    Some(if start >= total {
+        ByteRange::Unsatisfiable
+    } else {
+        ByteRange::Satisfiable {
+            start,
+            end: end.min(total - 1),
+        }
+    })
+}
+
+fn select_range(
+    method: &Method,
+    request: &HeaderMap,
+    response: &mut NativeResponse,
+) -> Option<bool> {
+    if method != Method::GET
+        || response.status != StatusCode::OK
+        || response.headers.contains_key(CONTENT_ENCODING)
+        || response.headers.contains_key(CONTENT_RANGE)
+    {
+        return None;
+    }
+    let total = safe_unsigned(header(&response.headers, CONTENT_LENGTH)?)?;
+    if request.contains_key(IF_RANGE) {
+        let validator = fetch_header_value(request, &IF_RANGE)?;
+        let inner = validator.strip_prefix('"')?.strip_suffix('"')?;
+        if inner.contains('"') || Some(validator.as_ref()) != header(&response.headers, ETAG) {
+            return None;
+        }
+    }
+    let range = parse_single_range(&fetch_header_value(request, &RANGE)?, total)?;
     response
+        .headers
+        .insert(ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    match range {
+        ByteRange::Unsatisfiable => {
+            response.status = StatusCode::RANGE_NOT_SATISFIABLE;
+            response
+                .headers
+                .insert(CONTENT_RANGE, header_value(format!("bytes */{total}")));
+            response.headers.remove(CONTENT_LENGTH);
+            Some(false)
+        }
+        ByteRange::Satisfiable { start, end } => {
+            let from = usize::try_from(start).ok()?.min(response.body.len());
+            let to = usize::try_from(end + 1).ok()?.min(response.body.len());
+            response.status = StatusCode::PARTIAL_CONTENT;
+            response.headers.insert(
+                CONTENT_RANGE,
+                header_value(format!("bytes {start}-{end}/{total}")),
+            );
+            response
+                .headers
+                .insert(CONTENT_LENGTH, HeaderValue::from(end - start + 1));
+            response.body = response.body.slice(from..to);
+            Some(true)
+        }
+    }
+}
+
+/// Applies range selection and compression on the controller's local runtime.
+/// A null body is distinct from a present body of zero bytes.
+pub async fn finish_native(
+    method: &Method,
+    request: &HeaderMap,
+    response: Response<Option<Bytes>>,
+    enabled: bool,
+) -> std::io::Result<Response<Option<Bytes>>> {
+    let (mut parts, body) = response.into_parts();
+    let Some(body) = body else {
+        return Ok(Response::from_parts(parts, None));
+    };
+    let mut response = NativeResponse {
+        status: parts.status,
+        headers: parts.headers,
+        body,
+    };
+    let mut has_body = true;
+    if request.contains_key(RANGE) {
+        match select_range(method, request, &mut response) {
+            Some(false) => has_body = false,
+            Some(true) if response.body.len() >= 256 => stream_framing(&mut response.headers),
+            // Bun's pass-through stream prevents its file response writer
+            // from applying a second, different range parser.
+            None if response.status == StatusCode::OK => {
+                stream_framing(&mut response.headers);
+                // An exact-size body would make Hyper announce that size for HEAD.
+                has_body = method != Method::HEAD;
+            }
+            _ => {}
+        }
+    } else if !should_skip(method, &response, enabled) {
+        if let Some(encoding) =
+            negotiate_encoding(fetch_header_value(request, &ACCEPT_ENCODING).as_deref())
+        {
+            let input = response.body.clone();
+            let compressed =
+                tokio::task::spawn_blocking(move || encoding.compress(&input)).await??;
+            apply_encoding(&mut response, encoding, compressed);
+            stream_framing(&mut response.headers);
+        } else {
+            append_vary_accept_encoding(&mut response.headers);
+        }
+    }
+    parts.status = response.status;
+    parts.headers = response.headers;
+    Ok(Response::from_parts(
+        parts,
+        has_body.then_some(response.body),
+    ))
+}
+
+// Bun 1.4.3 coalesces selected ranges smaller than 256 bytes; larger slices
+// and the pass-through stream omit Content-Length on the wire.
+fn stream_framing(headers: &mut HeaderMap) {
+    headers.remove(CONTENT_LENGTH);
+    headers.insert(TRANSFER_ENCODING, HeaderValue::from_static("chunked"));
 }
 
 #[cfg(test)]
