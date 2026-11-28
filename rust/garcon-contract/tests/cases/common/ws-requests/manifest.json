@@ -1,0 +1,40 @@
+{
+  "module": "common/ws-requests.ts",
+  "tests": [
+    "common/__tests__/ws-transcript-replay.test.js",
+    "common/__tests__/ws-events.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/ws-requests.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseClientWsMessage",
+      "argument": 0
+    },
+    {
+      "fn": "ReconnectStateQueryRequest.fromJson",
+      "argument": 0
+    },
+    {
+      "fn": "ChatSubscribeRequest.fromJson",
+      "argument": 0
+    },
+    {
+      "fn": "ChatReloadRequest.fromJson",
+      "argument": 0
+    },
+    {
+      "fn": "ChatReloadCancelRequest.fromJson",
+      "argument": 0
+    },
+    {
+      "fn": "WsPingRequest.fromJson",
+      "argument": 0
+    }
+  ],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 289,
+  "sha256": "d2de97e33b4b5fd6bbf52e0199c92d65749b48846d59d1a8f274d3a785797cb4"
+}

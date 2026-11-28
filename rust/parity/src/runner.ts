@@ -30,7 +30,7 @@ export async function runScenario(repoRoot: string, build: ServerBuild, scenario
   try {
     const runs: CaseRun[] = [];
     let offset = (await fallbacksSince(server.fallbackLogPath, 0)).offset;
-    // Each step's capture before normalization, for `{{<step>.body.<path>}}`.
+    // Each step's capture before normalization, for later response placeholders.
     const captures = new Map<string, Capture>();
     // Values earlier responses gave to placeholders, which later responses repeat.
     const carried = new Map<string, string>();
