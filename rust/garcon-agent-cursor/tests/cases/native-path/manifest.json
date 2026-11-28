@@ -1,0 +1,13 @@
+{
+  "module": "server-agents/cursor/src/agents/cursor/cursor-native-path.ts",
+  "tests": [
+    "server-agents/cursor/src/agents/cursor/__tests__/native-path.test.js"
+  ],
+  "inputs": "rust/garcon-agent-cursor/tests/inputs/native-path.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 148,
+  "sha256": "21f4e0f9ed8c03f63b1a437709df13348e089522e7b74eb7ad09742511731a66"
+}

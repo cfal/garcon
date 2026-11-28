@@ -1,0 +1,38 @@
+{
+  "module": "server-agents/cursor/src/agents/cursor/cursor-acp-model-config.ts",
+  "tests": [
+    "server-agents/cursor/src/agents/cursor/__tests__/acp-model-config.test.js"
+  ],
+  "inputs": "rust/garcon-agent-cursor/tests/inputs/acp-model-config.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.args[0].client.setSessionConfigOption",
+      "type": "a function",
+      "where": "args",
+      "at": "server-agents/cursor/src/agents/cursor/__tests__/acp-model-config.test.js:138:18",
+      "fn": "configureCursorAcpSessionOptions",
+      "count": 1
+    },
+    {
+      "path": "$.args[0].client.setSessionConfigOption",
+      "type": "a function",
+      "where": "args",
+      "at": "server-agents/cursor/src/agents/cursor/__tests__/acp-model-config.test.js:177:17",
+      "fn": "configureCursorAcpSessionOptions",
+      "count": 1
+    },
+    {
+      "path": "$.args[0].client.setSessionConfigOption",
+      "type": "a function",
+      "where": "args",
+      "at": "server-agents/cursor/src/agents/cursor/__tests__/acp-model-config.test.js:190:17",
+      "fn": "configureCursorAcpSessionOptions",
+      "count": 1
+    }
+  ],
+  "cases": 152,
+  "sha256": "ae78502b753eded399dc1153c2453edf21ab967287dcdfb663bfc705421dc7f8"
+}

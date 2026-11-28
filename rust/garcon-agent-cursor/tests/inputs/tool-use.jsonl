@@ -1,0 +1,18 @@
+{"fn":"convertCursorToolUse","args":["stamp",{"toolCallDelta":{"LS_TOOL_CALL":{"callId":"directory","input":{"path":"/some"}}}}]}
+{"fn":"convertCursorToolUse","args":["stamp",{"fileGlobToolCall":{"id":"glob","parameters":{"globPattern":"*.tsx","cwd":"/some"}}}]}
+{"fn":"convertCursorToolUse","args":["stamp",{"toolName":"read","callId":"lines","args":{"path":"p","offset":"0x10","limit":"  0b11 \t","endLine":"-1e1"}}]}
+{"fn":"convertCursorToolUse","args":["stamp",{"name":"r_e-a d","id":"lines2","args":{"path":"p","offset":" ","limit":"0o17","endLine":"Infinity"}}]}
+{"fn":"convertCursorToolUse","args":["stamp",{"toolName":"replace-file-content","toolCallId":"future-tool","rawInput":{"path":"p"}}]}
+{"fn":"convertCursorToolUse","args":["stamp",{"name":"edit","id":"one","args":{"edits":[{"oldText":"old","newText":"new"}],"changes":[{"path":"x.ts","kind":"rename"}]}}]}
+{"fn":"convertCursorToolUse","args":["stamp",{"name":"patch","id":"patch","args":{"filename":"p","newString":"new","diff":"+new"}}]}
+{"fn":"convertCursorToolUse","args":["stamp",{"name":"create","id":"new","args":{"filename":"p","contents":"line\n"}}]}
+{"fn":"convertCursorToolUse","args":["stamp",{"name":"search-files","id":"grep","args":{"regex":"needle","cwd":"synthetic"}}]}
+{"fn":"convertCursorToolUse","args":["stamp",{"name":"web-search","id":"search","input":{"query":"synthetic"}}]}
+{"fn":"convertCursorToolUse","args":["stamp",{"name":"fetchurl","id":"fetch","input":{"url":"https://example.test","objective":"title"}}]}
+{"fn":"convertCursorToolUse","args":["stamp",{"name":"todoread","id":"list-todos"}]}
+{"fn":"convertCursorToolUse","args":["stamp",{"name":"update-plan","id":"plan","input":{"items":[{"step":"a","status":"done"},{"text":"b","status":"in-progress"}]}}]}
+{"fn":"convertCursorToolUse","args":["stamp",{"name":"task","id":"task","input":{"subagent_type":"synthetic","description":"d","prompt":"p","model":"m","resume":"r"}}]}
+{"fn":"convertCursorToolUse","args":["stamp",{"name":"bash","tool_call":{"shellToolCall":42},"args":{"command":"not chosen"}}]}
+{"fn":"convertCursorToolUse","args":["stamp",{"name":"Unknown tool","args":"true"}]}
+{"fn":"convertCursorToolUse","args":["stamp",{"name":"Unknown tool","args":"not json"}]}
+{"fn":"convertCursorToolUse","args":["stamp",null]}
