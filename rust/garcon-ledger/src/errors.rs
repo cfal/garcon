@@ -1,10 +1,7 @@
 use std::error::Error;
 
 use garcon_base::{
-    errors::{
-        DiagnosticError, ErrorInput, ErrorMetadata, NamedError, diagnostic_error_code,
-        has_node_error_code,
-    },
+    errors::{DiagnosticError, ErrorMetadata, error_metadata},
     stored_json::MalformedStoredJsonError,
 };
 use garcon_contract::async_user_questions::InvalidAsyncQuestionReply;
@@ -166,28 +163,16 @@ fn cause_metadata<'a>(cause: &'a (dyn Error + 'static)) -> ErrorMetadata<'a> {
     if let Some(error) = cause.downcast_ref::<UndecodableLedgerRowError>() {
         return error.diagnostic_metadata();
     }
+    if let Some(error) = cause.downcast_ref::<TranscriptSinkClosedError>() {
+        return error.diagnostic_metadata();
+    }
     if let Some(error) = cause.downcast_ref::<LedgerError>() {
         return error.diagnostic_metadata();
     }
     if let Some(error) = cause.downcast_ref::<LedgerCodecError>() {
         return error.diagnostic_metadata();
     }
-    if let Some(error) = cause.downcast_ref::<NamedError>() {
-        return error.diagnostic_metadata();
-    }
-    let cause = ErrorInput::Error(cause);
-    let diagnostic = diagnostic_error_code(cause);
-    if has_node_error_code(cause, diagnostic) {
-        ErrorMetadata {
-            name: "Error",
-            code: Some(diagnostic),
-        }
-    } else {
-        ErrorMetadata {
-            name: diagnostic,
-            code: None,
-        }
-    }
+    error_metadata(cause)
 }
 
 fn safe_field(
