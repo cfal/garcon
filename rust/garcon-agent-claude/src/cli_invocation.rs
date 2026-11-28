@@ -1,4 +1,18 @@
+use std::{ffi::OsString, path::PathBuf, rc::Rc};
+
 use garcon_agents_common::execution::permission_modes::provider_startup_permission_mode;
+use garcon_agents_common::shared::single_query_control::{
+    SingleQueryControlOptions, with_single_query_control,
+};
+use garcon_interface::{host::AgentLogger, resources::ExecutorResult};
+use indexmap::IndexMap;
+use serde_json::Value;
+use tokio_util::sync::CancellationToken;
+
+use crate::{
+    cli_version::ClaudeCliVersionProbe,
+    single_query_process::{ClaudeSingleQueryProcessOptions, run_claude_single_query_process},
+};
 use garcon_contract::chat_modes::{ClaudeThinkingMode, PermissionMode, ThinkingMode};
 use garcon_interface::errors::AgentIntegrationError;
 
@@ -86,6 +100,65 @@ pub fn build_claude_cli_args(
     Ok(args)
 }
 
+#[derive(Default)]
+pub struct ClaudeSingleQueryOptions<'a> {
+    pub model: Option<String>,
+    pub cwd: Option<PathBuf>,
+    pub permission_mode: Option<PermissionMode>,
+    pub thinking_mode: Option<ThinkingMode>,
+    pub claude_thinking_mode: Option<ClaudeThinkingMode>,
+    pub env_overrides: IndexMap<OsString, OsString>,
+    pub timeout_ms: Option<&'a Value>,
+    pub signal: Option<CancellationToken>,
+}
+
+pub async fn run_single_query(
+    prompt: String,
+    options: ClaudeSingleQueryOptions<'_>,
+    executable: Rc<dyn Fn() -> ExecutorResult<OsString>>,
+    logger: Rc<dyn AgentLogger>,
+    version_probe: Rc<ClaudeCliVersionProbe>,
+) -> ExecutorResult<String> {
+    with_single_query_control(
+        SingleQueryControlOptions {
+            signal: options.signal,
+            timeout_ms: options.timeout_ms,
+        },
+        |signal| async move {
+            let binary = executable()?;
+            version_probe.assert_compatible(&binary).await?;
+            let args = build_claude_cli_args(ClaudeCliArgOptions {
+                model: options.model.as_deref(),
+                permission_mode: options.permission_mode,
+                thinking_mode: options.thinking_mode,
+                claude_thinking_mode: options.claude_thinking_mode,
+                prompt: Some(&prompt),
+                ..Default::default()
+            })?;
+            let cwd = match options.cwd.filter(|path| !path.as_os_str().is_empty()) {
+                Some(path) => path,
+                None => std::env::current_dir()?,
+            };
+            // The caller may stop waiting on timeout, but the process still owns teardown.
+            let _cancel_on_drop = signal.clone().drop_guard();
+            tokio::task::spawn_local(async move {
+                run_claude_single_query_process(ClaudeSingleQueryProcessOptions {
+                    binary,
+                    args: args.into_iter().map(OsString::from).collect(),
+                    model: options.model.as_deref(),
+                    cwd,
+                    env_overrides: options.env_overrides,
+                    signal: &signal,
+                    logger: logger.as_ref(),
+                })
+                .await
+            })
+            .await?
+        },
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,5 +193,55 @@ mod tests {
                 }
             },
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn single_query_matches_the_original_binary_arguments_environment_and_output() {
+        use std::os::unix::fs::PermissionsExt;
+
+        use garcon_agents_common::direct::conformance_host::conformance_host;
+        use tokio::{fs, process::Command, task::LocalSet};
+
+        LocalSet::new().run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let executable = root.path().join("fake-claude-query");
+            fs::write(&executable, r#"#!/bin/sh
+if [ "$1" = --version ]; then
+  printf '%s\n' '2.1.238 (Claude Code)'
+  exit 0
+fi
+[ "$GARCON_SYNTHETIC_QUERY" = expected ] || exit 2
+[ "$*" = '--print --no-session-persistence --model haiku --permission-mode default --effort high -p synthetic prompt' ] || exit 3
+printf ' synthetic answer \n'
+"#).await.unwrap();
+            fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).await.unwrap();
+            let host = conformance_host("claude", root.path()).unwrap();
+            let actual = run_single_query(
+                "synthetic prompt".into(),
+                ClaudeSingleQueryOptions {
+                    model: Some("haiku".into()),
+                    cwd: Some(root.path().to_owned()),
+                    thinking_mode: Some(ThinkingMode::High),
+                    env_overrides: IndexMap::from([("GARCON_SYNTHETIC_QUERY".into(), "expected".into())]),
+                    timeout_ms: Some(&json!(3_000)),
+                    ..Default::default()
+                },
+                Rc::new({
+                    let executable = executable.clone();
+                    move || Ok(executable.clone().into_os_string())
+                }),
+                host.logger,
+                Rc::new(ClaudeCliVersionProbe::default()),
+            ).await.unwrap();
+            let original = Command::new("bun")
+                .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/oracles/single-query.ts"))
+                .arg(executable)
+                .arg(root.path())
+                .output().await.unwrap();
+            assert!(original.status.success(), "{}", String::from_utf8_lossy(&original.stderr));
+            assert_eq!(actual.as_bytes(), original.stdout);
+            assert_eq!(actual, " synthetic answer \n");
+        }).await;
     }
 }
