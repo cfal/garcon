@@ -1,0 +1,56 @@
+{"id":"errorMessage#0","fn":"errorMessage","args":[null],"result":"null","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:1"}
+{"id":"errorMessage#1","fn":"errorMessage","args":[{"$":"undefined"}],"result":"undefined","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:2"}
+{"id":"errorMessage#2","fn":"errorMessage","args":[5],"result":"5","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:3"}
+{"id":"errorMessage#3","fn":"errorMessage","args":[0.5],"result":"0.5","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:4"}
+{"id":"errorMessage#4","fn":"errorMessage","args":[0],"result":"0","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:5"}
+{"id":"errorMessage#5","fn":"errorMessage","args":[1e+21],"result":"1e+21","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:6"}
+{"id":"errorMessage#6","fn":"errorMessage","args":[true],"result":"true","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:7"}
+{"id":"errorMessage#7","fn":"errorMessage","args":[false],"result":"false","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:8"}
+{"id":"errorMessage#8","fn":"errorMessage","args":["text"],"result":"text","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:9"}
+{"id":"errorMessage#9","fn":"errorMessage","args":[[]],"result":"","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:10"}
+{"id":"errorMessage#10","fn":"errorMessage","args":[[1,null,2]],"result":"1,,2","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:11"}
+{"id":"errorMessage#11","fn":"errorMessage","args":[["a",["b",["c"]]]],"result":"a,b,c","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:12"}
+{"id":"errorMessage#12","fn":"errorMessage","args":[[{}]],"result":"[object Object]","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:13"}
+{"id":"errorMessage#13","fn":"errorMessage","args":[{}],"result":"[object Object]","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:14"}
+{"id":"errorMessage#14","fn":"errorMessage","args":[{"message":"x"}],"result":"[object Object]","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:15"}
+{"id":"errorMessage#15","fn":"errorMessage","args":[{"a":{"b":1}}],"result":"[object Object]","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:16"}
+{"id":"errorMessage#16","fn":"errorMessage","args":[{"b":1}],"result":"[object Object]","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:17"}
+{"id":"errorMessage#17","fn":"errorMessage","args":["Ḱ"],"result":"Ḱ","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:40"}
+{"id":"errorMessage#18","fn":"errorMessage","args":["日本😀"],"result":"日本😀","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:41"}
+{"id":"errorMessage#19","fn":"errorMessage","args":["__proto__"],"result":"__proto__","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:42"}
+{"id":"errorMessage#20","fn":"errorMessage","args":["constructor"],"result":"constructor","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:43"}
+{"id":"errorMessage#21","fn":"errorMessage","args":[" "],"result":" ","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:44"}
+{"id":"errorMessage#22","fn":"errorMessage","args":[{"message":"K"}],"result":"[object Object]","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:45"}
+{"id":"errorMessage#23","fn":"errorMessage","args":[{"message":"日本","name":"😀"}],"result":"[object Object]","origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:46"}
+{"id":"hasNodeErrorCode#0","fn":"hasNodeErrorCode","args":[{"code":"ENOENT"},"ENOENT"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:18"}
+{"id":"hasNodeErrorCode#1","fn":"hasNodeErrorCode","args":[{"code":"ENOENT"},"enonent"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:19"}
+{"id":"hasNodeErrorCode#2","fn":"hasNodeErrorCode","args":[{"code":"EACCES"},"ENOENT"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:20"}
+{"id":"hasNodeErrorCode#3","fn":"hasNodeErrorCode","args":[{"code":null},"ENOENT"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:21"}
+{"id":"hasNodeErrorCode#4","fn":"hasNodeErrorCode","args":[{"code":1},"ENOENT"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:22"}
+{"id":"hasNodeErrorCode#5","fn":"hasNodeErrorCode","args":[{"code":true},"ENOENT"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:23"}
+{"id":"hasNodeErrorCode#6","fn":"hasNodeErrorCode","args":[{},"ENOENT"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:24"}
+{"id":"hasNodeErrorCode#7","fn":"hasNodeErrorCode","args":[null,"ENOENT"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:25"}
+{"id":"hasNodeErrorCode#8","fn":"hasNodeErrorCode","args":[{"$":"undefined"},"ENOENT"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:26"}
+{"id":"hasNodeErrorCode#9","fn":"hasNodeErrorCode","args":["ENOENT","ENOENT"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:27"}
+{"id":"hasNodeErrorCode#10","fn":"hasNodeErrorCode","args":[5,"5"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:28"}
+{"id":"hasNodeErrorCode#11","fn":"hasNodeErrorCode","args":[true,"true"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:29"}
+{"id":"hasNodeErrorCode#12","fn":"hasNodeErrorCode","args":[["ENOENT"],"ENOENT"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:30"}
+{"id":"hasNodeErrorCode#13","fn":"hasNodeErrorCode","args":[{"code":"ENOENT"},""],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:31"}
+{"id":"hasNodeErrorCode#14","fn":"hasNodeErrorCode","args":[{"code":"ENOENT"},"__proto__"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:32"}
+{"id":"hasNodeErrorCode#15","fn":"hasNodeErrorCode","args":[{"code":"__proto__"},"__proto__"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:33"}
+{"id":"hasNodeErrorCode#16","fn":"hasNodeErrorCode","args":[{"code":"constructor"},"constructor"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:34"}
+{"id":"hasNodeErrorCode#17","fn":"hasNodeErrorCode","args":[{"code":"toString"},"toString"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:35"}
+{"id":"hasNodeErrorCode#18","fn":"hasNodeErrorCode","args":[{"code":"hasOwnProperty"},"hasOwnProperty"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:36"}
+{"id":"hasNodeErrorCode#19","fn":"hasNodeErrorCode","args":[{"code":"ENOENT","name":"Error"},"ENOENT"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:37"}
+{"id":"hasNodeErrorCode#20","fn":"hasNodeErrorCode","args":[{"Code":"ENOENT"},"ENOENT"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:38"}
+{"id":"hasNodeErrorCode#21","fn":"hasNodeErrorCode","args":[{"code":"enoent"},"ENOENT"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:39"}
+{"id":"hasNodeErrorCode#22","fn":"hasNodeErrorCode","args":[{"code":"K"},"K"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:47"}
+{"id":"hasNodeErrorCode#23","fn":"hasNodeErrorCode","args":[{"code":"K"},"K"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:48"}
+{"id":"hasNodeErrorCode#24","fn":"hasNodeErrorCode","args":[{"code":"ENOENT"},"ENOENT "],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:49"}
+{"id":"hasNodeErrorCode#25","fn":"hasNodeErrorCode","args":[{"code":"constructor"},"constructor"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:50"}
+{"id":"hasNodeErrorCode#26","fn":"hasNodeErrorCode","args":[{"code":"hasOwnProperty"},"toString"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:51"}
+{"id":"hasNodeErrorCode#27","fn":"hasNodeErrorCode","args":[{"__proto__":{"code":"ENOENT"}},"ENOENT"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:52"}
+{"id":"hasNodeErrorCode#28","fn":"hasNodeErrorCode","args":[{"code":"ENOENT","__proto__":null},"ENOENT"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:53"}
+{"id":"hasNodeErrorCode#29","fn":"hasNodeErrorCode","args":[{"code":"ENOENT","toString":"x"},"ENOENT"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:54"}
+{"id":"hasNodeErrorCode#30","fn":"hasNodeErrorCode","args":[{"code":null},"null"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:55"}
+{"id":"hasNodeErrorCode#31","fn":"hasNodeErrorCode","args":[{"code":1},"1"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/lib-errors.jsonl:56"}
