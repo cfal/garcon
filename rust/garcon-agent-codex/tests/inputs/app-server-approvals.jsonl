@@ -1,0 +1,38 @@
+{"fn":"isApprovalRequest","args":[{"id":1,"method":"item/tool/requestUserInput"}]}
+{"fn":"isApprovalRequest","args":[{"id":1,"method":"item/commandExecution/requestApproval"}]}
+{"fn":"isApprovalRequest","args":[{"id":1,"method":"item/fileChange/requestApproval"}]}
+{"fn":"isApprovalRequest","args":[{"id":1,"method":"item/permissions/requestApproval"}]}
+{"fn":"isApprovalRequest","args":[{"id":1,"method":"execCommandApproval"}]}
+{"fn":"isApprovalRequest","args":[{"id":1,"method":"applyPatchApproval"}]}
+{"fn":"isApprovalRequest","args":[{"id":1,"method":"item/commandExecution/unknown"}]}
+{"fn":"createPendingApproval","args":["chat",{"id":"rpc","method":"item/commandExecution/requestApproval","params":[{"unexpected":true}]}]}
+{"fn":"createPendingApproval","args":["chat",{"id":123,"method":"item/commandExecution/requestApproval","params":{"itemId":"item","approvalId":"review","kind":"writeStdin"}}]}
+{"fn":"buildApprovalMessage","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/commandExecution/requestApproval","params":{"itemId":"item","approvalId":"review","command":"pwd","kind":"command"}}]}
+{"fn":"buildApprovalMessage","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/commandExecution/requestApproval","params":{"itemId":"item","approvalId":"review","kind":"writeStdin","reason":"Synthetic"}}]}
+{"fn":"buildApprovalMessage","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/commandExecution/requestApproval","params":{"itemId":"item","kind":"writeStdin"}}]}
+{"fn":"buildApprovalMessage","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/commandExecution/requestApproval","params":{"kind":"humanCommand","itemId":"item","command":"pwd"}}]}
+{"fn":"buildApprovalMessage","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/commandExecution/requestApproval","params":{"itemId":"item","networkApprovalContext":{"host":"example.invalid","protocol":"https"}}}]}
+{"fn":"buildApprovalMessage","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/commandExecution/requestApproval","params":{"command":"","reason":"Synthetic"}}]}
+{"fn":"buildApprovalMessage","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"execCommandApproval","params":{"callId":"call","command":["printf",1,true,null,["a","b"],{}]}}]}
+{"fn":"buildApprovalMessage","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/fileChange/requestApproval","params":{"itemId":"item"}}]}
+{"fn":"buildApprovalMessage","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"applyPatchApproval","params":{"callId":"call"}}]}
+{"fn":"buildApprovalMessage","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/permissions/requestApproval","params":{"permissions":{"fileSystem":{"read":["/fixture"]},"network":{"enabled":true}},"reason":"","itemId":"item"}}]}
+{"fn":"buildApprovalMessage","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/tool/requestUserInput","params":{"itemId":"fixture","questions":[{"id":"one","question":"Pick one","options":[{"label":"One"}]}]}}]}
+{"fn":"buildApprovalMessage","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/tool/requestUserInput","params":{"itemId":"fixture","questions":[]}}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/commandExecution/requestApproval","params":{}},{"allow":true}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/commandExecution/requestApproval","params":{}},{"allow":true,"alwaysAllow":true}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/commandExecution/requestApproval","params":{}},{"allow":false,"alwaysAllow":true}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/commandExecution/requestApproval","params":{"kind":"writeStdin","approvalId":"review"}},{"allow":false}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/commandExecution/requestApproval","params":{"kind":"writeStdin","approvalId":"review"}},{"allow":true,"alwaysAllow":true}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/commandExecution/requestApproval","params":{"kind":"writeStdin"}},{"allow":true}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/fileChange/requestApproval","params":{}},{"allow":false}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/fileChange/requestApproval","params":{}},{"allow":true,"alwaysAllow":true}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"execCommandApproval","params":{}},{"allow":true}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"applyPatchApproval","params":{}},{"allow":true,"alwaysAllow":true}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"applyPatchApproval","params":{}},{"allow":false}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/permissions/requestApproval","params":{"permissions":{"fileSystem":{"read":["/fixture"]},"irrelevant":true,"network":{"enabled":true}}}},{"allow":true,"alwaysAllow":true}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/permissions/requestApproval","params":{"permissions":{"network":{"enabled":true}}}},{"allow":false,"alwaysAllow":true}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/permissions/requestApproval","params":{"permissions":{"network":false,"fileSystem":[]}}},{"allow":true}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/tool/requestUserInput","params":{"itemId":"fixture","questions":[{"id":"one","question":"Pick one","options":[{"label":"One"}]}]}},{"allow":true,"response":{"type":"ask-user-question-response","outcome":"answered","answers":[{"questionId":"one","selectedOptionIds":["option-0"]}]}}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"item/tool/requestUserInput","params":{"itemId":"fixture","questions":[{"id":"one","question":"Pick one","options":[{"label":"One"}]}]}},{"allow":false}]}
+{"fn":"buildApprovalResponse","args":[{"permissionOccurrenceId":"occurrence","requestId":7,"chatId":"chat","method":"unknown","params":{}},{"allow":false}]}
