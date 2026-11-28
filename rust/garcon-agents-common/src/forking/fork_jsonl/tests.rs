@@ -98,7 +98,7 @@ async fn rejects_whole_source_mutation_and_removes_created_target() {
     request.create_target_path = Some(Rc::new(move |input| {
         assert_eq!(input.target_agent_session_id, "synthetic-target");
         assert_eq!(input.created_at_ms, 1_000);
-        expected_target.clone()
+        Ok(expected_target.clone())
     }));
     request.transform_entries = Some(Rc::new(move |input| {
         let source = source.clone();
@@ -269,6 +269,89 @@ async fn original_fork(source: &Path, target: &Path, mode: &str) -> Vec<u8> {
         String::from_utf8_lossy(&oracle.stderr)
     );
     fs::read(target).await.unwrap()
+}
+
+#[tokio::test]
+async fn a_failing_target_path_is_lazy_and_preserves_the_original_error_and_files() {
+    use std::cell::RefCell;
+
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.jsonl");
+    let sibling = dir.path().join("existing.jsonl");
+    let body = b"{\"type\":\"synthetic\"}\n";
+    fs::write(&sibling, body).await.unwrap();
+    for (source_contents, mode) in [
+        (body.as_slice(), "target-path-failure"),
+        (b"", "unused-target-path"),
+    ] {
+        fs::write(&source, source_contents).await.unwrap();
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let mut request = request(&source, None);
+        request.allow_unmaterialized_whole_session = true;
+        request.create_target_path = Some(Rc::new({
+            let events = events.clone();
+            move |_| {
+                events.borrow_mut().push("target");
+                Err(NamedError {
+                    name: "TypeError".into(),
+                    message: "Synthetic target path failure".into(),
+                    code: None,
+                }
+                .into())
+            }
+        }));
+        request.transform_entries = Some(Rc::new({
+            let events = events.clone();
+            move |input| {
+                events.borrow_mut().push("transform");
+                Box::pin(async move {
+                    Ok(ForkTranscriptTransformResult {
+                        entries: input.selected_entries,
+                        expected_semantic_digest: None,
+                    })
+                })
+            }
+        }));
+        let outcome = fork(request).await;
+        let outcome = match outcome {
+            Err(error) => {
+                let error = error
+                    .downcast_ref::<NamedError>()
+                    .expect("original target path error");
+                json!({"error":{"name":error.name,"message":error.message}})
+            }
+            Ok(ForkJsonlOutcome::Unmaterialized) => json!({"kind":"unmaterialized"}),
+            outcome => panic!("unexpected fork outcome: {outcome:?}"),
+        };
+        let oracle = tokio::process::Command::new("bun")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/oracles/fork-jsonl.ts"
+            ))
+            .arg(&source)
+            .arg(&sibling)
+            .arg(mode)
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            oracle.status.success(),
+            "{}",
+            String::from_utf8_lossy(&oracle.stderr)
+        );
+        let actual = json!({"events":*events.borrow(),"outcome":outcome});
+        assert_eq!(
+            serde_json::to_vec(&actual).unwrap(),
+            oracle.stdout,
+            "{mode}"
+        );
+        assert_eq!(fs::read(&source).await.unwrap(), source_contents);
+        assert_eq!(fs::read(&sibling).await.unwrap(), body);
+        let mut files = fs::read_dir(dir.path()).await.unwrap();
+        assert!(files.next_entry().await.unwrap().is_some());
+        assert!(files.next_entry().await.unwrap().is_some());
+        assert!(files.next_entry().await.unwrap().is_none());
+    }
 }
 
 #[tokio::test]

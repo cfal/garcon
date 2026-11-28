@@ -155,7 +155,7 @@ async fn fixture(
         create_rewrite_entry: None,
         fork_whole_session: None,
         transform_entries: None,
-        create_target_path: Some(Rc::new(move |_| target.clone())),
+        create_target_path: Some(Rc::new(move |_| Ok(target.clone()))),
         allow_unmaterialized_whole_session: false,
         semantic_digest: None,
     };

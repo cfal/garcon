@@ -53,7 +53,7 @@ pub type TransformEntries =
     dyn Fn(
         ForkTranscriptTransformInput,
     ) -> LocalBoxFuture<'static, ExecutorResult<ForkTranscriptTransformResult>>;
-pub type CreateTargetPath = dyn Fn(ForkJsonlTargetPathInput) -> String;
+pub type CreateTargetPath = dyn Fn(ForkJsonlTargetPathInput) -> ExecutorResult<String>;
 
 pub struct ForkJsonlRequest {
     pub source_path: String,
@@ -115,10 +115,10 @@ pub async fn fork_jsonl_transcript_with(
                 created_at_ms: clock.now_ms(),
             })
         } else {
-            path::join(&[
+            Ok(path::join(&[
                 &path::dirname(&request.source_path),
                 &format!("{}.jsonl", context.target_agent_session_id),
-            ])
+            ]))
         }
     });
     let result = fork_into_target(&request, &context, &mut target).await;
@@ -131,7 +131,7 @@ pub async fn fork_jsonl_transcript_with(
 async fn fork_into_target(
     request: &ForkJsonlRequest,
     context: &ForkTranscriptEntryContext,
-    target: &mut TargetWriter<impl Fn() -> String>,
+    target: &mut TargetWriter<impl Fn() -> ExecutorResult<String>>,
 ) -> ExecutorResult<ForkJsonlOutcome> {
     let SourceRead { entries, digest } = if request.cutoff_line.is_none() {
         read_whole_session(request, context, target).await?
@@ -247,7 +247,7 @@ async fn stat_source(path: &str) -> io::Result<FileIdentity> {
 async fn read_whole_session(
     request: &ForkJsonlRequest,
     context: &ForkTranscriptEntryContext,
-    target: &mut TargetWriter<impl Fn() -> String>,
+    target: &mut TargetWriter<impl Fn() -> ExecutorResult<String>>,
 ) -> ExecutorResult<SourceRead> {
     let transforms = request.transform_entries.is_some();
     let mut entries = ForkEntries::new(transforms);
@@ -314,7 +314,7 @@ async fn read_whole_session(
 async fn read_retained_prefix(
     request: &ForkJsonlRequest,
     context: &ForkTranscriptEntryContext,
-    target: &mut TargetWriter<impl Fn() -> String>,
+    target: &mut TargetWriter<impl Fn() -> ExecutorResult<String>>,
 ) -> ExecutorResult<SourceRead> {
     let count = retained_line_count(request)?;
     let transforms = request.transform_entries.is_some();
@@ -565,7 +565,7 @@ struct TargetWriter<F> {
     create_path: F,
 }
 
-impl<F: Fn() -> String> TargetWriter<F> {
+impl<F: Fn() -> ExecutorResult<String>> TargetWriter<F> {
     fn new(create_path: F) -> Self {
         Self {
             path: None,
@@ -608,7 +608,7 @@ impl<F: Fn() -> String> TargetWriter<F> {
         if self.file.is_some() {
             return Ok(());
         }
-        let path = (self.create_path)();
+        let path = (self.create_path)()?;
         let mut options = fs::OpenOptions::new();
         options.create_new(true).write(true);
         #[cfg(unix)]
