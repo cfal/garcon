@@ -15,6 +15,7 @@ async fn distinguishes_unknown_integration_from_cancellation_and_disposal() {
                 terminal_runtime_id: None,
                 user_shell: None,
                 child_environment: None,
+                integrations: None,
             })
             .unwrap();
             let api = executor.api();
