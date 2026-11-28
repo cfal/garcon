@@ -1,7 +1,7 @@
 {
   "module": "common/agent-settings.ts",
   "tests": [
-    "rust/garcon-contract/tests/inputs/common/agent-settings-original.test.ts"
+    "rust/garcon-contract/tests/inputs/common/agent-settings-original.cases.ts"
   ],
   "inputs": "rust/garcon-contract/tests/inputs/common/agent-settings.jsonl",
   "guards": [
