@@ -883,8 +883,10 @@ dependencies = [
 name = "garcon-executor"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "base64",
  "bytes",
+ "futures",
  "garcon-base",
  "garcon-contract",
  "garcon-interface",
