@@ -1213,6 +1213,7 @@ dependencies = [
  "futures",
  "garcon-base",
  "garcon-cases",
+ "garcon-chats",
  "garcon-contract",
  "garcon-interface",
  "garcon-js",

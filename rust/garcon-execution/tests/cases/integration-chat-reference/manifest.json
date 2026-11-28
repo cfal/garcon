@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-execution/tests/support/integration-chat-reference-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-execution/tests/inputs/integration-chat-reference.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 5,
+  "sha256": "b3c0a85b3f4a2b6bb314673f91399793e0c6c0dd46b792e3a08e003a5dfb44b2"
+}

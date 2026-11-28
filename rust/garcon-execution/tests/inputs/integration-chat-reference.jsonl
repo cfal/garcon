@@ -1,0 +1,5 @@
+{"fn":"integrationChatReferenceTrace","args":["defaults"]}
+{"fn":"integrationChatReferenceTrace","args":["seed"]}
+{"fn":"integrationChatReferenceTrace","args":["empty-session"]}
+{"fn":"integrationChatReferenceTrace","args":["mismatch"]}
+{"fn":"integrationChatReferenceTrace","args":["parse-fails"]}
