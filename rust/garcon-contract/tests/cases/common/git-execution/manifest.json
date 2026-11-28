@@ -1,0 +1,11 @@
+{
+  "module": "common/git-execution.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/git-execution.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 51,
+  "sha256": "496f328cf6a9d07ddb2e589b7eb87bae490b6434f7f4d0c5ebb004d6f9e9b332"
+}
