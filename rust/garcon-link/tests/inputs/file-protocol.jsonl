@@ -1,0 +1,17 @@
+{"fn":"decodeFileData","args":["AAH/"]}
+{"fn":"decodeFileData","args":["AAH_"]}
+{"fn":"decodeFileData","args":["aGk="]}
+{"fn":"decodeFileData","args":["aGl="]}
+{"fn":"decodeFileData","args":["aGk"]}
+{"fn":"decodeFileData","args":["a Gk="]}
+{"fn":"decodeFileData","args":[""]}
+{"fn":"decodeFileData","args":[null]}
+{"fn":"decodeFileText","args":["77u/aGk="]}
+{"fn":"decodeFileText","args":["/w=="]}
+{"fn":"validateFileRpcRequest","args":["files.createDirectory",{"parentPath":"/p","name":""}]}
+{"fn":"validateFileRpcRequest","args":["files.createDirectory",{"parentPath":"/p","name":null}]}
+{"fn":"validateFileRpcRequest","args":["files.browse",{}]}
+{"fn":"validateFileRpcRequest","args":["files.tree",{"directoryPath":null}]}
+{"fn":"validateFileRpcRequest","args":["files.list",{"projectPath":"/p"}]}
+{"fn":"validateFileRpcRequest","args":["files.read",{"projectPath":"/p","filePath":"synthetic\u0000tail"}]}
+{"fn":"validateFileRpcRequest","args":["files.read",{"projectPath":"/p","filePath":"synthetic"}]}

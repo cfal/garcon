@@ -40,9 +40,11 @@ pub fn finalize_normalized_tags<'a>(tags: &'a [String], pending_tag: &str) -> Co
 }
 
 pub fn normalize_tags(raw: &[Value]) -> Vec<String> {
+    normalize_tag_strings(raw.iter().filter_map(Value::as_str))
+}
+
+pub(crate) fn normalize_tag_strings<'a>(raw: impl Iterator<Item = &'a str>) -> Vec<String> {
     let seen: IndexSet<_> = raw
-        .iter()
-        .filter_map(Value::as_str)
         .map(normalize_tag_slug)
         .filter(|tag| !tag.is_empty())
         .collect();

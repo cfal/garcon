@@ -1,0 +1,62 @@
+{
+  "module": "common/command-request-validation.ts",
+  "tests": [
+    "common/__tests__/chat-command-contracts.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "requestRecord",
+      "argument": 0
+    },
+    {
+      "fn": "requiredString",
+      "argument": 0
+    },
+    {
+      "fn": "requiredCommandCorrelationId",
+      "argument": 0
+    },
+    {
+      "fn": "requiredQueueEntryId",
+      "argument": 0
+    },
+    {
+      "fn": "requiredChatId",
+      "argument": 0
+    },
+    {
+      "fn": "optionalChatId",
+      "argument": 0
+    },
+    {
+      "fn": "requiredContent",
+      "argument": 0
+    },
+    {
+      "fn": "requiredStringContent",
+      "argument": 0
+    },
+    {
+      "fn": "optionalString",
+      "argument": 0
+    },
+    {
+      "fn": "optionalNonEmptyString",
+      "argument": 0
+    },
+    {
+      "fn": "optionalNullableString",
+      "argument": 0
+    },
+    {
+      "fn": "optionalRecord",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 1662,
+  "sha256": "823c9af71a9b2e5b4586d2708e76b27697d740d9568bad09711d26ef32e97fb9"
+}

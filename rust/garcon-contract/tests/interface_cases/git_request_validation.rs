@@ -36,12 +36,16 @@ fn dispatch_git_request_validation(function: &str, args: &[Value]) -> Result<Val
         }
         "validateGhRequest" => {
             // The call is typed; the request it checks is `unknown`.
-            let method = typed(function, args, is_gh_method)?;
+            let method = typed(function, args, |value| {
+                serde_json::from_value(value.clone()).ok()
+            })?;
             let request = unknown(function, args.get(1))?;
             asserted(validate_gh_request(method, &request))
         }
         "validateGitRequest" => {
-            let method = typed(function, args, is_git_method)?;
+            let method = typed(function, args, |value| {
+                serde_json::from_value(value.clone()).ok()
+            })?;
             let request = unknown(function, args.get(1))?;
             asserted(validate_git_request(method, &request))
         }

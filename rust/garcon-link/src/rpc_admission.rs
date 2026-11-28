@@ -16,6 +16,7 @@ pub struct RpcAdmissionSnapshot {
     pub bulk: usize,
 }
 
+#[derive(Clone)]
 pub struct RpcAdmission {
     counts: Rc<Cell<RpcAdmissionSnapshot>>,
     total_limit: usize,

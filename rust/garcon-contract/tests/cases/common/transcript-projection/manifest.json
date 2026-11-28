@@ -5,6 +5,8 @@
   ],
   "inputs": "rust/garcon-contract/tests/inputs/common/transcript-projection.jsonl",
   "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
   "notCaptured": [
     {
       "path": "$.args[0].entries[0].refit",

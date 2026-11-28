@@ -1,0 +1,12 @@
+{"fn":"isChatActivityStatus","args":["working"]}
+{"fn":"isChatActivityStatus","args":["complete"]}
+{"fn":"isChatActivityStatus","args":["error"]}
+{"fn":"isChatActivityStatus","args":["pending-user-action"]}
+{"fn":"isChatActivityStatus","args":["pendingUserAction"]}
+{"fn":"isChatActivityStatus","args":["Working"]}
+{"fn":"isChatActivityStatus","args":["working "]}
+{"fn":"isChatActivityStatus","args":["pending-user-action\n"]}
+{"fn":"isChatActivityStatus","args":[null]}
+{"fn":"isChatActivityStatus","args":[0]}
+{"fn":"isChatActivityStatus","args":[["working"]]}
+{"fn":"isChatActivityStatus","args":[{}]}

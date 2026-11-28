@@ -7,7 +7,7 @@ after which the fallback is removed (the lift). The SPA in `web/` stays Svelte.
 Decisions are in [`DECISIONS.md`](DECISIONS.md). A session claims one unit here
 before starting it and marks it done with its gate results.
 
-Plan accepted 2026-11-27 (ADR-012 to ADR-027). A new session reads this file,
+Plan accepted 2026-11-27 (ADR-012 to ADR-028). A new session reads this file,
 then `DECISIONS.md`, `RULES.md`, and `GLOSSARY.md`.
 
 ## Where the port stands
@@ -357,6 +357,7 @@ runs.
 | 025 | Each session works in its own worktree |
 | 026 | Bun 1.4.3 is the reference runtime, and Rust builds leave the development machine |
 | 027 | Each integration is a crate of its own, held to the compatibility suite |
+| 028 | The manager approves known differences that are clear bugs |
 
 ## Open questions
 

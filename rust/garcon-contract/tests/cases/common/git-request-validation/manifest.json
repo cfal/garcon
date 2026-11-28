@@ -13,7 +13,30 @@
       "kept": 0
     }
   ],
+  "jsonArguments": [
+    {
+      "fn": "isGitDocumentRef",
+      "argument": 0
+    },
+    {
+      "fn": "isGitMethod",
+      "argument": 0
+    },
+    {
+      "fn": "isGhMethod",
+      "argument": 0
+    },
+    {
+      "fn": "validateGhRequest",
+      "argument": 1
+    },
+    {
+      "fn": "validateGitRequest",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
   "notCaptured": [],
-  "cases": 2212,
-  "sha256": "8775074365a0c821ad097bb609df782849ec7a0a0e3884c2a016eddfce7149fd"
+  "cases": 2218,
+  "sha256": "f21d65d2c09185f3e8fd1db50aaeef020c623117e41825e495b7f25838851cac"
 }

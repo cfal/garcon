@@ -1,0 +1,12 @@
+{"id":"isChatActivityStatus#0","fn":"isChatActivityStatus","args":["working"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/chat-activity.jsonl:1"}
+{"id":"isChatActivityStatus#1","fn":"isChatActivityStatus","args":["complete"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/chat-activity.jsonl:2"}
+{"id":"isChatActivityStatus#2","fn":"isChatActivityStatus","args":["error"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/chat-activity.jsonl:3"}
+{"id":"isChatActivityStatus#3","fn":"isChatActivityStatus","args":["pending-user-action"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/chat-activity.jsonl:4"}
+{"id":"isChatActivityStatus#4","fn":"isChatActivityStatus","args":["pendingUserAction"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/chat-activity.jsonl:5"}
+{"id":"isChatActivityStatus#5","fn":"isChatActivityStatus","args":["Working"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/chat-activity.jsonl:6"}
+{"id":"isChatActivityStatus#6","fn":"isChatActivityStatus","args":["working "],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/chat-activity.jsonl:7"}
+{"id":"isChatActivityStatus#7","fn":"isChatActivityStatus","args":["pending-user-action\n"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/chat-activity.jsonl:8"}
+{"id":"isChatActivityStatus#8","fn":"isChatActivityStatus","args":[null],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/chat-activity.jsonl:9"}
+{"id":"isChatActivityStatus#9","fn":"isChatActivityStatus","args":[0],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/chat-activity.jsonl:10"}
+{"id":"isChatActivityStatus#10","fn":"isChatActivityStatus","args":[["working"]],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/chat-activity.jsonl:11"}
+{"id":"isChatActivityStatus#11","fn":"isChatActivityStatus","args":[{}],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/chat-activity.jsonl:12"}

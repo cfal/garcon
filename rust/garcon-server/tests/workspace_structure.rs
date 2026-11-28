@@ -47,6 +47,21 @@ fn integration_may_depend_on(dependency: &str) -> bool {
     role(dependency) == Some(Role::Shared) || dependency == "garcon-agents-common"
 }
 
+/// The shared crates depend on each other in one direction only (ADR-024):
+/// a crate may use the ones before it in this list.
+const SHARED_ORDER: [&str; 6] = [
+    "garcon-js",
+    "garcon-cases",
+    "garcon-contract",
+    "garcon-interface",
+    "garcon-base",
+    "garcon-link",
+];
+
+fn shared_rank(package: &str) -> Option<usize> {
+    SHARED_ORDER.iter().position(|name| *name == package)
+}
+
 fn workspace_root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -107,6 +122,11 @@ fn every_workspace_crate_has_a_role_and_respects_it() {
             continue;
         }
         let name = name_of(id).expect("workspace member is a package");
+        if role(name) == Some(Role::Shared) && shared_rank(name).is_none() {
+            violations.push(format!(
+                "{name} is a shared crate without a place in SHARED_ORDER"
+            ));
+        }
         let Some(from) = role(name) else {
             violations.push(format!(
                 "{name} has no role; classify it in workspace_structure.rs"
@@ -123,6 +143,13 @@ fn every_workspace_crate_has_a_role_and_respects_it() {
             {
                 violations.push(format!(
                     "{name} ({from:?}) depends on {dependency} ({to:?})"
+                ));
+            }
+            if let (Some(own), Some(other)) = (shared_rank(name), shared_rank(dependency))
+                && other >= own
+            {
+                violations.push(format!(
+                    "{name} depends on {dependency}, which comes after it in the shared order"
                 ));
             }
             if name.starts_with("garcon-agent-") && !integration_may_depend_on(dependency) {
