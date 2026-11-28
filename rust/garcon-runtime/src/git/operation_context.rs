@@ -17,6 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::ChildEnvironment;
 use crate::cancellation::check_cancelled;
+use crate::gh::gh_types::GhProcessError;
 
 use super::git_domain_error::GitDomainError;
 use super::types::{GitCommandOptions, GitProcessError};
@@ -173,6 +174,9 @@ pub fn is_git_cancellation(error: &(dyn std::error::Error + 'static)) -> bool {
             .downcast_ref::<GitProcessError>()
             .is_some_and(|error| error.aborted == Some(true) || error.timed_out == Some(true))
         || error
+            .downcast_ref::<GhProcessError>()
+            .is_some_and(|error| error.aborted || error.timed_out)
+        || error
             .downcast_ref::<GitServiceError>()
             .is_some_and(|error| error.code == GitServiceErrorCode::GIT_TIMEOUT)
 }
@@ -181,7 +185,7 @@ pub fn git_operation_signal() -> Option<CancellationToken> {
     current().map(|context| context.signal.clone())
 }
 
-pub(super) fn mark_git_mutation_dispatched() {
+pub(crate) fn mark_git_mutation_dispatched() {
     if let Some(current) = current() {
         current.mutation_dispatched.set(true);
     }
@@ -210,7 +214,7 @@ impl Drop for PendingProcess {
     }
 }
 
-pub(super) fn track_git_process<T: 'static>(
+pub(crate) fn track_git_process<T: 'static>(
     future: impl Future<Output = ExecutorResult<T>> + 'static,
 ) -> impl Future<Output = ExecutorResult<T>> {
     let task = if let Some(current) = current() {
@@ -226,12 +230,12 @@ pub(super) fn track_git_process<T: 'static>(
     async move { task.await? }
 }
 
-pub(super) struct ScopedGitOptions {
+pub(crate) struct ScopedGitOptions {
     pub options: GitCommandOptions,
     pub context_signal: Option<CancellationToken>,
 }
 
-pub(super) fn git_operation_options(
+pub(crate) fn git_operation_options(
     mut options: GitCommandOptions,
 ) -> Result<ScopedGitOptions, GitServiceError> {
     let context_signal = if let Some(current) = current() {
