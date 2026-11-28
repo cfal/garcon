@@ -35,6 +35,10 @@ impl OpenCodeClient for FakeClient {
         .boxed_local())
     }
 
+    fn supports_config_providers(&self) -> bool {
+        false
+    }
+
     fn supports_move_session(&self) -> bool {
         false
     }

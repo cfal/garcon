@@ -3,9 +3,11 @@
 pub mod compaction_routing;
 pub mod endpoint_coordinator;
 pub mod global_event_listener;
+pub mod idle_lifecycle;
 pub mod instance_lifecycle;
 pub mod jsonc;
 pub mod model_catalog;
+pub mod model_discovery;
 pub mod opencode_auth;
 pub mod operation_routes;
 pub mod permission_tool_converter;

@@ -28,6 +28,7 @@ pub trait OpenCodeClient {
 
     async fn global_events(&self, signal: &AbortSignal) -> ExecutorResult<OpenCodeEnvelopes>;
 
+    fn supports_config_providers(&self) -> bool;
     fn supports_move_session(&self) -> bool;
 }
 
@@ -269,6 +270,10 @@ impl OpenCodeClient for OpenCodeSdkClient {
             return Err(error("Error", "No body in SSE response"));
         }
         Ok(read_sdk_events(response.bytes_stream(), signal.clone()))
+    }
+
+    fn supports_config_providers(&self) -> bool {
+        true
     }
 
     fn supports_move_session(&self) -> bool {
