@@ -68,10 +68,16 @@ async fn terminate_git_process(pid: u32) -> io::Result<()> {
 }
 
 pub fn git_command_env(options: &GitCommandOptions) -> Option<BTreeMap<OsString, OsString>> {
-    if !options.disable_optional_locks && options.env.is_none() {
+    if !options.disable_optional_locks
+        && options.env.is_none()
+        && options.base_environment.is_none()
+    {
         return None;
     }
-    let mut env: BTreeMap<_, _> = std::env::vars_os().collect();
+    let mut env: BTreeMap<_, _> = options.base_environment.as_ref().map_or_else(
+        || std::env::vars_os().collect(),
+        |base| base.iter().cloned().collect(),
+    );
     for (name, value) in options.env.iter().flatten() {
         if let Some(value) = value {
             env.insert(name.clone(), value.clone());

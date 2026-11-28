@@ -604,6 +604,23 @@ dependencies = [
 [[package]]
 name = "garcon-executor"
 version = "0.0.0"
+dependencies = [
+ "base64",
+ "garcon-base",
+ "garcon-contract",
+ "garcon-interface",
+ "garcon-js",
+ "garcon-link",
+ "garcon-runtime",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "url",
+ "uuid",
+]
 
 [[package]]
 name = "garcon-http"
