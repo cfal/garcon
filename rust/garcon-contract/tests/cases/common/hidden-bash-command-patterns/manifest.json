@@ -9,7 +9,7 @@
       "fn": "validateHiddenBashCommandPattern",
       "argument": 1,
       "guard": "isHiddenBashCommandPatternMode",
-      "dropped": 1934,
+      "dropped": 2764,
       "kept": 0
     },
     {
@@ -36,6 +36,6 @@
   ],
   "bunVersion": "1.4.3",
   "notCaptured": [],
-  "cases": 481,
-  "sha256": "c9ba1975cf4d282c6432b6233d7495245e9adae31f4fdfc5e642787fb8fcf21a"
+  "cases": 514,
+  "sha256": "798bb27dffa123dd21a5aae4aa95e0edd3313bf720f57ff9e8898382990a4da3"
 }

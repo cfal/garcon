@@ -1,0 +1,14 @@
+{"id":"endpointModelOptionValue#0","fn":"endpointModelOptionValue","args":["",""],"result":":","origin":"rust/garcon-contract/tests/inputs/common/model-routing.jsonl:1"}
+{"id":"endpointModelOptionValue#1","fn":"endpointModelOptionValue","args":["endpoint","model:latest"],"result":"endpoint:model:latest","origin":"rust/garcon-contract/tests/inputs/common/model-routing.jsonl:2"}
+{"id":"endpointModelOptionValue#2","fn":"endpointModelOptionValue","args":["endpoint:sub","model"],"result":"endpoint:sub:model","origin":"rust/garcon-contract/tests/inputs/common/model-routing.jsonl:3"}
+{"id":"endpointModelOptionValue#3","fn":"endpointModelOptionValue","args":["😀","model "],"result":"😀:model ","origin":"rust/garcon-contract/tests/inputs/common/model-routing.jsonl:4"}
+{"id":"rawModelFromEndpointOptionValue#0","fn":"rawModelFromEndpointOptionValue","args":["endpoint","endpoint:model:latest"],"result":"model:latest","origin":"rust/garcon-contract/tests/inputs/common/model-routing.jsonl:5"}
+{"id":"rawModelFromEndpointOptionValue#1","fn":"rawModelFromEndpointOptionValue","args":["endpoint","endpoint:"],"result":"","origin":"rust/garcon-contract/tests/inputs/common/model-routing.jsonl:6"}
+{"id":"rawModelFromEndpointOptionValue#2","fn":"rawModelFromEndpointOptionValue","args":["endpoint","endpoint-suffix:model"],"result":"endpoint-suffix:model","origin":"rust/garcon-contract/tests/inputs/common/model-routing.jsonl:7"}
+{"id":"rawModelFromEndpointOptionValue#3","fn":"rawModelFromEndpointOptionValue","args":["endpoint","ENDPOINT:model"],"result":"ENDPOINT:model","origin":"rust/garcon-contract/tests/inputs/common/model-routing.jsonl:8"}
+{"id":"rawModelFromEndpointOptionValue#4","fn":"rawModelFromEndpointOptionValue","args":["endpoint:sub","endpoint:sub:still:model"],"result":"still:model","origin":"rust/garcon-contract/tests/inputs/common/model-routing.jsonl:9"}
+{"id":"rawModelFromEndpointOptionValue#5","fn":"rawModelFromEndpointOptionValue","args":["endpoint","endpoint:endpoint:model"],"result":"endpoint:model","origin":"rust/garcon-contract/tests/inputs/common/model-routing.jsonl:10"}
+{"id":"rawModelFromEndpointOptionValue#6","fn":"rawModelFromEndpointOptionValue","args":["",":raw"],"result":"raw","origin":"rust/garcon-contract/tests/inputs/common/model-routing.jsonl:11"}
+{"id":"rawModelFromEndpointOptionValue#7","fn":"rawModelFromEndpointOptionValue","args":["","raw"],"result":"raw","origin":"rust/garcon-contract/tests/inputs/common/model-routing.jsonl:12"}
+{"id":"rawModelFromEndpointOptionValue#8","fn":"rawModelFromEndpointOptionValue","args":["😀","😀:model "],"result":"model ","origin":"rust/garcon-contract/tests/inputs/common/model-routing.jsonl:13"}
+{"id":"rawModelFromEndpointOptionValue#9","fn":"rawModelFromEndpointOptionValue","args":["é","é:model"],"result":"é:model","origin":"rust/garcon-contract/tests/inputs/common/model-routing.jsonl:14"}

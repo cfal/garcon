@@ -13,6 +13,8 @@ export interface HttpStep {
   path?: string;
   originPath?: string;
   headers?: Record<string, string>;
+  // Appended as separate HTTP/1.1 fields after the regular headers and credential.
+  rawHeaders?: [name: string, value: string][];
   json?: Json;
   body?: string;
   auth?: RequestAuth;
@@ -70,6 +72,11 @@ function assertScenario(value: unknown, file: string): asserts value is Scenario
   for (const step of scenario.steps) {
     if (typeof step?.name !== 'string' || (!step.http === !step.ws)) {
       throw new Error(`${file}: every step needs a name and exactly one of http or ws`);
+    }
+    const rawHeaders = step.http?.rawHeaders;
+    if (rawHeaders !== undefined && (!Array.isArray(rawHeaders)
+      || rawHeaders.some((pair) => !Array.isArray(pair) || pair.length !== 2 || pair.some((item) => typeof item !== 'string')))) {
+      throw new Error(`${file}: ${step.name}: rawHeaders must be an array of [name, value] string pairs`);
     }
     if (names.has(step.name)) throw new Error(`${file}: duplicate step ${step.name}`);
     names.add(step.name);

@@ -1,0 +1,49 @@
+Garcon Server
+
+Usage:
+  bun server/main.ts [options]
+  bun run start -- [options]
+  garcon executor --help
+
+Options:
+  --help, -h                     Show this help screen and exit.
+  --port <number>                Listen port (0..65535). Use 0 for a random port.
+  --bind-address <host-or-ip>    Bind hostname/address for Bun server.
+  --public-url <url>             Public HTTP(S) base URL for executor onboarding.
+  --base-path <path>             Mount the webapp and API beneath this path (default: /).
+  --trust-proxy                  Trust X-Forwarded-For and X-Real-IP for client addresses.
+  --runtime-origin <origin>      Origin published for CLI discovery when a front door owns the listener.
+  --disable-auth                 Disable all HTTP/WebSocket authentication checks.
+  --config-dir <directory>       Override Garcon config directory.
+  --workspace-dir <directory>    Use an explicit workspace directory path.
+  --workspace <name>             Use workspace name under config dir (workspace-<name>).
+  --project-base-dir <directory> Restrict file access to a project root directory.
+  --rollback-carryover-migration Restore the pre-migration carryover workspace and exit.
+
+Environment Variables:
+  GARCON_PORT                      Listen port (0..65535). If 0, picks a random port.
+  GARCON_BIND_ADDRESS              Bind hostname/address. Default: 127.0.0.1
+  GARCON_PUBLIC_URL                Public HTTP(S) base URL; otherwise uses request Host.
+  GARCON_BASE_PATH                 Webapp and API mount path. Restart required; no rebuild.
+  GARCON_DISABLE_AUTH              Disable all HTTP/WebSocket authentication checks.
+  GARCON_CONFIG_DIR                Base config directory. Default: ~/.garcon
+  GARCON_WORKSPACE_DIR             Explicit workspace directory path.
+  GARCON_WORKSPACE                 Workspace suffix under config dir. Default: default
+  GARCON_JWT_TOKEN_EXPIRY          JWT expiry for auth tokens. Default: 30d
+  GARCON_PROJECT_BASE_DIR          Restricts project file access to this resolved path.
+  GARCON_TERMINAL_SHELL            Shell executable for PTY sessions (non-Windows).
+  GARCON_MAX_REQUEST_BODY_SIZE     HTTP request body size limit (bytes). Default: 52428800
+  GARCON_MAX_CONNECTIONS           Max concurrent HTTP connections. Default: 1024
+  GARCON_MAX_WS_CLIENTS            Max pending websocket clients. Default: 128
+  GARCON_WS_IDLE_TIMEOUT_SECONDS   WebSocket idle timeout seconds. Default: 960
+  GARCON_WS_BACKPRESSURE_LIMIT     WebSocket backpressure limit (bytes). Default: 2097152
+  GARCON_WS_MAX_PAYLOAD_LENGTH     WebSocket max payload length (bytes). Default: 16777216
+  GARCON_HTTP_IDLE_TIMEOUT_SECONDS HTTP idle timeout seconds. Default: 120
+  GARCON_HTTP_COMPRESSION          Enable streamed HTTP response compression. Default: true
+  GARCON_WEB_BUILD_DIR             Serve the web app from this directory. Default: <install>/web/build
+  SHELL                            Fallback shell path when GARCON_TERMINAL_SHELL is unset.
+
+Notes:
+  CLI options take precedence over environment variables, then defaults apply.
+  PTY/agent subprocesses inherit the resolved config root and GARCON_RUNTIME=controller.
+  Workspace settings configure controller storage, not garcon-cli discovery.

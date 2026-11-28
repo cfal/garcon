@@ -2,7 +2,10 @@
 //!
 //! Ports `common/`, one module per TypeScript file with the same name.
 
+pub mod agent_auth;
+pub mod agent_execution;
 pub mod agent_integration;
+pub mod agent_settings;
 pub mod agents;
 pub mod api_providers;
 pub mod ask_user_question_response;
@@ -18,6 +21,7 @@ pub mod chat_message_coercion;
 pub mod chat_modes;
 pub mod chat_parentage;
 pub mod chat_plan;
+pub mod chat_row_contracts;
 pub mod chat_stop;
 pub mod chat_tag_mutations;
 pub mod chat_title_contracts;
@@ -32,6 +36,7 @@ pub mod error_codes;
 pub mod executor_path;
 pub mod executors;
 pub mod file_contracts;
+pub mod file_mention_context;
 pub mod generation_prompts;
 pub mod gh;
 pub mod gh_identity;
@@ -46,6 +51,9 @@ pub mod hidden_bash_command_patterns;
 pub mod http_error;
 pub mod input_format;
 pub mod json;
+pub mod model_catalog;
+pub mod model_routing;
+pub mod models;
 pub mod project_resolution;
 pub mod queue_state;
 pub mod server_runtime;
