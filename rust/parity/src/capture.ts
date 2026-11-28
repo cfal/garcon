@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
-import { request as httpRequest } from 'node:http';
+import { request as httpRequest, validateHeaderName, validateHeaderValue, type IncomingMessage } from 'node:http';
 import { gunzipSync, inflateSync, zstdDecompressSync } from 'node:zlib';
 import { webSocketProtocolsForAuth } from '../../../common/ws-auth.js';
 import type { StartedServer } from './environment.js';
@@ -51,7 +51,7 @@ export type CapturedBody =
   | { kind: 'bytes'; sha256: string; length: number };
 
 export interface CapturedExchange {
-  request: { method: string; path: string; auth: RequestAuth };
+  request: { method: string; path: string; auth: RequestAuth; rawHeaders?: HttpStep['rawHeaders'] };
   status: number;
   headers: Record<string, string>;
   // Available to later request placeholders, not part of the golden.
@@ -147,36 +147,76 @@ export function decodeBody(bytes: Uint8Array, encoding: string | null): Uint8Arr
   }
 }
 
+async function rawHttpResponse(url: URL, method: string, headers: string[], body: string | undefined) {
+  // Fetch combines duplicate fields; node:http's flat header array writes
+  // them as separate lines. This mode must supply its own Host and framing.
+  const response = await new Promise<IncomingMessage>((resolve, reject) => {
+    const outgoing = httpRequest(url, {
+      method, headers, agent: false, signal: AbortSignal.timeout(30_000),
+    }, resolve);
+    outgoing.on('error', reject);
+    outgoing.end(body);
+  });
+  const responseHeaders = new Headers();
+  for (let index = 0; index < response.rawHeaders.length; index += 2) {
+    responseHeaders.append(response.rawHeaders[index], response.rawHeaders[index + 1]);
+  }
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of response) chunks.push(chunk);
+  return { status: response.statusCode ?? 0, headers: responseHeaders, bytes: Buffer.concat(chunks) };
+}
+
 async function captureHttp(server: StartedServer, step: HttpStep, placeholders: Placeholders): Promise<CapturedExchange> {
   const auth = step.auth ?? 'token';
   const headers = new Headers();
   for (const [name, value] of Object.entries(step.headers ?? {})) headers.set(name, expandPlaceholders(value, placeholders.values));
   const token = tokenFor(server, auth);
   if (token) headers.set('Authorization', `Bearer ${token}`);
+  const raw = step.rawHeaders?.map(([name, value]): [string, string] => {
+    const expanded = expandPlaceholders(value, placeholders.values);
+    validateHeaderName(name);
+    validateHeaderValue(name, expanded);
+    return [name, expanded];
+  });
+  const hasHeader = (name: string) => headers.has(name) || raw?.some(([key]) => key.toLowerCase() === name);
   let body: string | undefined;
   if (step.json !== undefined) {
     body = expandPlaceholders(JSON.stringify(expandJson(step.json, placeholders)), placeholders.values);
-    if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+    if (!hasHeader('content-type')) headers.set('Content-Type', 'application/json');
   } else if (step.body !== undefined) {
     body = expandPlaceholders(step.body, placeholders.values);
   }
   // Compression is requested explicitly unless the step chooses its own
   // Accept-Encoding; an empty value sends none.
-  if (!headers.has('Accept-Encoding')) headers.set('Accept-Encoding', 'gzip');
-  // Redirects are part of the contract, so they are recorded rather than
-  // followed. Bodies are decoded here rather than by fetch, so encoders that
-  // produce different bytes for the same content still compare equal.
-  const response = await fetch(requestUrl(server, step, placeholders), {
-    method: step.method,
-    headers,
-    body,
-    redirect: 'manual',
-    decompress: false,
-    signal: AbortSignal.timeout(30_000),
-  });
-  const bytes = decodeBody(new Uint8Array(await response.arrayBuffer()), response.headers.get('content-encoding'));
+  if (!hasHeader('accept-encoding')) headers.set('Accept-Encoding', 'gzip');
+  const url = requestUrl(server, step, placeholders);
+  let response: { status: number; headers: Headers; bytes: Uint8Array };
+  if (raw) {
+    const target = new URL(url);
+    if (!hasHeader('host')) headers.set('Host', target.host);
+    if (body !== undefined && !hasHeader('content-length') && !hasHeader('transfer-encoding')) {
+      headers.set('Content-Length', String(Buffer.byteLength(body)));
+    }
+    response = await rawHttpResponse(target, step.method, [...headers, ...raw].flat(), body);
+  } else {
+    // Redirects are recorded rather than followed. Decode the body ourselves
+    // so encoders that produce different bytes for the same content compare equal.
+    const fetched = await fetch(url, {
+      method: step.method,
+      headers,
+      body,
+      redirect: 'manual',
+      decompress: false,
+      signal: AbortSignal.timeout(30_000),
+    });
+    response = { status: fetched.status, headers: fetched.headers, bytes: new Uint8Array(await fetched.arrayBuffer()) };
+  }
+  const bytes = decodeBody(response.bytes, response.headers.get('content-encoding'));
   return {
-    request: { method: step.method, path: step.originPath ?? step.path ?? '/', auth },
+    request: {
+      method: step.method, path: step.originPath ?? step.path ?? '/', auth,
+      ...(step.rawHeaders ? { rawHeaders: step.rawHeaders } : {}),
+    },
     status: response.status,
     headers: contractHeaders(response.headers),
     rawHeaders: response.headers,

@@ -33,9 +33,11 @@ function httpTraps(step: ScenarioStep & { http: HttpStep }): ScenarioStep[] {
     }
   }
   if (http.json !== undefined) {
+    const malformedHeaders = http.rawHeaders?.some(([name]) => name.toLowerCase() === 'content-type')
+      ? http.headers : { ...http.headers, 'Content-Type': 'application/json' };
     traps.push({
       name: `${step.name}~malformed-json`,
-      http: { ...http, json: undefined, body: '{"unterminated', headers: { ...http.headers, 'Content-Type': 'application/json' } },
+      http: { ...http, json: undefined, body: '{"unterminated', headers: malformedHeaders },
     });
     traps.push({
       name: `${step.name}~non-ascii-json`,
