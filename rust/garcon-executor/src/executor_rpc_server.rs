@@ -268,7 +268,7 @@ impl ExecutorRpcServer {
                     ))
                 })?;
                 history
-                    .handle(integration.as_ref().try_into()?, call, signal)
+                    .handle(integration.as_ref().into(), call, signal)
                     .await
             }
             "producers.bind"

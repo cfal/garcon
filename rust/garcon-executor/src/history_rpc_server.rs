@@ -13,6 +13,7 @@ use garcon_interface::integration::AgentIntegration;
 use garcon_interface::native_history::{
     AgentHistoryImport, AgentHistoryImportRequest, AgentImportedTranscriptRow,
 };
+use garcon_interface::producer::AgentProducers;
 use garcon_interface::resources::{
     AgentResourceRef, AgentResourceScope, ExecutorCallOptions, create_agent_resource_ref,
     is_agent_resource_ref,
@@ -36,29 +37,32 @@ const MAX_READERS: usize = 16;
 const READER_IDLE: Duration = Duration::from_secs(120);
 
 pub(crate) struct HistoryIntegration<'a> {
-    scope: AgentResourceScope,
+    producers: &'a dyn AgentProducers,
     execution: &'a dyn AgentExecutionV5,
     legacy: Option<Rc<dyn AgentHistoryImport>>,
     native: Option<Rc<dyn AgentHistoryImport>>,
 }
 
-impl<'a> TryFrom<&'a AgentIntegration> for HistoryIntegration<'a> {
-    type Error = SessionError;
-
-    fn try_from(integration: &'a AgentIntegration) -> Result<Self, SessionError> {
-        Ok(Self {
-            scope: integration.producers.scope().map_err(SessionError::from)?,
+impl<'a> From<&'a AgentIntegration> for HistoryIntegration<'a> {
+    fn from(integration: &'a AgentIntegration) -> Self {
+        Self {
+            producers: integration.producers.as_ref(),
             execution: integration.execution.as_ref(),
             legacy: integration.legacy_history_import.clone(),
             native: integration.native_history_import.clone(),
-        })
+        }
     }
 }
 
 #[derive(Default)]
 pub(crate) struct HistoryRpcServer {
-    readers: RefCell<HashMap<String, HashMap<String, Rc<Reader>>>>,
+    tables: RefCell<HashMap<String, Rc<ReaderTable>>>,
     closed: CancellationToken,
+}
+
+struct ReaderTable {
+    scope: AgentResourceScope,
+    readers: RefCell<HashMap<String, Rc<Reader>>>,
 }
 
 #[derive(Serialize)]
@@ -85,29 +89,27 @@ struct Open {
 
 impl HistoryRpcServer {
     pub(crate) async fn handle(
-        self: &Rc<Self>,
+        &self,
         integration: HistoryIntegration<'_>,
         call: &ExecutorRpcRequest,
         signal: CancellationToken,
     ) -> RpcResult {
         self.assert_open(&signal)?;
+        let table = self.table(&call.integration_id, integration.producers)?;
         match call.method.as_str() {
             "history.open" => {
-                let reference = self.open(integration, &call.request, &signal).await?;
+                let reference = self
+                    .open(table, integration, &call.request, &signal)
+                    .await?;
                 reply(Ok(reference))
             }
             "history.next" => {
-                let row = self
-                    .next(&integration.scope, &call.request, &signal)
-                    .await?;
+                let row = self.next(&table, &call.request, &signal).await?;
                 reply(Ok(row))
             }
             "history.close" => {
-                let reader = self.get(&integration.scope, &call.request)?;
-                self.retire(
-                    &integration.scope,
-                    call.request["id"].as_str().unwrap_or_default(),
-                );
+                let reader = table.get(&call.request)?;
+                table.retire(call.request["id"].as_str().unwrap_or_default());
                 reader.finished.cancelled().await;
                 Ok(None)
             }
@@ -115,8 +117,27 @@ impl HistoryRpcServer {
         }
     }
 
+    fn table(
+        &self,
+        integration_id: &str,
+        producers: &dyn AgentProducers,
+    ) -> Result<Rc<ReaderTable>, SessionError> {
+        if let Some(table) = self.tables.borrow().get(integration_id) {
+            return Ok(table.clone());
+        }
+        let table = Rc::new(ReaderTable {
+            scope: producers.scope().map_err(SessionError::from)?,
+            readers: RefCell::default(),
+        });
+        self.tables
+            .borrow_mut()
+            .insert(integration_id.into(), table.clone());
+        Ok(table)
+    }
+
     async fn open(
-        self: &Rc<Self>,
+        &self,
+        table: Rc<ReaderTable>,
         integration: HistoryIntegration<'_>,
         input: &Opaque,
         signal: &CancellationToken,
@@ -165,21 +186,17 @@ impl HistoryRpcServer {
             reader.stop.cancel();
             return Err(stale());
         }
-        let reference = create_agent_resource_ref(integration.scope.clone(), KIND, || {
-            Uuid::new_v4().to_string()
-        });
+        let reference =
+            create_agent_resource_ref(table.scope.clone(), KIND, || Uuid::new_v4().to_string());
         let registered = self.assert_open(signal).and_then(|()| {
-            let mut readers = self.readers.borrow_mut();
-            let table = readers
-                .entry(integration.scope.integration_id.clone())
-                .or_default();
-            if table.contains_key(&reference.id) {
+            let mut readers = table.readers.borrow_mut();
+            if readers.contains_key(&reference.id) {
                 return Err(stale_scope("Resource is already bound"));
             }
-            if table.len() >= MAX_READERS {
+            if readers.len() >= MAX_READERS {
                 return Err(rejected("Resource budget exhausted"));
             }
-            table.insert(reference.id.clone(), Rc::clone(&reader));
+            readers.insert(reference.id.clone(), Rc::clone(&reader));
             Ok(())
         });
         if let Err(error) = registered {
@@ -189,14 +206,13 @@ impl HistoryRpcServer {
         }
         reader.refresh();
         tokio::task::spawn_local({
-            let server = Rc::downgrade(self);
-            let scope = integration.scope.clone();
+            let table = Rc::downgrade(&table);
             let id = reference.id.clone();
             async move {
                 if reader.expired().await
-                    && let Some(server) = server.upgrade()
+                    && let Some(table) = table.upgrade()
                 {
-                    server.retire(&scope, &id);
+                    table.retire(&id);
                 }
             }
         });
@@ -205,12 +221,12 @@ impl HistoryRpcServer {
 
     async fn next(
         &self,
-        scope: &AgentResourceScope,
+        table: &ReaderTable,
         request: &Value,
         signal: &CancellationToken,
     ) -> Result<Page, SessionError> {
         let reference = &request["reader"];
-        let reader = self.get(scope, reference)?;
+        let reader = table.get(reference)?;
         if as_number(&request["page"]) != Some(reader.requested.get() as f64) {
             return Err(rejected("History pages must be requested in order"));
         }
@@ -221,7 +237,7 @@ impl HistoryRpcServer {
         let result = tokio::select! {
             biased;
             () = signal.cancelled() => {
-                self.retire(scope, reference["id"].as_str().unwrap_or_default());
+                table.retire(reference["id"].as_str().unwrap_or_default());
                 receive.await
             }
             result = &mut receive => result,
@@ -241,44 +257,34 @@ impl HistoryRpcServer {
         }
     }
 
-    fn get(
-        &self,
-        scope: &AgentResourceScope,
-        reference: &Value,
-    ) -> Result<Rc<Reader>, SessionError> {
-        if !is_agent_resource_ref(reference, KIND, Some(scope)) {
-            return Err(stale_scope("Resource belongs to another execution scope"));
-        }
-        self.readers
-            .borrow()
-            .get(&scope.integration_id)
-            .and_then(|table| table.get(reference["id"].as_str().unwrap_or_default()))
-            .cloned()
-            .ok_or_else(|| stale_scope("Resource has retired"))
-    }
-
-    fn retire(&self, scope: &AgentResourceScope, id: &str) {
-        let reader = self
-            .readers
-            .borrow_mut()
-            .get_mut(&scope.integration_id)
-            .and_then(|table| table.remove(id));
-        if let Some(reader) = reader {
-            reader.stop.cancel();
-        }
-    }
-
     pub(crate) fn dispose(&self) {
         if self.closed.is_cancelled() {
             return;
         }
         self.closed.cancel();
-        for reader in self
-            .readers
-            .take()
-            .into_values()
-            .flat_map(HashMap::into_values)
-        {
+        for table in self.tables.take().into_values() {
+            for reader in table.readers.take().into_values() {
+                reader.stop.cancel();
+            }
+        }
+    }
+}
+
+impl ReaderTable {
+    fn get(&self, reference: &Value) -> Result<Rc<Reader>, SessionError> {
+        if !is_agent_resource_ref(reference, KIND, Some(&self.scope)) {
+            return Err(stale_scope("Resource belongs to another execution scope"));
+        }
+        self.readers
+            .borrow()
+            .get(reference["id"].as_str().unwrap_or_default())
+            .cloned()
+            .ok_or_else(|| stale_scope("Resource has retired"))
+    }
+
+    fn retire(&self, id: &str) {
+        let reader = self.readers.borrow_mut().remove(id);
+        if let Some(reader) = reader {
             reader.stop.cancel();
         }
     }
