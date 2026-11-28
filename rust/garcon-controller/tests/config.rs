@@ -25,7 +25,6 @@ fn parse(
             variables: &variables,
             server_root: "/fixture/install",
             process_home: "/fixture/process-home",
-            user_shell: "/bin/bash",
         },
     )
 }
@@ -62,8 +61,8 @@ fn recorded_error(error: ConfigError) -> CaseError {
 fn recorded_configuration_cases_match() {
     const FIXTURE_PROCESS: &str = "GARCON_TEST_CONFIG_FIXTURE_PROCESS";
     if std::env::var_os(FIXTURE_PROCESS).is_none() {
-        // The shared config-directory resolver uses the process's home and cwd.
-        // Give the oracle its fixed paths without changing the other tests' cwd.
+        // The fixture runs at a fixed cwd, but its live HOME must not match
+        // the injected process home that the config parser should use.
         let output = Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
@@ -72,7 +71,7 @@ fn recorded_configuration_cases_match() {
             ])
             .current_dir("/")
             .env(FIXTURE_PROCESS, "1")
-            .env("HOME", "/fixture/process-home")
+            .env("HOME", "/fixture/live-home")
             .output()
             .unwrap();
         assert!(

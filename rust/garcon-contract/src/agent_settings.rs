@@ -52,6 +52,7 @@ pub fn with_agent_setting<'a>(
     }
     let mut entries = envelope.values.as_object().cloned().unwrap_or_default();
     entries.insert(descriptor.key.clone(), value.as_value().clone());
+    // Opaque normalizes JavaScript's integer-index order after insertion.
     Cow::Owned(AgentSettingsEnvelope {
         owner_id: envelope.owner_id.clone(),
         schema_version: envelope.schema_version,

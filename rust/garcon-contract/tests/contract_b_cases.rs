@@ -58,6 +58,89 @@ fn required_text<'a>(function: &str, argument: Option<&'a Value>) -> Result<&'a 
     text(function, argument)?.ok_or_else(|| CaseError::unhandled(function))
 }
 
+fn typed_argument<T: DeserializeOwned>(
+    function: &str,
+    argument: Option<&Value>,
+) -> Result<T, CaseError> {
+    serde_json::from_value(unknown(function, argument)?.into_owned())
+        .map_err(|error| CaseError::undeliverable(error.to_string()))
+}
+
+#[test]
+fn execution_defaults_recordings() {
+    use garcon_contract::execution_defaults::*;
+    use garcon_contract::settings::RemoteExecutionDefaults;
+
+    assert_recording("execution-defaults", |function, args| {
+        Ok(match function {
+            "executionDefaultsForAgent" => {
+                let defaults: Option<RemoteExecutionDefaults> =
+                    typed_argument(function, args.first())?;
+                serialized_record(execution_defaults_for_agent(
+                    defaults.as_ref(),
+                    required_text(function, args.get(1))?,
+                ))
+            }
+            "normalizeSupportedPermissionMode" => {
+                let supported: Vec<_> = typed_argument(function, args.get(1))?;
+                json!(normalize_supported_permission_mode(
+                    unknown(function, args.first())?.as_ref(),
+                    &supported
+                ))
+            }
+            "normalizeSupportedThinkingMode" => {
+                let supported: Vec<_> = typed_argument(function, args.get(1))?;
+                json!(normalize_supported_thinking_mode(
+                    unknown(function, args.first())?.as_ref(),
+                    &supported
+                ))
+            }
+            "isPermissionModeSupported" => {
+                let supported: Vec<_> = typed_argument(function, args.get(1))?;
+                json!(is_permission_mode_supported(
+                    typed_argument(function, args.first())?,
+                    &supported
+                ))
+            }
+            "isThinkingModeSupported" => {
+                let supported: Vec<_> = typed_argument(function, args.get(1))?;
+                json!(is_thinking_mode_supported(
+                    typed_argument(function, args.first())?,
+                    &supported
+                ))
+            }
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+#[test]
+fn execution_defaults_preserve_the_original_settings_wire_format() {
+    use garcon_contract::execution_defaults::execution_defaults_for_agent;
+    use garcon_contract::settings::RemoteExecutionDefaults;
+
+    let input = include_str!("inputs/common/execution-defaults.jsonl")
+        .lines()
+        .last()
+        .unwrap();
+    let original = pinned_bun_stdout(
+        r#"import { executionDefaultsForAgent } from "./common/execution-defaults.ts";
+           console.log(JSON.stringify(executionDefaultsForAgent(...JSON.parse(Bun.argv.at(-1)).args)));"#,
+        &[input],
+    );
+    #[derive(serde::Deserialize)]
+    struct Call {
+        args: (RemoteExecutionDefaults, String),
+    }
+    let Call {
+        args: (defaults, agent_id),
+    } = garcon_js::json::from_str(input).unwrap();
+    assert_eq!(
+        serde_json::to_string(&execution_defaults_for_agent(Some(&defaults), &agent_id)).unwrap(),
+        original.trim_end()
+    );
+}
+
 #[test]
 fn chat_row_contracts_recordings() {
     use garcon_contract::chat_row_contracts::*;
@@ -250,6 +333,84 @@ fn verify_wire_round_trip<T: DeserializeOwned + Serialize>(wire: &str) {
 }
 
 #[test]
+fn model_catalog_round_trips_bun_json() {
+    use garcon_contract::model_catalog::*;
+    let fixtures = pinned_bun_stdout(
+        r#"import "./rust/garcon-contract/tests/inputs/common/model-catalog-wire.ts";"#,
+        &[],
+    );
+    let lines: Vec<_> = fixtures.lines().collect();
+    assert_eq!(lines.len(), 4);
+    assert_eq!(
+        serde_json::to_string(CATALOG_INSTANCE_HEADER).unwrap(),
+        lines[0]
+    );
+    assert_eq!(serde_json::to_string(LOGIN_AGENT_QUERY).unwrap(), lines[1]);
+    for line in &lines[2..4] {
+        verify_wire_round_trip::<ModelCatalogResponse>(line);
+    }
+}
+
+#[test]
+fn models_recordings() {
+    use garcon_contract::models::is_codex_sol_model;
+    assert_recording("models", |function, args| match function {
+        "isCodexSolModel" => Ok(json!(is_codex_sol_model(text(function, args.first())?))),
+        _ => Err(CaseError::unhandled(function)),
+    });
+}
+
+#[test]
+fn model_constants_match_bun() {
+    use garcon_contract::models::*;
+    let original = pinned_bun_stdout(
+        r#"import * as models from "./common/models.ts";
+           console.log(JSON.stringify(models));"#,
+        &[],
+    );
+    let original: Value = garcon_js::json::from_str(&original).unwrap();
+    assert_eq!(
+        original,
+        json!({
+            "CLAUDE_MODELS": CLAUDE_MODELS,
+            "GPT_6_ASTRA_MODEL": GPT_6_ASTRA_MODEL,
+            "GPT_6_2_SOL_MODEL": GPT_6_2_SOL_MODEL,
+            "GPT_6_2_ASTRA_MODEL": GPT_6_2_ASTRA_MODEL,
+            "GPT_6_1_SOL_MODEL": GPT_6_1_SOL_MODEL,
+            "GPT_6_1_TERRA_MODEL": GPT_6_1_TERRA_MODEL,
+            "GPT_6_SOL_MODEL": GPT_6_SOL_MODEL,
+            "GPT_6_LUNA_MODEL": GPT_6_LUNA_MODEL,
+            "CODEX_MODELS": CODEX_MODELS,
+            "AMP_MODELS": AMP_MODELS,
+            "FACTORY_MODELS": FACTORY_MODELS,
+            "PI_MODELS": PI_MODELS,
+            "OPENROUTER_MODELS": OPENROUTER_MODELS,
+            "ALIBABA_CLOUD_MODELS": ALIBABA_CLOUD_MODELS,
+            "FIREWORKS_MODELS": FIREWORKS_MODELS,
+            "GEMINI_MODELS": GEMINI_MODELS,
+            "TOGETHER_MODELS": TOGETHER_MODELS,
+            "ZAI_MODELS": ZAI_MODELS,
+        })
+    );
+}
+
+#[test]
+fn model_routing_recordings() {
+    use garcon_contract::model_routing::*;
+    assert_recording("model-routing", |function, args| {
+        let endpoint_id = required_text(function, args.first())?;
+        let model = required_text(function, args.get(1))?;
+        Ok(match function {
+            "endpointModelOptionValue" => json!(endpoint_model_option_value(endpoint_id, model)),
+            "rawModelFromEndpointOptionValue" => {
+                json!(raw_model_from_endpoint_option_value(endpoint_id, model))
+            }
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+#[test]
 fn agent_execution_dtos_round_trip_bun_json() {
     use garcon_contract::agent_execution::*;
     let fixtures = agent_wire_fixtures();
@@ -356,6 +517,59 @@ fn cloned_agent_settings_preserve_javascript_json_text() {
         serde_json::to_string(&clone_agent_settings(&envelope)).unwrap(),
         original.trim_end()
     );
+}
+
+#[test]
+fn setting_updates_keep_javascript_index_key_order() {
+    use garcon_contract::agent_integration::{
+        AgentSettingDescriptor, parse_agent_settings_envelope,
+    };
+    use garcon_contract::agent_settings::with_agent_setting;
+    use garcon_js::json::Opaque;
+
+    let original = pinned_bun_stdout(
+        r#"import { withAgentSetting } from "./common/agent-settings.ts";
+           const file = Bun.file("rust/garcon-contract/tests/inputs/common/agent-settings.jsonl");
+           for (const line of (await file.text()).trimEnd().split("\n")) {
+             const { fn, args } = JSON.parse(line);
+             if (fn === "withAgentSetting" && args[1].label === "Index or ordinary property")
+               console.log(JSON.stringify(withAgentSetting(...args)));
+           }"#,
+        &[],
+    );
+    let calls = include_str!("inputs/common/agent-settings.jsonl")
+        .lines()
+        .map(|line| garcon_js::json::from_str::<Value>(line).unwrap())
+        .filter(|call| {
+            call["fn"] == "withAgentSetting"
+                && call["args"][1]["label"] == "Index or ordinary property"
+        });
+    assert_eq!(original.lines().count(), 6);
+    let mut checked = 0;
+    for (call, expected) in calls.zip(original.lines()) {
+        let args = &call["args"];
+        let envelope = parse_agent_settings_envelope(&args[0]).unwrap();
+        let descriptor = serde_json::from_value::<AgentSettingDescriptor>(args[1].clone()).unwrap();
+        let updated =
+            with_agent_setting(&envelope, &descriptor, &Opaque::from_value(args[2].clone()));
+        let expected_value: Value = garcon_js::json::from_str(expected).unwrap();
+        assert_eq!(
+            updated
+                .values
+                .as_object()
+                .unwrap()
+                .keys()
+                .collect::<Vec<_>>(),
+            expected_value["values"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(serde_json::to_string(&updated).unwrap(), expected);
+        checked += 1;
+    }
+    assert_eq!(checked, 6);
 }
 
 #[test]

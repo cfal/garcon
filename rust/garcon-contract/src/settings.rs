@@ -2,7 +2,7 @@
 
 use garcon_js::{OptionalNullable, trim, utf16};
 use indexmap::IndexMap;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::agent_integration::{AgentSettingsEnvelope, parse_agent_settings_by_id};
@@ -422,7 +422,7 @@ pub struct RecentAgentSetting {
     pub model_protocol: Option<ApiProtocol>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionDefaults {
     pub permission_mode: PermissionMode,
@@ -430,7 +430,7 @@ pub struct ExecutionDefaults {
     pub agent_settings_by_id: IndexMap<String, AgentSettingsEnvelope>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionDefaultsPatch {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -441,7 +441,7 @@ pub struct ExecutionDefaultsPatch {
     pub agent_settings_by_id: Option<IndexMap<String, AgentSettingsEnvelope>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteExecutionDefaults {
     pub global: ExecutionDefaults,
