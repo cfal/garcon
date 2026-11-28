@@ -5,6 +5,7 @@
 //! depends on an executor crate.
 
 pub mod config;
+mod provider_configuration;
 pub mod server;
 pub mod workspace_lease;
 pub mod workspace_version;
