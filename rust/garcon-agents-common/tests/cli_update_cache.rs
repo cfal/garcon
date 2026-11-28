@@ -171,3 +171,60 @@ async fn reads_a_local_release_channel_and_times_out_during_the_body() {
     };
     tokio::join!(server, client);
 }
+
+#[tokio::test]
+async fn release_lookup_follows_a_cross_origin_redirect_with_garcon_http_policy() {
+    let first = TcpListener::bind("0.0.0.0:0").await.unwrap();
+    let second = TcpListener::bind("0.0.0.0:0").await.unwrap();
+    let url = format!(
+        "http://127.0.0.1:{}/channel",
+        first.local_addr().unwrap().port()
+    );
+    let location = format!(
+        "http://127.0.0.1:{}/release",
+        second.local_addr().unwrap().port()
+    );
+    let redirect = async move {
+        let (mut stream, _) = first.accept().await.unwrap();
+        let request = read_headers(&mut stream).await;
+        assert!(request.starts_with("GET /channel HTTP/1.1\r\n"));
+        let response = format!(
+            "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+    };
+    let release = async move {
+        let (mut stream, _) = second.accept().await.unwrap();
+        let request = read_headers(&mut stream).await.to_ascii_lowercase();
+        assert!(request.starts_with("get /release http/1.1\r\n"));
+        assert!(request.contains("\r\nuser-agent: garcon/"));
+        assert!(request.contains("\r\naccept-encoding: gzip, deflate, br, zstd\r\n"));
+        assert!(!request.contains("\r\nauthorization:"));
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\n1.2.3")
+            .await
+            .unwrap();
+    };
+    let client = async {
+        let version = channel_latest_version(url, |body| Some(body.to_owned()))()
+            .await
+            .unwrap();
+        assert_eq!(version.as_deref(), Some("1.2.3"));
+    };
+    tokio::time::timeout(Duration::from_secs(6), async {
+        tokio::join!(redirect, release, client);
+    })
+    .await
+    .unwrap();
+}
+
+async fn read_headers(stream: &mut tokio::net::TcpStream) -> String {
+    let mut data = Vec::new();
+    let mut chunk = [0; 1024];
+    while !data.ends_with(b"\r\n\r\n") {
+        let count = stream.read(&mut chunk).await.unwrap();
+        assert_ne!(count, 0);
+        data.extend_from_slice(&chunk[..count]);
+    }
+    String::from_utf8(data).unwrap()
+}

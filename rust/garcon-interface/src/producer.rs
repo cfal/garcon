@@ -309,7 +309,8 @@ pub struct AgentProducerBindRequest {
 
 #[async_trait(?Send)]
 pub trait AgentProducers {
-    fn scope(&self) -> &AgentResourceScope;
+    /// Captures the scope of the currently available executor instance.
+    fn scope(&self) -> ExecutorResult<AgentResourceScope>;
     async fn bind(
         &self,
         request: AgentProducerBindRequest,

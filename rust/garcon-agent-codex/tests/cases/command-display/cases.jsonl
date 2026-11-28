@@ -78,15 +78,15 @@
 {"id":"normalizeCodexCommandDisplay#77","fn":"normalizeCodexCommandDisplay","args":["/usr/bin/bash -c 'git status --short'K"],"result":"git status --shortK","origin":"trap:kelvin+append@$.args[0]"}
 {"id":"normalizeCodexCommandDisplay#78","fn":"normalizeCodexCommandDisplay","args":["/ıbin/sh -lc 'git status --short'"],"result":"git status --short","origin":"trap:dotless-i+after-first@$.args[0]"}
 {"id":"normalizeCodexCommandDisplay#79","fn":"normalizeCodexCommandDisplay","args":["/bin/sh -lc 'git status --short'ı"],"result":"git status --shortı","origin":"trap:dotless-i+append@$.args[0]"}
-{"id":"normalizeCodexCommandDisplay#80","fn":"normalizeCodexCommandDisplay","args":["pwsh -NoProfile -Command 'Write-Output hi'"],"result":"Write-Output hi","origin":"../../../home/ubuntu/tmp/agent-codex/command-display-inputs.jsonl:1"}
-{"id":"normalizeCodexCommandDisplay#81","fn":"normalizeCodexCommandDisplay","args":["cmd /C \"\""],"result":"","origin":"../../../home/ubuntu/tmp/agent-codex/command-display-inputs.jsonl:2"}
-{"id":"normalizeCodexCommandDisplay#82","fn":"normalizeCodexCommandDisplay","args":["bash -lc 'echo $HOME'"],"result":"echo $HOME","origin":"../../../home/ubuntu/tmp/agent-codex/command-display-inputs.jsonl:3"}
-{"id":"normalizeCodexCommandDisplay#83","fn":"normalizeCodexCommandDisplay","args":["bash -lc echo#comment"],"result":"bash -lc echo#comment","origin":"../../../home/ubuntu/tmp/agent-codex/command-display-inputs.jsonl:4"}
-{"id":"normalizeCodexCommandDisplay#84","fn":"normalizeCodexCommandDisplay","args":["bash -lc \\*"],"result":"bash -lc \\*","origin":"../../../home/ubuntu/tmp/agent-codex/command-display-inputs.jsonl:5"}
-{"id":"normalizeCodexCommandDisplay#85","fn":"normalizeCodexCommandDisplay","args":["bash -lc \"echo \\$HOME\""],"result":"echo $HOME","origin":"../../../home/ubuntu/tmp/agent-codex/command-display-inputs.jsonl:6"}
-{"id":"normalizeCodexCommandDisplay#86","fn":"normalizeCodexCommandDisplay","args":["bash -lc $'one\\ntwo'"],"result":"one\ntwo","origin":"../../../home/ubuntu/tmp/agent-codex/command-display-inputs.jsonl:7"}
-{"id":"normalizeCodexCommandDisplay#87","fn":"normalizeCodexCommandDisplay","args":["bash -lc $'a\\x00b'"],"result":"a","origin":"../../../home/ubuntu/tmp/agent-codex/command-display-inputs.jsonl:8"}
-{"id":"normalizeCodexCommandDisplay#88","fn":"normalizeCodexCommandDisplay","args":["bash -lc $'\\U0001F600'"],"result":"😀","origin":"../../../home/ubuntu/tmp/agent-codex/command-display-inputs.jsonl:9"}
-{"id":"normalizeCodexCommandDisplay#89","fn":"normalizeCodexCommandDisplay","args":["bash\n-lc 'pwd'"],"result":"pwd","origin":"../../../home/ubuntu/tmp/agent-codex/command-display-inputs.jsonl:10"}
-{"id":"normalizeCodexCommandDisplay#90","fn":"normalizeCodexCommandDisplay","args":["bash -lc echo\\ hi"],"result":"echo hi","origin":"../../../home/ubuntu/tmp/agent-codex/command-display-inputs.jsonl:11"}
-{"id":"normalizeCodexCommandDisplay#91","fn":"normalizeCodexCommandDisplay","args":["bash -lc echo\\\n"],"result":"echo","origin":"../../../home/ubuntu/tmp/agent-codex/command-display-inputs.jsonl:12"}
+{"id":"normalizeCodexCommandDisplay#80","fn":"normalizeCodexCommandDisplay","args":["pwsh -NoProfile -Command 'Write-Output hi'"],"result":"Write-Output hi","origin":"rust/garcon-agent-codex/tests/inputs/command-display.jsonl:1"}
+{"id":"normalizeCodexCommandDisplay#81","fn":"normalizeCodexCommandDisplay","args":["cmd /C \"\""],"result":"","origin":"rust/garcon-agent-codex/tests/inputs/command-display.jsonl:2"}
+{"id":"normalizeCodexCommandDisplay#82","fn":"normalizeCodexCommandDisplay","args":["bash -lc 'echo $HOME'"],"result":"echo $HOME","origin":"rust/garcon-agent-codex/tests/inputs/command-display.jsonl:3"}
+{"id":"normalizeCodexCommandDisplay#83","fn":"normalizeCodexCommandDisplay","args":["bash -lc echo#comment"],"result":"bash -lc echo#comment","origin":"rust/garcon-agent-codex/tests/inputs/command-display.jsonl:4"}
+{"id":"normalizeCodexCommandDisplay#84","fn":"normalizeCodexCommandDisplay","args":["bash -lc \\*"],"result":"bash -lc \\*","origin":"rust/garcon-agent-codex/tests/inputs/command-display.jsonl:5"}
+{"id":"normalizeCodexCommandDisplay#85","fn":"normalizeCodexCommandDisplay","args":["bash -lc \"echo \\$HOME\""],"result":"echo $HOME","origin":"rust/garcon-agent-codex/tests/inputs/command-display.jsonl:6"}
+{"id":"normalizeCodexCommandDisplay#86","fn":"normalizeCodexCommandDisplay","args":["bash -lc $'one\\ntwo'"],"result":"one\ntwo","origin":"rust/garcon-agent-codex/tests/inputs/command-display.jsonl:7"}
+{"id":"normalizeCodexCommandDisplay#87","fn":"normalizeCodexCommandDisplay","args":["bash -lc $'a\\x00b'"],"result":"a","origin":"rust/garcon-agent-codex/tests/inputs/command-display.jsonl:8"}
+{"id":"normalizeCodexCommandDisplay#88","fn":"normalizeCodexCommandDisplay","args":["bash -lc $'\\U0001F600'"],"result":"😀","origin":"rust/garcon-agent-codex/tests/inputs/command-display.jsonl:9"}
+{"id":"normalizeCodexCommandDisplay#89","fn":"normalizeCodexCommandDisplay","args":["bash\n-lc 'pwd'"],"result":"pwd","origin":"rust/garcon-agent-codex/tests/inputs/command-display.jsonl:10"}
+{"id":"normalizeCodexCommandDisplay#90","fn":"normalizeCodexCommandDisplay","args":["bash -lc echo\\ hi"],"result":"echo hi","origin":"rust/garcon-agent-codex/tests/inputs/command-display.jsonl:11"}
+{"id":"normalizeCodexCommandDisplay#91","fn":"normalizeCodexCommandDisplay","args":["bash -lc echo\\\n"],"result":"echo","origin":"rust/garcon-agent-codex/tests/inputs/command-display.jsonl:12"}

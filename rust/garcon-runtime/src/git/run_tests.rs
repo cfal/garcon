@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::ffi::OsString;
 use std::future::Future;
 use std::io;
@@ -11,8 +12,9 @@ use garcon_contract::git_error::{GitServiceError, GitServiceErrorCode};
 use garcon_interface::resources::{ExecutorCallOptions, ExecutorResult};
 use serde_json::json;
 use tempfile::TempDir;
-use tokio::task::LocalSet;
-use tokio::time::{Instant, sleep, timeout};
+use tokio::sync::oneshot;
+use tokio::task::{LocalSet, spawn_blocking};
+use tokio::time::{advance, pause};
 use tokio_util::sync::CancellationToken;
 
 use super::operation_context::{
@@ -54,9 +56,12 @@ impl FakeGit {
     }
 
     async fn await_marker(&self, marker: &str) {
-        timeout(Duration::from_secs(3), async {
-            while !self.0.path().join(marker).exists() {
-                sleep(Duration::from_millis(5)).await;
+        let path = self.0.path().join(marker);
+        spawn_blocking(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            while !path.exists() {
+                assert!(std::time::Instant::now() < deadline, "missing {path:?}");
+                std::thread::sleep(Duration::from_millis(5));
             }
         })
         .await
@@ -81,6 +86,58 @@ fn process_error<T: std::fmt::Debug>(result: ExecutorResult<T>) -> GitProcessErr
 
 async fn locally<F: Future>(future: F) -> F::Output {
     LocalSet::new().run_until(future).await
+}
+
+async fn with_controlled_time<F: Future>(test: F) -> F::Output {
+    locally(async {
+        let (stop, release) = std::sync::mpsc::channel::<()>();
+        let (ready, started) = oneshot::channel();
+        let (expired, watchdog) = oneshot::channel();
+        // An active blocking task inhibits Tokio's paused-clock auto-advance
+        // while the real subprocess is scheduled and its pipes are read.
+        let guard = spawn_blocking(move || {
+            let _ = ready.send(());
+            let _ = release.recv_timeout(Duration::from_secs(10));
+            let _ = expired.send(());
+        });
+        started.await.unwrap();
+        pause();
+        let result = tokio::select! {
+            result = test => result,
+            _ = watchdog => panic!("Git did not settle with its simulated clock"),
+        };
+        drop(stop);
+        guard.await.unwrap();
+        result
+    })
+    .await
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum RunnerEvent {
+    Retry,
+    DeadlineDuringReap,
+}
+
+thread_local! {
+    static EXPECTED_EVENT: RefCell<Option<(RunnerEvent, oneshot::Sender<()>)>> = const {
+        RefCell::new(None)
+    };
+}
+
+fn next_event(event: RunnerEvent) -> oneshot::Receiver<()> {
+    let (sender, receiver) = oneshot::channel();
+    assert!(EXPECTED_EVENT.replace(Some((event, sender))).is_none());
+    receiver
+}
+
+pub(super) fn notify(event: RunnerEvent) {
+    let expected = EXPECTED_EVENT.with_borrow(|next| next.as_ref().map(|(event, _)| *event));
+    if expected == Some(event)
+        && let Some((_, sender)) = EXPECTED_EVENT.take()
+    {
+        let _ = sender.send(());
+    }
 }
 
 #[test]
@@ -268,52 +325,80 @@ const LOCK_FAILURE: &str =
     "echo attempt >> attempts; echo 'fatal: index.lock exists' >&2; exit 128";
 
 #[tokio::test]
-async fn lock_retries_share_the_original_budget_but_push_is_never_retried() {
-    locally(async {
+async fn budget_expiring_between_attempts_preserves_the_last_lock_failure() {
+    with_controlled_time(async {
         let git = FakeGit::new(LOCK_FAILURE);
-        let mut options = git.options();
-        options.timeout_ms = Some(450.0);
-        let started = Instant::now();
-        let error = process_error(
-            timeout(
-                Duration::from_millis(900),
-                run_git(git.cwd(), args("reset"), options),
-            )
-            .await
-            .unwrap(),
-        );
-        assert!(started.elapsed() >= Duration::from_millis(400));
-        assert!(git.attempts() >= 2);
-        assert_eq!(error.timed_out, Some(true));
-        assert!(error.stderr.contains("index.lock"));
-
-        let git = FakeGit::new(LOCK_FAILURE);
+        let retry = next_event(RunnerEvent::Retry);
         let mut options = git.options();
         options.timeout_ms = Some(60.0);
-        let error = process_error(run_git(git.cwd(), args("reset"), options).await);
-        assert_eq!(error.timed_out, Some(true));
+        let command = run_git(git.cwd(), args("reset"), options);
+        retry.await.unwrap();
+        advance(Duration::from_millis(61)).await;
+        let error = process_error(command.await);
+        assert_eq!((error.timed_out, error.code), (Some(true), Some(128)));
+        assert_eq!(error.stderr, "fatal: index.lock exists\n");
         assert_eq!(git.attempts(), 1);
+    })
+    .await;
+}
 
-        let error = process_error(run_git(git.cwd(), args("push"), git.options()).await);
-        assert_eq!(error.code, Some(128));
+#[tokio::test]
+async fn budget_expiring_during_a_retry_reports_that_attempts_empty_stderr() {
+    with_controlled_time(async {
+        let git = FakeGit::new(&format!(
+            r#"if [ -f attempts ]; then
+    echo attempt >> attempts
+    trap ': > terminated; exit 143' TERM
+    : > started
+    while :; do sleep 1; done 2>/dev/null
+fi
+{LOCK_FAILURE}"#
+        ));
+        let retry = next_event(RunnerEvent::Retry);
+        let mut options = git.options();
+        options.timeout_ms = Some(450.0);
+        let command = run_git(git.cwd(), args("reset"), options);
+        retry.await.unwrap();
+        advance(Duration::from_millis(300)).await;
+        git.await_marker("started").await;
+        advance(Duration::from_millis(151)).await;
+        git.await_marker("terminated").await;
+        advance(Duration::from_millis(251)).await;
+        let error = process_error(command.await);
+        assert_eq!((error.timed_out, error.code), (Some(true), Some(143)));
+        assert_eq!(error.stderr, "");
         assert_eq!(git.attempts(), 2);
     })
     .await;
 }
 
 #[tokio::test]
-async fn caller_abort_during_retry_keeps_the_failure_without_spawning_again() {
+async fn push_is_never_retried_after_a_lock_failure() {
     locally(async {
         let git = FakeGit::new(LOCK_FAILURE);
+        let error = process_error(run_git(git.cwd(), args("push"), git.options()).await);
+        assert_eq!(error.code, Some(128));
+        assert_eq!(error.stderr, "fatal: index.lock exists\n");
+        assert_eq!(git.attempts(), 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn caller_abort_during_retry_keeps_the_failure_without_spawning_again() {
+    with_controlled_time(async {
+        let git = FakeGit::new(LOCK_FAILURE);
+        let retry = next_event(RunnerEvent::Retry);
         let signal = CancellationToken::new();
         let mut options = git.options();
         options.signal = Some(signal.clone());
         let command = run_git(git.cwd(), args("reset"), options);
-        git.await_marker("attempts").await;
-        sleep(Duration::from_millis(25)).await;
+        retry.await.unwrap();
         signal.cancel();
+        advance(Duration::from_millis(101)).await;
         let failure = process_error(command.await);
         assert_eq!((failure.aborted, failure.code), (Some(true), Some(128)));
+        assert_eq!(failure.stderr, "fatal: index.lock exists\n");
         assert_eq!(git.attempts(), 1);
     })
     .await;
@@ -321,11 +406,11 @@ async fn caller_abort_during_retry_keeps_the_failure_without_spawning_again() {
 
 #[tokio::test]
 async fn deadline_keeps_running_while_an_aborted_process_waits_to_be_reaped() {
-    locally(async {
+    with_controlled_time(async {
         let git = FakeGit::new(
-            r#"trap '' TERM
-echo active > started
-while :; do sleep 1; done"#,
+            r#"trap ': > terminated' TERM
+: > started
+while :; do sleep 1; done 2>/dev/null"#,
         );
         let signal = CancellationToken::new();
         let mut options = git.options();
@@ -334,6 +419,11 @@ while :; do sleep 1; done"#,
         let command = run_git(git.cwd(), args("reset"), options);
         git.await_marker("started").await;
         signal.cancel();
+        git.await_marker("terminated").await;
+        let deadline = next_event(RunnerEvent::DeadlineDuringReap);
+        advance(Duration::from_millis(181)).await;
+        deadline.await.unwrap();
+        advance(Duration::from_millis(70)).await;
         let error = process_error(command.await);
         assert_eq!(
             (error.timed_out, error.aborted, error.code),
@@ -352,7 +442,8 @@ async fn cancellation_does_not_release_the_operation_before_its_process_group_se
         // The TERM trap cannot complete before the runner escalates to KILL.
         let git = FakeGit::new(
             r#"trap 'while [ ! -f trap-release ]; do sleep 1; done; echo settled > finished; exit 143' TERM
-printf '%s\n' "$$" > started
+printf '%s\n' "$$" > started.tmp
+mv started.tmp started
 while :; do sleep 1; done"#,
         );
         let caller = CancellationToken::new();

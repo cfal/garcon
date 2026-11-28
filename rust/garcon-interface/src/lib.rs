@@ -21,3 +21,4 @@ pub mod terminals;
 pub mod testing;
 pub mod transcript;
 pub mod usage_history;
+pub mod versioned_settings;

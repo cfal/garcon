@@ -1,0 +1,22 @@
+{
+  "module": "server-agents/common/src/auth/cli-login-controller.ts",
+  "tests": [
+    "server-agents/common/src/auth/__tests__/cli-login-controller.test.ts"
+  ],
+  "inputs": "rust/garcon-agents-common/tests/inputs/cli-login-controller.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.args[0].command",
+      "type": "a function",
+      "where": "args",
+      "at": "server-agents/common/src/auth/__tests__/cli-login-controller.test.ts:10:26",
+      "fn": "new CliLoginController",
+      "count": 11
+    }
+  ],
+  "cases": 165,
+  "sha256": "8aaf4af691b5edb5534dbd751c93fe10a1a69ba1303bce24e7917e2761f02b52"
+}

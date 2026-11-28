@@ -126,8 +126,8 @@ impl AgentMigration for Fixture {
 
 #[async_trait(?Send)]
 impl AgentProducers for Fixture {
-    fn scope(&self) -> &AgentResourceScope {
-        &self.host.scope
+    fn scope(&self) -> ExecutorResult<AgentResourceScope> {
+        Ok(self.host.scope.clone())
     }
     async fn bind(
         &self,

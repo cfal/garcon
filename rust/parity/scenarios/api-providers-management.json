@@ -1,0 +1,16 @@
+{
+  "name": "api-providers-management",
+  "description": "Read provider profiles and their executor assignments without any preceding mutation, including the redaction of stored keys and headers.",
+  "server": {
+    "files": {
+      "workspace/workspace-version.json": "{\"version\":10}",
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":5,\"assignments\":{\"local\":[\"profile_one\"],\"11111111-1111-4111-8111-111111111111\":[\"profile_one\"]}}",
+      "config/api-providers.json": "{\"version\":2,\"legacyProviderIds\":[],\"apiProviders\":[{\"id\":\"profile_one\",\"revision\":3,\"label\":\"Fixture\",\"createdAt\":\"2020-01-01T00:00:00.000Z\",\"updatedAt\":\"2020-01-02T00:00:00.000Z\",\"endpoints\":[{\"id\":\"profile_one_openai\",\"protocol\":\"openai-compatible\",\"baseUrl\":\"https://provider.example.invalid/v1/\",\"apiKey\":\"SyntheticPrivateCredential\",\"headers\":{\"X-Synthetic-Test\":\"private-header\"},\"defaultModel\":\"default\",\"models\":[{\"value\":\"other\",\"label\":\"Other model\",\"isLocal\":true}]}]}]}"
+    }
+  },
+  "steps": [
+    {"name":"read-redacted-profile","http":{"method":"GET","path":"/api/v1/api-providers"}},
+    {"name":"read-assignments-after-startup-prune","http":{"method":"GET","path":"/api/v1/api-provider-assignments"}},
+    {"name":"deny-missing-session","http":{"method":"GET","path":"/api/v1/api-providers","auth":"none"}}
+  ]
+}

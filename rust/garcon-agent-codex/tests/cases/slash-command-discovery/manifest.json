@@ -1,0 +1,22 @@
+{
+  "module": "server-agents/codex/src/agents/codex/slash-command-discovery.ts",
+  "tests": [
+    "server-agents/codex/src/agents/codex/__tests__/slash-command-discovery.test.js"
+  ],
+  "inputs": "rust/garcon-agent-codex/tests/inputs/slash-command-discovery.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.args[0].createClient",
+      "type": "a function",
+      "where": "args",
+      "at": "server-agents/codex/src/agents/codex/__tests__/slash-command-discovery.test.js:65:27",
+      "fn": "new CodexSkillDiscovery",
+      "count": 1
+    }
+  ],
+  "cases": 69,
+  "sha256": "e10b76c9238cd1608071fdd421b3b4051cab368148b0195fd7599af4d6c50c2c"
+}

@@ -1,0 +1,14 @@
+{
+  "module": "server-agents/opencode/src/agents/opencode/permission-tool-converter.ts",
+  "tests": [
+    "server-agents/opencode/src/agents/opencode/__tests__/permissions.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 63,
+  "sha256": "15f268689e1be863c27abec5dccc8c15ac3bd78d5b0a6cd3f893e653dc0a386b"
+}

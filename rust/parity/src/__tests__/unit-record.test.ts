@@ -116,6 +116,14 @@ const line = (record: CaptureRecord): string => 'notCaptured' in record
 const undefinedMarker = { $: 'undefined' };
 
 describe('captureTests', () => {
+  test('caps explicitly concurrent Bun tests at one', async () => {
+    const records = await captureTests(repoRoot, resolve(repoRoot, fixture('functions.ts')), [fixture('concurrency.calls.ts')]);
+    expect(records.map(line)).toEqual([
+      'echo ["first"] => "first"',
+      'echo ["second"] => "second"',
+    ]);
+  });
+
   test('records every call to function declarations: returned, thrown, async, and from another export', async () => {
     const records = await captureTests(repoRoot, resolve(repoRoot, fixture('functions.ts')), [fixture('functions.calls.ts')]);
     expect(records.map(line)).toEqual([

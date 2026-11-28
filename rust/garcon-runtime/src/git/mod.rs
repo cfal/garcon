@@ -46,7 +46,7 @@ mod comparison_tests;
 mod diff_engine_tests;
 #[cfg(test)]
 #[path = "../../tests/support/git_fixture.rs"]
-mod git_fixture;
+pub(crate) mod git_fixture;
 #[cfg(test)]
 mod mutation_tests;
 #[cfg(test)]

@@ -15,9 +15,13 @@ async-trait.workspace = true
 bcrypt = "0.19.3"
 garcon-base.workspace = true
 garcon-contract.workspace = true
+garcon-interface.workspace = true
 garcon-js.workspace = true
+garcon-link.workspace = true
 getrandom = "0.4"
+indexmap.workspace = true
 jsonwebtoken = { version = "12", default-features = false, features = ["rust_crypto"] }
+percent-encoding = "2"
 regex = "1"
 rusqlite.workspace = true
 serde.workspace = true
@@ -25,7 +29,8 @@ serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tokio-util.workspace = true
+tokio-util = { workspace = true, features = ["rt"] }
+url.workspace = true
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]

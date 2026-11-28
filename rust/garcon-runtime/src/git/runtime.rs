@@ -14,17 +14,25 @@ use garcon_base::path_boundary::{
 use garcon_base::unhandled_rejection_policy::{
     UnhandledRejectionPolicy, install_unhandled_rejection_policy,
 };
+use garcon_contract::gh::{
+    CreatePullRequestCommentRequest, GetPullRequestRequest, GetPullRequestReviewTargetRequest,
+    GhMethod, GhStatusRequest, GhStatusResponse, ListPullRequestsRequest,
+    MinimizePullRequestCommentRequest, PullRequestCommentMinimized, PullRequestCommentRef,
+    PullRequestDetail, PullRequestListResult, PullRequestReviewTarget, is_gh_mutation,
+};
 use garcon_contract::git::GitMethod;
 use garcon_contract::git_diagnostics::{
     GitCommandDiagnostics, GitOperationDiagnostics, GitReviewRouteMetrics,
 };
 use garcon_contract::git_error::{GitServiceError, GitServiceErrorCode as Code};
 use garcon_contract::git_execution::{
-    ExecutionGitResult, GIT_MAX_CONCURRENT_QUERIES, GitExecutorScope, is_git_mutation,
+    ExecutionGhResult, ExecutionGitResult, GIT_MAX_CONCURRENT_QUERIES, GitExecutorScope,
+    gh_operation_timeout_ms, is_git_mutation,
 };
-use garcon_contract::git_request_validation::validate_git_request;
-use garcon_contract::git_result_validation::validate_git_result;
+use garcon_contract::git_request_validation::{validate_gh_request, validate_git_request};
+use garcon_contract::git_result_validation::{validate_gh_result, validate_git_result};
 use garcon_interface::errors::{AgentCallError, AgentDeliveryOutcome};
+use garcon_interface::git::ExecutionGhService;
 use garcon_interface::resources::{ExecutorCallOptions, ExecutorResult};
 use garcon_js::{Number, path::native};
 use indexmap::{IndexMap, IndexSet};
@@ -35,6 +43,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::ChildEnvironment;
 use crate::cancellation::check_cancelled;
+use crate::gh::gh_service::GhOperations;
 
 use super::git_error_classifier::classify_git_error;
 use super::git_service::GitOperations;
@@ -45,7 +54,7 @@ use super::repository_coordination::with_repository_mutation;
 use super::review_diff_batch::GitReviewDiffBatchContext;
 use super::review_document_registry::GitReviewDocumentRegistry;
 use super::run::{read_only_git_options, resolve_path_within_project, run_git};
-use super::service_errors::git_service_error;
+use super::service_errors::{gh_service_error, git_service_error};
 use super::types::{GitCommandOptions, GitCommandTrace};
 use super::worktrees::ProjectPathAllowed;
 
@@ -151,6 +160,25 @@ struct Admission {
     runtime: Rc<GitRuntimeState>,
 }
 
+impl Admission {
+    async fn run<R: 'static>(
+        self,
+        work: impl Future<Output = ExecutorResult<R>> + 'static,
+    ) -> ExecutorResult<R> {
+        let state = self.runtime.clone();
+        let (sender, receiver) = oneshot::channel();
+        // A lost reply cannot release a lock or capacity while subprocesses are active.
+        spawn_local(async move {
+            let result = work.await;
+            drop(self);
+            if let Err(Err(error)) = sender.send(result) {
+                state.unhandled.report(ErrorInput::Error(error.as_ref()));
+            }
+        });
+        receiver.await?
+    }
+}
+
 impl Drop for Admission {
     fn drop(&mut self) {
         let count = self.runtime.admitted_count(self.mutation);
@@ -177,6 +205,7 @@ struct GitRuntimeState {
     reads: Cell<usize>,
     mutations: Cell<usize>,
     operations: GitOperations,
+    gh: GhOperations,
     unhandled: UnhandledRejectionPolicy,
 }
 
@@ -187,6 +216,7 @@ impl GitRuntime {
         });
         let operations =
             GitOperations::new(configuration.review_registry.clone(), boundary.clone());
+        let gh = GhOperations::new(boundary.base.clone());
         Self {
             state: Rc::new(GitRuntimeState {
                 configuration,
@@ -195,6 +225,7 @@ impl GitRuntime {
                 reads: Cell::new(0),
                 mutations: Cell::new(0),
                 operations,
+                gh,
                 unhandled: install_unhandled_rejection_policy(Rc::new(create_logger(
                     "git:runtime",
                 ))),
@@ -237,19 +268,157 @@ impl GitRuntime {
             Ok(admission) => admission,
             Err(error) => return state.finish(Err(error), &requested_path, fallback),
         };
-        let (sender, receiver) = oneshot::channel();
-        // The reply does not own the operation: a disconnected caller cannot unlock
-        // a repository or free capacity while its Git subprocesses are still running.
-        spawn_local(async move {
-            let result = state
-                .run(method, input, &requested_path, options, signal, operation)
-                .await;
-            drop(admission);
-            if let Err(Err(error)) = sender.send(state.finish(result, &requested_path, fallback)) {
-                state.unhandled.report(ErrorInput::Error(error.as_ref()));
+        admission
+            .run(async move {
+                let result = state
+                    .run(method, input, &requested_path, options, signal, operation)
+                    .await;
+                state.finish(result, &requested_path, fallback)
+            })
+            .await
+    }
+
+    async fn invoke_gh<Q, R>(
+        &self,
+        method: GhMethod,
+        request: Q,
+        options: Option<ExecutorCallOptions>,
+        operation: impl for<'run> AsyncFnOnce(
+            &'run GhOperations,
+            Q,
+            Option<&'run CancellationToken>,
+        ) -> ExecutorResult<R>
+        + 'static,
+    ) -> ExecutorResult<ExecutionGhResult<R>>
+    where
+        Q: Serialize + DeserializeOwned,
+        R: Serialize + 'static,
+    {
+        let mut input = wire_value(&request)?;
+        validate_gh_request(method, &input)?;
+        let mutation = is_gh_mutation(method);
+        let state = self.state.clone();
+        let signal = state.abort.child_token();
+        let max_timeout = gh_operation_timeout_ms(method) as f64;
+        let mut options = options.unwrap_or_default();
+        options.timeout_ms = Some(
+            options
+                .timeout_ms
+                .unwrap_or(max_timeout)
+                .min(max_timeout)
+                .max(1.0),
+        );
+        state.available(Some(&options)).map_err(gh_service_error)?;
+        let admission = state
+            .take_admission(&format!("gh.{}", method.as_str()), mutation, signal.clone())
+            .map_err(gh_service_error)?;
+        admission.run(async move {
+            let result = state.run_scoped(mutation, Some(options), signal, async |call_options| {
+                if method != GhMethod::GetStatus {
+                    let project = state.repository(input["projectPath"].as_str().unwrap_or_default(), &call_options).await?;
+                    state.available(Some(&call_options))?;
+                    input["projectPath"] = Value::String(project);
+                }
+                let input = serde_json::from_value(input)?;
+                operation(&state.gh, input, call_options.signal.as_ref()).await
+            }).await.map_err(gh_service_error)?;
+            let response = ExecutionGhResult { result, scope: state.configuration.scope.clone() };
+            if let Err(error) = validate_gh_result(method, &wire_value(&response)?, &state.configuration.scope) {
+                if mutation {
+                    return Err(GitServiceError::new(Code::GIT_MUTATION_OUTCOME_UNKNOWN,
+                        "GitHub change could not be confirmed. Check the pull request before trying again.",
+                    ).into());
+                }
+                return Err(error.into());
             }
-        });
-        receiver.await?
+            Ok(response)
+        }).await
+    }
+}
+
+#[async_trait(?Send)]
+impl ExecutionGhService for GitRuntime {
+    async fn get_status(
+        &self,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<ExecutionGhResult<GhStatusResponse>> {
+        self.invoke_gh(
+            GhMethod::GetStatus,
+            GhStatusRequest {},
+            options,
+            async |gh, _, signal| gh.get_status(signal).await,
+        )
+        .await
+    }
+
+    async fn list_pull_requests(
+        &self,
+        request: ListPullRequestsRequest,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<ExecutionGhResult<PullRequestListResult>> {
+        self.invoke_gh(
+            GhMethod::ListPullRequests,
+            request,
+            options,
+            async |gh, request, signal| gh.list_pull_requests(request, signal).await,
+        )
+        .await
+    }
+
+    async fn get_pull_request(
+        &self,
+        request: GetPullRequestRequest,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<ExecutionGhResult<PullRequestDetail>> {
+        self.invoke_gh(
+            GhMethod::GetPullRequest,
+            request,
+            options,
+            async |gh, request, signal| gh.get_pull_request(request, signal).await,
+        )
+        .await
+    }
+
+    async fn get_pull_request_review_target(
+        &self,
+        request: GetPullRequestReviewTargetRequest,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<ExecutionGhResult<PullRequestReviewTarget>> {
+        self.invoke_gh(
+            GhMethod::GetPullRequestReviewTarget,
+            request,
+            options,
+            async |gh, request, signal| gh.get_pull_request_review_target(request, signal).await,
+        )
+        .await
+    }
+
+    async fn create_pull_request_comment(
+        &self,
+        request: CreatePullRequestCommentRequest,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<ExecutionGhResult<PullRequestCommentRef>> {
+        self.invoke_gh(
+            GhMethod::CreatePullRequestComment,
+            request,
+            options,
+            async |gh, request, signal| gh.create_pull_request_comment(request, signal).await,
+        )
+        .await
+    }
+
+    async fn minimize_pull_request_comment(
+        &self,
+        request: MinimizePullRequestCommentRequest,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<ExecutionGhResult<PullRequestCommentMinimized>> {
+        self.invoke_gh(
+            GhMethod::MinimizePullRequestComment,
+            request,
+            options,
+            async |gh, request, signal| gh.minimize_pull_request_comment(request, signal).await,
+        )
+        .await
     }
 }
 

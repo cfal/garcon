@@ -1,0 +1,14 @@
+{
+  "module": "server/runtime/gh/gh-error-classifier.ts",
+  "tests": [
+    "server/runtime/gh/__tests__/gh-error-classifier.test.js",
+    "rust/garcon-runtime/tests/oracles/gh-classifier-inputs.suite.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 73,
+  "sha256": "42332d6e63598fc1abdf5cbeeab4760c84807d6af6f71824ace452a86054f6c2"
+}

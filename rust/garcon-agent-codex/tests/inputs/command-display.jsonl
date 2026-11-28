@@ -1,0 +1,12 @@
+{"fn":"normalizeCodexCommandDisplay","args":["pwsh -NoProfile -Command 'Write-Output hi'"]}
+{"fn":"normalizeCodexCommandDisplay","args":["cmd /C \"\""]}
+{"fn":"normalizeCodexCommandDisplay","args":["bash -lc 'echo $HOME'"]}
+{"fn":"normalizeCodexCommandDisplay","args":["bash -lc echo#comment"]}
+{"fn":"normalizeCodexCommandDisplay","args":["bash -lc \\*"]}
+{"fn":"normalizeCodexCommandDisplay","args":["bash -lc \"echo \\$HOME\""]}
+{"fn":"normalizeCodexCommandDisplay","args":["bash -lc $'one\\ntwo'"]}
+{"fn":"normalizeCodexCommandDisplay","args":["bash -lc $'a\\x00b'"]}
+{"fn":"normalizeCodexCommandDisplay","args":["bash -lc $'\\U0001F600'"]}
+{"fn":"normalizeCodexCommandDisplay","args":["bash\n-lc\u00a0'pwd'"]}
+{"fn":"normalizeCodexCommandDisplay","args":["bash -lc echo\\ hi"]}
+{"fn":"normalizeCodexCommandDisplay","args":["bash -lc echo\\\n"]}
