@@ -1,0 +1,11 @@
+{
+  "module": "common/terminal-identity.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/terminal-identity.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 16,
+  "sha256": "7b2fca7a998a1d88ae779417a6d77c60f9cc10c4dbd9805c3e1d678d5aff34de"
+}

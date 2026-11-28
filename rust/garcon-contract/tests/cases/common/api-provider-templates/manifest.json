@@ -1,0 +1,11 @@
+{
+  "module": "common/api-provider-templates.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/api-provider-templates.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 18,
+  "sha256": "5aba0cb9a4ba8c996bef81398e485fb3370e3cce13355962e1fd874561681301"
+}
