@@ -1063,11 +1063,14 @@ name = "garcon-execution"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "bytes",
+ "futures",
  "garcon-base",
  "garcon-cases",
  "garcon-contract",
  "garcon-interface",
  "garcon-js",
+ "garcon-link",
  "indexmap",
  "serde",
  "serde_json",

@@ -17,6 +17,7 @@ pub mod execution_ownership;
 pub mod queue_drainer;
 pub mod queue_steer_error;
 pub mod queued_steer_delivery;
+pub mod remote_client;
 pub mod runtime_router_errors;
 pub mod session_types;
 pub mod steer_input_delivery;
