@@ -1,6 +1,8 @@
 //! Ports `server-agents/opencode/src/agents/opencode/`.
 
 pub mod compaction_routing;
+pub mod endpoint_coordinator;
+pub mod global_event_listener;
 pub mod instance_lifecycle;
 pub mod jsonc;
 pub mod model_catalog;

@@ -176,7 +176,10 @@ impl SharedError {
 
 impl From<Box<dyn Error>> for SharedError {
     fn from(error: Box<dyn Error>) -> Self {
-        Self(Rc::from(error))
+        match error.downcast::<Self>() {
+            Ok(shared) => *shared,
+            Err(error) => Self(Rc::from(error)),
+        }
     }
 }
 

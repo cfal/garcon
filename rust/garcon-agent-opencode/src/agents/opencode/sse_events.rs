@@ -97,6 +97,7 @@ pub async fn stream_global_events(
                 if event.kind == "server.connected" {
                     connected = true;
                     on_connected();
+                    tokio::task::yield_now().await;
                     continue;
                 }
                 if !connected {
