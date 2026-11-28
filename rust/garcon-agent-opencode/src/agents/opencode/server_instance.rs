@@ -22,6 +22,7 @@ use tokio::{
     sync::oneshot,
     task::spawn_local,
 };
+use tokio_util::task::TaskTracker;
 
 use super::instance_lifecycle::{OpenCodeInstance, OpenCodeServer, OpenCodeServerTermination};
 use super::jsonc::{self, ParseOptions};
@@ -214,17 +215,23 @@ fn process_platform() -> &'static str {
     }
 }
 
-pub async fn create_open_code_instance(
+pub(super) async fn create_open_code_instance(
     signal: AbortSignal,
+    processes: TaskTracker,
 ) -> ExecutorResult<Rc<OpenCodeInstance>> {
-    create_open_code_instance_at(OsStr::new("opencode"), signal).await
+    create_open_code_instance_at(OsStr::new("opencode"), signal, &processes).await
 }
 
 async fn create_open_code_instance_at(
     executable: &OsStr,
     signal: AbortSignal,
+    processes: &TaskTracker,
 ) -> ExecutorResult<Rc<OpenCodeInstance>> {
     signal.throw_if_aborted()?;
+    if processes.is_closed() {
+        return Err(error("Error", "OpenCode runtime is shutting down"));
+    }
+    let lifetime = processes.token();
     let environment = build_open_code_server_env(None, None, None)?;
     let mut child = Command::new(executable)
         .args(["serve", "--hostname=127.0.0.1", "--port=0"])
@@ -250,6 +257,7 @@ async fn create_open_code_instance_at(
             drop(stderr);
             if matches!(stopping, Ok(None)) {
                 spawn_local(async move {
+                    let _lifetime = lifetime;
                     let _ = wait_after_process_stop(&mut child).await;
                 });
             }
@@ -264,6 +272,7 @@ async fn create_open_code_instance_at(
     spawn_local({
         let exit_observed = exit_observed.clone();
         async move {
+            let _lifetime = lifetime;
             let outcome = observe_process(child, stdout, stderr, closing).await;
             exit_observed.set(true);
             let _ = terminated.send(outcome);
@@ -489,11 +498,16 @@ exec /bin/sleep 60\n";
         (directory, path)
     }
 
+    async fn start_fake_cli(path: &std::path::Path) -> ExecutorResult<Rc<OpenCodeInstance>> {
+        create_open_code_instance_at(path.as_os_str(), AbortSignal::new(), &TaskTracker::new())
+            .await
+    }
+
     #[tokio::test]
     async fn observes_the_real_child_pid_terminating_after_readiness() {
         LocalSet::new().run_until(async {
             let (_directory, path) = fake_cli(START);
-            let instance = timeout(Duration::from_secs(5), create_open_code_instance_at(path.as_os_str(), AbortSignal::new())).await
+            let instance = timeout(Duration::from_secs(5), start_fake_cli(&path)).await
                 .expect("ready within fixture deadline").expect("fake CLI ready");
             assert_eq!(instance.base_url.as_deref(), Some("http://127.0.0.1:12345"));
             let server = instance.server.as_ref().expect("process lifetime");
@@ -509,11 +523,172 @@ exec /bin/sleep 60\n";
         }).await;
     }
 
+    #[cfg(target_os = "linux")]
+    const WRAPPED_START: &str = "\
+/bin/sleep 60 &\n\
+child=$!\n\
+trap 'kill -TERM \"$child\"; wait \"$child\"; exit 0' TERM\n\
+printf '%s %s' \"$$\" \"$child\" > \"$0.pid\"\n\
+[ -e \"$0.hold\" ] || printf 'opencode server listening on http://127.0.0.1:12345\\n'\n\
+wait \"$child\"\n";
+
+    #[cfg(target_os = "linux")]
+    fn live_identity(pid: Pid) -> Option<String> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let fields = stat
+            .rsplit_once(") ")?
+            .1
+            .split_whitespace()
+            .collect::<Vec<_>>();
+        (fields.first() != Some(&"Z")).then(|| fields.get(19).unwrap().to_string())
+    }
+
+    #[cfg(target_os = "linux")]
+    #[derive(Clone, Copy)]
+    enum StopPhase {
+        Ready,
+        Starting,
+        Retired,
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn stop_with_wrapper_and_child(phase: StopPhase) {
+        use garcon_interface::services::AgentLifecycle;
+
+        use crate::agents::opencode::{
+            opencode::OpenCodeRuntime, runtime_options::OpenCodeRuntimeOptions,
+        };
+
+        let (_directory, path) = fake_cli(WRAPPED_START);
+        if matches!(phase, StopPhase::Starting) {
+            std::fs::write(path.with_extension("hold"), "").unwrap();
+        }
+        let local = LocalSet::new();
+        let identities = local
+            .run_until(async {
+                let processes = TaskTracker::new();
+                let runtime = OpenCodeRuntime::new_with_process_tracker(
+                    OpenCodeRuntimeOptions {
+                        create_instance: Some(Rc::new({
+                            let path = path.clone();
+                            let processes = processes.clone();
+                            move |signal| {
+                                let path = path.clone();
+                                let processes = processes.clone();
+                                async move {
+                                    create_open_code_instance_at(
+                                        path.as_os_str(),
+                                        signal,
+                                        &processes,
+                                    )
+                                    .await
+                                }
+                                .boxed_local()
+                            }
+                        })),
+                        ..Default::default()
+                    },
+                    processes.clone(),
+                );
+                let lifecycle = crate::integration::create_lifecycle(runtime.clone());
+                lifecycle.start().await.unwrap();
+                let mut startup = None;
+                let mut prior = None;
+                match phase {
+                    StopPhase::Ready => {
+                        runtime.get_client().await.unwrap();
+                    }
+                    StopPhase::Starting => {
+                        startup = Some(spawn_local(async move { runtime.get_client().await }));
+                    }
+                    StopPhase::Retired => {
+                        prior = Some(
+                            create_open_code_instance_at(
+                                path.as_os_str(),
+                                AbortSignal::new(),
+                                &processes,
+                            )
+                            .await
+                            .unwrap(),
+                        );
+                    }
+                }
+                let pids = timeout(Duration::from_secs(5), async {
+                    loop {
+                        if let Ok(pids) =
+                            tokio::fs::read_to_string(path.with_extension("pid")).await
+                            && pids.split_whitespace().count() == 2
+                        {
+                            break pids;
+                        }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .unwrap();
+                let identities = pids
+                    .split_whitespace()
+                    .map(|pid| {
+                        let pid = Pid::from_raw(pid.parse().unwrap());
+                        (
+                            pid,
+                            live_identity(pid).expect("owned process is alive before stop"),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(identities.len(), 2);
+                if let Some(prior) = prior {
+                    close_open_code_instance(&prior);
+                }
+                lifecycle.stop().await.unwrap();
+                if let Some(startup) = startup {
+                    let failure = startup
+                        .await
+                        .unwrap()
+                        .err()
+                        .expect("shutdown aborts startup");
+                    assert_eq!(failure.to_string(), "OpenCode runtime shutting down");
+                }
+                identities
+            })
+            .await;
+        drop(local);
+        let mut survivors = Vec::new();
+        for (pid, identity) in identities {
+            if live_identity(pid).as_deref() == Some(&identity) {
+                survivors.push(pid);
+                let _ = kill(pid, Signal::SIGKILL);
+            }
+        }
+        assert!(
+            survivors.is_empty(),
+            "OpenCode wrapper or child survived worker exit: {survivors:?}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn lifecycle_stop_reaps_its_real_wrapper_and_child_before_the_worker_exits() {
+        stop_with_wrapper_and_child(StopPhase::Ready).await;
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn lifecycle_stop_reaps_a_child_that_never_became_ready() {
+        stop_with_wrapper_and_child(StopPhase::Starting).await;
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn lifecycle_stop_joins_a_previously_retired_child() {
+        stop_with_wrapper_and_child(StopPhase::Retired).await;
+    }
+
     #[tokio::test]
     async fn reports_early_process_exit_with_startup_output() {
         LocalSet::new().run_until(async {
             let (_directory, path) = fake_cli("printf 'bad configuration\\n' >&2; exit 23\n");
-            let result = timeout(Duration::from_secs(5), create_open_code_instance_at(path.as_os_str(), AbortSignal::new())).await.expect("fixture deadline");
+            let result = timeout(Duration::from_secs(5), start_fake_cli(&path)).await.expect("fixture deadline");
             assert_eq!(result.err().expect("startup rejected").to_string(), "OpenCode server exited before startup with code 23\nServer output: bad configuration");
         }).await;
     }
@@ -522,7 +697,7 @@ exec /bin/sleep 60\n";
     async fn closing_the_child_is_idempotent_and_reaps_it() {
         LocalSet::new().run_until(async {
             let (_directory, path) = fake_cli(START);
-            let instance = timeout(Duration::from_secs(5), create_open_code_instance_at(path.as_os_str(), AbortSignal::new())).await
+            let instance = timeout(Duration::from_secs(5), start_fake_cli(&path)).await
                 .expect("fixture deadline").expect("fake CLI ready");
             let termination = instance.server.as_ref().and_then(|server| server.termination.clone()).expect("termination promise");
             close_open_code_instance(&instance);
@@ -536,7 +711,7 @@ exec /bin/sleep 60\n";
     async fn escalates_after_the_grace_period_when_the_child_ignores_term() {
         LocalSet::new().run_until(async {
             let (_directory, path) = fake_cli(&format!("trap '' TERM\n{START}"));
-            let instance = timeout(Duration::from_secs(5), create_open_code_instance_at(path.as_os_str(), AbortSignal::new())).await
+            let instance = timeout(Duration::from_secs(5), start_fake_cli(&path)).await
                 .expect("fixture deadline").expect("fake CLI ready");
             let mut termination = instance.server.as_ref().and_then(|server| server.termination.clone()).expect("termination promise");
             tokio::time::pause();
