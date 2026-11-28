@@ -150,4 +150,53 @@ describe('a scenario run against the stand-in controller', () => {
     expect(replayPassed([withoutMismatches])).toBe(false);
     expect(replayPassed([withoutMismatches], true)).toBe(true);
   });
+
+  for (const clientRequestId of ['probe-request', undefined]) {
+    const request: Json = clientRequestId === undefined ? { type: 'chat-subscribe' } : { type: 'chat-subscribe', clientRequestId };
+    const correlation = clientRequestId === undefined ? 'uncorrelated fault' : 'correlated reply';
+    test(`classifies a marked WebSocket ${correlation} and blocks its dependent steps`, async () => {
+      const replay: Scenario = {
+        name: 'socket-dependencies',
+        description: 'The native WebSocket reply marks an unported operation.',
+        steps: [
+          { name: 'socket', ws: { path: '/probe-ws', send: [request], frames: 1 } },
+          { name: 'direct', http: { method: 'GET', path: '/api/v1/things/{{socket.body.id}}' } },
+          { name: 'transitive', http: { method: 'GET', path: '/api/v1/things/{{direct.body.id}}' } },
+          { name: 'status', http: { method: 'GET', path: '/api/v1/auth/status' } },
+        ],
+      };
+      const runs = await runScenario(repoRoot, { ...probe, command: [...probe.command, '--ws-unported'] }, replay);
+      expect(runs[0]?.capture).toMatchObject({ opened: true, frames: [{
+        type: clientRequestId === undefined ? 'ws-fault' : 'client-request-error', garconRsUnported: true,
+      }] });
+      expect(runs.map((run) => run.unavailable ?? null)).toEqual([
+        { kind: 'unported' }, { kind: 'blocked', supplier: 'socket' }, { kind: 'blocked', supplier: 'direct' }, null,
+      ]);
+      expect(runs.slice(1, 3).map((run) => run.capture)).toEqual([null, null]);
+      const result = compareScenario({ scenario: replay.name, cases: replay.steps.map(({ name }) => ({
+        name, expected: name === 'status' ? runs[3]!.capture : { status: 200 }, noise: [],
+      })) }, runs, replay.name);
+      const report = renderReport('socket-probe', [result], true);
+      expect(report).toContain('| socket-dependencies | 1/4 | 1/4 | 1 | 2 | 0 |');
+      expect(report).toContain('socket-dependencies/direct: blocked by socket');
+      expect(report).toContain('socket-dependencies/transitive: blocked by direct');
+      expect(replayPassed([result])).toBe(false);
+      expect(replayPassed([result], true)).toBe(true);
+    });
+  }
+
+  test('compares an unmarked WebSocket error even when unported cases are allowed', async () => {
+    const replay: Scenario = {
+      name: 'unmarked-socket', description: 'An ordinary error stays a mismatch.',
+      steps: [{ name: 'socket', ws: { path: '/probe-ws', send: [{ type: 'chat-subscribe', clientRequestId: 'probe-request' }], frames: 1 } }],
+    };
+    const runs = await runScenario(repoRoot, probe, replay);
+    expect(runs[0]?.unavailable).toBeUndefined();
+    const expected = structuredClone(runs[0]!.capture) as { frames: { message: string }[] };
+    expected.frames[0]!.message = 'the expected error';
+    const golden: Golden = { scenario: replay.name, cases: [{ name: 'socket', expected, noise: [] }] };
+    const result = compareScenario(golden, runs, replay.name);
+    expect(result.cases[0]?.difference).toMatchObject({ path: '$.frames[0].message', actual: '"not ported"' });
+    expect(replayPassed([result], true)).toBe(false);
+  });
 });
