@@ -88,6 +88,7 @@ fn git_and_gh_rpc_payloads_round_trip_bun_json() {
                         result: GitResults::GetQuickSummary(typed.result),
                         scope: typed.scope,
                         diagnostics: typed.diagnostics,
+                        output_truncated: None,
                     },
                 );
             }

@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agents-common/tests/oracles/direct-helpers.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/direct-helpers.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 34,
+  "sha256": "fdf736809aa38a55f2bef3e72efbc5c737bd71951d05cf208c350fce902db60f"
+}

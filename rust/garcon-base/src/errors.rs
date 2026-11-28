@@ -2,7 +2,9 @@
 
 use std::borrow::Cow;
 use std::error::Error;
+use std::fmt;
 use std::io;
+use std::rc::Rc;
 
 use garcon_contract::{
     chat_id::InvalidChatIdError, git_error::GitServiceError,
@@ -91,6 +93,45 @@ impl DiagnosticError for NamedError {
     }
 }
 
+/// Keeps one non-cloneable failure, and its diagnostics, for multiple waiters.
+#[derive(Debug)]
+pub struct SharedDiagnosticError {
+    source: Rc<dyn Error>,
+    name: String,
+    code: Option<String>,
+}
+
+impl SharedDiagnosticError {
+    pub fn new(source: Rc<dyn Error>, metadata: ErrorMetadata<'_>) -> Self {
+        Self {
+            source,
+            name: metadata.name.to_owned(),
+            code: metadata.code.map(str::to_owned),
+        }
+    }
+}
+
+impl fmt::Display for SharedDiagnosticError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self.source.as_ref(), formatter)
+    }
+}
+
+impl Error for SharedDiagnosticError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
+impl DiagnosticError for SharedDiagnosticError {
+    fn diagnostic_metadata(&self) -> ErrorMetadata<'_> {
+        ErrorMetadata {
+            name: &self.name,
+            code: self.code.as_deref(),
+        }
+    }
+}
+
 pub fn error_message<'a>(error: ErrorInput<'a>, fallback: Option<&'a str>) -> Cow<'a, str> {
     match error {
         ErrorInput::Error(error) => Cow::Owned(error.to_string()),
@@ -132,6 +173,9 @@ fn structured_error_code(error: ErrorInput<'_>) -> Option<&str> {
 
 /// Reads a shared error's original class name and code independently.
 pub fn error_metadata<'a>(error: &'a (dyn Error + 'static)) -> ErrorMetadata<'a> {
+    if let Some(error) = error.downcast_ref::<SharedDiagnosticError>() {
+        return error.diagnostic_metadata();
+    }
     if let Some(error) = error.downcast_ref::<io::Error>() {
         return ErrorMetadata {
             name: "Error",

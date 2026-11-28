@@ -946,4 +946,4 @@ async fn parse_session_file(
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

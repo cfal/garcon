@@ -8,6 +8,7 @@ pub mod discard;
 pub mod file_history;
 pub mod git_domain_error;
 pub mod git_error_classifier;
+pub mod git_service;
 pub mod log_records;
 pub mod operation_context;
 pub mod pathspecs;
@@ -22,6 +23,7 @@ pub mod review_document_service;
 pub mod review_patch;
 pub mod review_performance;
 pub mod run;
+pub mod runtime;
 pub mod selected_file_commit;
 pub mod service_errors;
 pub mod stashes;
@@ -53,3 +55,5 @@ mod read_tests;
 mod review_bodies_tests;
 #[cfg(all(test, unix))]
 mod run_tests;
+#[cfg(test)]
+mod runtime_tests;
