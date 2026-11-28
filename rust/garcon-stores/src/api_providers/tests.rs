@@ -16,6 +16,9 @@ use tokio::{sync::Notify, task::LocalSet};
 
 use super::access::ApiProviderAccess;
 use super::assignments::{ApiProviderAssignmentStore, RetainExecutorReferences};
+use super::endpoint_resolver::{
+    ApiProviderEndpointResolver, ModelSelectionInput, PreviousModelSelectionInput,
+};
 use super::service::{ApiProviderService, PreparedDiscovery};
 use super::store::{ApiProviderStore, UpdateApiProviderInput};
 use super::{Result, SnapshotWriter, UncertainWrite};
@@ -27,6 +30,119 @@ fn create_input() -> Value {
         "protocol":"openai-compatible","baseUrl":"provider.example.invalid/v1/",
         "apiKey":"RustSyntheticKey","defaultModel":"base","models":[{"value":"other","label":"Other"}]
     }})
+}
+
+#[tokio::test]
+async fn provider_storage_failure_omits_model_options_but_denies_selection_and_reference_checks() {
+    LocalSet::new()
+        .run_until(async {
+            for profile_failure in [true, false] {
+                let root = tempfile::tempdir().unwrap();
+                let dir = root.path().to_str().unwrap();
+                seed_assignments(root.path()).await;
+                let profile_writer = Rc::new(FaultWriter::default());
+                let assignment_writer = Rc::new(FaultWriter::default());
+                let profiles = ApiProviderStore::open_with_writer(
+                    dir,
+                    Rc::new(SystemClock),
+                    profile_writer.clone(),
+                )
+                .await
+                .unwrap();
+                let assignments =
+                    ApiProviderAssignmentStore::open_with_writer(dir, assignment_writer.clone())
+                        .await
+                        .unwrap();
+                let access =
+                    ApiProviderAccess::new(profiles, assignments, Rc::new(|id| id == "local"));
+                let service = ApiProviderService::new(access.clone());
+                let provider = service
+                    .create(create_input(), "local", retain_local())
+                    .await
+                    .unwrap()
+                    .entry;
+                let resolver = ApiProviderEndpointResolver::new(
+                    access,
+                    Rc::new(|_, _| {
+                        vec![garcon_contract::api_providers::ApiProtocol::OpenAiCompatible]
+                    }),
+                );
+                let input = ModelSelectionInput {
+                    executor_id: None,
+                    agent_id: Some("codex"),
+                    model: "base",
+                    api_provider_id: Some(&provider.id),
+                    model_endpoint_id: Some(&provider.endpoints[0].id),
+                };
+                let captured = resolver.resolve_selection(input).unwrap();
+                assert_eq!(resolver.get_model_options("codex", None).unwrap().len(), 2);
+                if profile_failure {
+                    profile_writer.fail.set(Some(true));
+                    assert!(
+                        service
+                            .update(
+                                provider.id.clone(),
+                                json!({"label":"After rename"}),
+                                retain_local()
+                            )
+                            .await
+                            .is_err()
+                    );
+                } else {
+                    assignment_writer.fail.set(Some(true));
+                    assert!(
+                        service
+                            .unassign("local".into(), provider.id.clone(), retain_local(), None)
+                            .await
+                            .is_err()
+                    );
+                }
+                assert!(
+                    resolver
+                        .get_model_options("codex", None)
+                        .unwrap()
+                        .is_empty()
+                );
+                for error in [
+                    resolver.resolve_selection(input).err().unwrap(),
+                    resolver.model_supports_images(input).unwrap_err(),
+                    resolver
+                        .resolve_endpoint_reference(&captured)
+                        .err()
+                        .unwrap(),
+                ] {
+                    assert_eq!(
+                        as_domain_error(error.as_ref()).unwrap().code,
+                        ErrorCode::API_PROVIDER_STORAGE_UNAVAILABLE
+                    );
+                }
+                let native = resolver
+                    .resolve_selection(ModelSelectionInput {
+                        api_provider_id: None,
+                        model_endpoint_id: None,
+                        ..input
+                    })
+                    .unwrap();
+                assert_eq!(native.model, "base");
+                assert!(native.endpoint.is_none());
+                let historical = resolver.describe_previous(PreviousModelSelectionInput {
+                    model: input.model,
+                    api_provider_id: input.api_provider_id,
+                    model_endpoint_id: input.model_endpoint_id,
+                });
+                if profile_failure {
+                    assert_eq!(
+                        as_domain_error(historical.err().unwrap().as_ref())
+                            .unwrap()
+                            .code,
+                        ErrorCode::API_PROVIDER_STORAGE_UNAVAILABLE
+                    );
+                } else {
+                    assert!(!historical.unwrap().is_local);
+                }
+            }
+        })
+        .await;
 }
 
 fn retain_local() -> RetainExecutorReferences {
