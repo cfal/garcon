@@ -179,6 +179,13 @@ the user corrects how a port behaves, the correction is added under
 - Port the unit tests that pin observable behavior, with the same names in
   snake case. Skip tests that only mock the original's internals. Never weaken
   or delete a test to make it pass.
+- A replay dispatcher is a thin adapter. It converts the recorded arguments
+  to the port's parameter types, calls the port, and converts what the port
+  returned, value or error, to the recorded form. It builds a result or an
+  error only from what the port returned: it never runs a validation of its
+  own, never copies a recorded argument into the result, and never treats one
+  function name specially to make a case match. A dispatcher that does can
+  pass a broken port.
 - The replay compares a result as it would cross the JSON boundary, because
   that is the only way the result leaves the process: a property the original
   returns as `undefined` matches an absent property, `undefined` inside an
