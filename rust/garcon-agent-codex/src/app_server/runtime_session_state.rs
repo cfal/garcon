@@ -1,4 +1,9 @@
+use std::{collections::HashSet, rc::Rc};
+
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+
+use super::operation_routes::CodexOperation;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -20,4 +25,117 @@ pub struct FinishSessionOptions {
     pub aborted: bool,
     #[serde(default)]
     pub emit_finished_on_abort: bool,
+}
+
+pub struct CodexTurnRoutes {
+    source_operation: Rc<CodexOperation>,
+    next_operation: Option<Rc<CodexOperation>>,
+    active_turn_id: Option<String>,
+    operations: IndexMap<String, Rc<CodexOperation>>,
+    terminal_turn_ids: HashSet<String>,
+}
+
+impl CodexTurnRoutes {
+    pub fn new(operation: Rc<CodexOperation>) -> Self {
+        Self {
+            source_operation: operation.clone(),
+            next_operation: Some(operation),
+            active_turn_id: None,
+            operations: IndexMap::new(),
+            terminal_turn_ids: HashSet::new(),
+        }
+    }
+
+    pub fn reactivate(&mut self, operation: Rc<CodexOperation>) {
+        self.active_turn_id = None;
+        self.source_operation = operation.clone();
+        self.next_operation = Some(operation);
+    }
+
+    pub fn expect_turn(&mut self, operation: Rc<CodexOperation>) {
+        self.next_operation = Some(operation);
+    }
+
+    pub fn operation_for_start(&self) -> Rc<CodexOperation> {
+        self.next_operation
+            .as_ref()
+            .unwrap_or(&self.source_operation)
+            .clone()
+    }
+
+    pub fn operation_for_turn(&self, turn_id: &str) -> Option<&Rc<CodexOperation>> {
+        self.operations.get(turn_id)
+    }
+
+    pub fn active_turn_id(&self) -> Option<&str> {
+        self.active_turn_id.as_deref()
+    }
+
+    pub fn adopt_turn(&mut self, turn_id: &str, operation: Rc<CodexOperation>) -> bool {
+        if self.operations.contains_key(turn_id) {
+            return false;
+        }
+        self.operations.insert(turn_id.into(), operation.clone());
+        self.active_turn_id = Some(turn_id.into());
+        if self
+            .next_operation
+            .as_ref()
+            .is_some_and(|next| Rc::ptr_eq(next, &operation))
+        {
+            self.next_operation = None;
+        }
+        true
+    }
+
+    pub fn mark_terminal(&mut self, turn_id: &str) -> bool {
+        self.terminal_turn_ids.insert(turn_id.into())
+    }
+
+    pub fn finish_active_turn(&mut self) {
+        self.active_turn_id = None;
+    }
+
+    pub fn retire(&mut self) {
+        self.operations.clear();
+        self.terminal_turn_ids.clear();
+        self.next_operation = None;
+        self.active_turn_id = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_server::operation_routes::codex_operation;
+
+    fn operation(id: &str) -> Rc<CodexOperation> {
+        codex_operation("chat", id, Rc::new(|_| {}))
+    }
+
+    #[test]
+    fn retained_writer_keeps_each_native_turn_bound_to_its_original_run() {
+        let first = operation("first");
+        let second = operation("second");
+        let mut routes = CodexTurnRoutes::new(first.clone());
+        assert!(routes.adopt_turn("turn-1", routes.operation_for_start()));
+        assert!(routes.mark_terminal("turn-1"));
+        assert!(!routes.mark_terminal("turn-1"));
+        routes.finish_active_turn();
+        routes.reactivate(second.clone());
+        assert!(!routes.adopt_turn("turn-1", routes.operation_for_start()));
+        assert_eq!(routes.active_turn_id(), None);
+        assert!(routes.adopt_turn("turn-2", routes.operation_for_start()));
+        assert_eq!(routes.active_turn_id(), Some("turn-2"));
+        assert!(Rc::ptr_eq(
+            routes.operation_for_turn("turn-1").unwrap(),
+            &first
+        ));
+        assert!(Rc::ptr_eq(
+            routes.operation_for_turn("turn-2").unwrap(),
+            &second
+        ));
+        routes.retire();
+        assert!(routes.operation_for_turn("turn-1").is_none());
+        assert!(routes.operation_for_turn("turn-2").is_none());
+    }
 }

@@ -198,7 +198,7 @@ pub fn append_text_attachment_context<'a>(
     )
 }
 
-fn buffer_base64(input: &str) -> Vec<u8> {
+pub(crate) fn buffer_base64(input: &str) -> Vec<u8> {
     // Node's Buffer accepts either alphabet, ignores other characters, and stops at padding.
     let mut filtered: Vec<_> = input
         .bytes()

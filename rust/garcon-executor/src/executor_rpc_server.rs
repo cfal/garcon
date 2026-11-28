@@ -214,6 +214,15 @@ impl ExecutorRpcServer {
             "controllerCli.describe" | "controllerCli.request" => {
                 Err(rejected("CLI dispatch is controller-owned"))
             }
+            "apiProviders.discoverModels" => {
+                let request =
+                    decode(request).map_err(|_| rejected("Invalid model discovery request"))?;
+                reply(
+                    self.api
+                        .discover_api_provider_models(request, options(signal))
+                        .await,
+                )
+            }
             "projects.inspect" => {
                 let request =
                     decode(request).map_err(|_| rejected("Invalid project inspection request"))?;

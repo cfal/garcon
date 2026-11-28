@@ -1,6 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, error::Error, rc::Rc};
 
 use garcon_contract::{
+    chat_activity::ChatRunOutcome,
     cli_presentation::{CliBodyDisclosure, CliPresentation, CliRowFormat},
     command_output::CommandWorkingDirectory,
 };
@@ -10,7 +11,8 @@ use garcon_js::clock::{Clock, SystemClock, to_iso_string};
 use crate::{
     contracts::{
         AppendChatRowRequest, AppendChatRowResult, InputComposition, LedgerCliRowNoticeDetail,
-        LedgerRow, TranscriptView, TranscriptViewId,
+        LedgerRow, TranscriptNativeActivityState, TranscriptView, TranscriptViewId,
+        transcript_view_id,
     },
     sqlite_operations::LedgerResult,
     store::TranscriptLedgerStore,
@@ -113,6 +115,23 @@ impl TranscriptLedgerService {
             producers,
             prepared_inputs: RefCell::default(),
         }
+    }
+
+    pub fn native_activity_state(
+        &self,
+        chat_id: &str,
+    ) -> LedgerResult<TranscriptNativeActivityState> {
+        self.store.native_activity_state(chat_id)
+    }
+
+    pub async fn last_run_outcome(
+        &self,
+        chat_id: &str,
+        view_id: &str,
+    ) -> LedgerResult<Option<ChatRunOutcome>> {
+        self.store
+            .last_run_outcome(chat_id, &transcript_view_id(view_id)?)
+            .await
     }
 
     /// Subscribes to committed rows and view replacements; the returned function unsubscribes.

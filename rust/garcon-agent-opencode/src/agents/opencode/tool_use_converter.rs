@@ -2,11 +2,12 @@
 
 use std::{collections::HashSet, sync::LazyLock};
 
+use garcon_agents_common::shared::normalize_util::{normalize_todo_items, normalize_tool_input};
 use garcon_contract::chat_message_coercion::{
     AskUserQuestionOption, AskUserQuestionPrompt, as_allowed_prompts, as_optional_changes,
     as_record,
 };
-use garcon_contract::chat_plan::{PlanStep, coerce_todo_items};
+use garcon_contract::chat_plan::PlanStep;
 use garcon_contract::chat_types::ToolUseChatMessage as Message;
 use garcon_js::{Number, OptionalNullable, json::Opaque, string_to_number};
 use serde_json::{Map, Value};
@@ -40,18 +41,6 @@ static OPENCODE_BUILTIN_TOOL_KEYS: LazyLock<HashSet<String>> = LazyLock::new(|| 
         .map(|id| strip_name_separators(id))
         .collect()
 });
-
-fn as_input(value: &Value) -> Opaque {
-    let input = match value {
-        Value::Object(_) => value.clone(),
-        Value::String(raw) if !raw.is_empty() => match garcon_js::json::parse(raw) {
-            Ok(value @ Value::Object(_)) => value,
-            _ => Value::Object(Map::from_iter([("raw".to_owned(), value.clone())])),
-        },
-        _ => Value::Object(Map::new()),
-    };
-    Opaque::from_value(input)
-}
 
 fn as_number(value: &Value) -> Option<Number> {
     value
@@ -125,7 +114,7 @@ pub fn convert_open_code_tool_use(ts: &str, part: &Value) -> Message {
         return message;
     }
 
-    let input = as_input(raw_input);
+    let input = normalize_tool_input(Some(&Opaque::from_value(raw_input.clone())));
     if tool.is_none()
         || (!matches!(key.as_str(), "invalid" | "skill" | "lsp")
             && OPENCODE_BUILTIN_TOOL_KEYS.contains(&key))
@@ -221,7 +210,7 @@ fn known_tool(ts: &str, tool_id: &str, key: &str, input: &Map<String, Value>) ->
         "todowrite" => Message::TodoWrite {
             timestamp,
             tool_id,
-            todos: coerce_todo_items(coalesce(&["todos", "items"])),
+            todos: normalize_todo_items(coalesce(&["todos", "items"])),
         },
         "todoread" => Message::TodoRead { timestamp, tool_id },
         "task" => Message::Task {
@@ -236,7 +225,7 @@ fn known_tool(ts: &str, tool_id: &str, key: &str, input: &Map<String, Value>) ->
         "updateplan" => Message::UpdatePlan {
             timestamp,
             tool_id,
-            todos: coerce_todo_items(coalesce(&["items", "todos"])).map(|items| {
+            todos: normalize_todo_items(coalesce(&["items", "todos"])).map(|items| {
                 items
                     .into_iter()
                     .map(|item| PlanStep {

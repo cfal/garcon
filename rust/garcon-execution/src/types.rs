@@ -187,6 +187,10 @@ pub fn execution_error_input<'a>(error: &'a (dyn Error + 'static)) -> ErrorInput
         error.downcast_ref::<crate::chat_execution_coordinator::SharedCoordinatorError>()
     {
         ErrorInput::Diagnostic(error)
+    } else if let Some(error) =
+        error.downcast_ref::<garcon_stores::api_providers::endpoint_resolver::ModelSelectionError>()
+    {
+        ErrorInput::Diagnostic(error)
     } else {
         ErrorInput::Error(error)
     }
