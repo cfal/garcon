@@ -2003,7 +2003,7 @@
                 },
                 "defaultModel": "default-model",
                 "hasApiKey": true,
-                "id": "[..]",
+                "id": "[..base64url:23]",
                 "modelDiscovery": "openai-models",
                 "models": [
                   {
@@ -2072,7 +2072,7 @@
                 },
                 "defaultModel": "r1",
                 "hasApiKey": true,
-                "id": "[..]",
+                "id": "[..base64url:20]",
                 "modelDiscovery": "openai-models",
                 "models": [
                   {
@@ -2127,7 +2127,7 @@
                 "baseUrl": "https://example.invalid",
                 "defaultModel": "a1",
                 "hasApiKey": false,
-                "id": "[..]",
+                "id": "[..base64url:26]",
                 "modelDiscovery": "none",
                 "models": [
                   {
@@ -2190,7 +2190,7 @@
                 },
                 "defaultModel": "r1",
                 "hasApiKey": false,
-                "id": "[..]",
+                "id": "[..base64url:23]",
                 "modelDiscovery": "none",
                 "models": [
                   {
@@ -2249,7 +2249,7 @@
                 },
                 "defaultModel": "m1",
                 "hasApiKey": false,
-                "id": "[..]",
+                "id": "[..base64url:17]",
                 "modelDiscovery": "none",
                 "models": [
                   {
@@ -2304,7 +2304,7 @@
                 "baseUrl": "https://none.example.invalid",
                 "defaultModel": "a1",
                 "hasApiKey": false,
-                "id": "[..]",
+                "id": "[..base64url:29]",
                 "modelDiscovery": "openrouter-models",
                 "models": [
                   {
@@ -2361,7 +2361,7 @@
                 },
                 "defaultModel": "m1",
                 "hasApiKey": false,
-                "id": "[..]",
+                "id": "[..base64url:24]",
                 "modelDiscovery": "none",
                 "models": [
                   {
@@ -2420,7 +2420,7 @@
                 },
                 "defaultModel": "m1",
                 "hasApiKey": false,
-                "id": "[..]",
+                "id": "[..base64url:20]",
                 "modelDiscovery": "none",
                 "models": [
                   {
@@ -2489,7 +2489,7 @@
                     },
                     "defaultModel": "default-model",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -2529,7 +2529,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -2555,7 +2555,7 @@
                     "baseUrl": "https://example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:26]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -2589,7 +2589,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -2619,7 +2619,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:17]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -2645,7 +2645,7 @@
                     "baseUrl": "https://none.example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:29]",
                     "modelDiscovery": "openrouter-models",
                     "models": [
                       {
@@ -2675,7 +2675,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:24]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -2705,7 +2705,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -2797,7 +2797,7 @@
                     },
                     "defaultModel": "default-model",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -2837,7 +2837,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -2863,7 +2863,7 @@
                     "baseUrl": "https://example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:26]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -2897,7 +2897,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -2927,7 +2927,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:17]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -2953,7 +2953,7 @@
                     "baseUrl": "https://none.example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:29]",
                     "modelDiscovery": "openrouter-models",
                     "models": [
                       {
@@ -2983,7 +2983,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:24]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -3013,7 +3013,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -3256,7 +3256,7 @@
                     },
                     "defaultModel": "default-model",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -3296,7 +3296,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -3322,7 +3322,7 @@
                     "baseUrl": "https://example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:26]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -3356,7 +3356,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -3386,7 +3386,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:17]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -3412,7 +3412,7 @@
                     "baseUrl": "https://none.example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:29]",
                     "modelDiscovery": "openrouter-models",
                     "models": [
                       {
@@ -3442,7 +3442,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:24]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -3472,7 +3472,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -3604,7 +3604,7 @@
                     },
                     "defaultModel": "default-model",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -3644,7 +3644,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -3670,7 +3670,7 @@
                     "baseUrl": "https://example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:26]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -3704,7 +3704,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -3734,7 +3734,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:17]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -3760,7 +3760,7 @@
                     "baseUrl": "https://none.example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:29]",
                     "modelDiscovery": "openrouter-models",
                     "models": [
                       {
@@ -3790,7 +3790,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:24]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -3820,7 +3820,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -4003,7 +4003,7 @@
                     },
                     "defaultModel": "default-model",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -4043,7 +4043,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -4069,7 +4069,7 @@
                     "baseUrl": "https://example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:26]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -4103,7 +4103,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -4133,7 +4133,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:17]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -4159,7 +4159,7 @@
                     "baseUrl": "https://none.example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:29]",
                     "modelDiscovery": "openrouter-models",
                     "models": [
                       {
@@ -4189,7 +4189,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:24]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -4219,7 +4219,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -4351,7 +4351,7 @@
                     },
                     "defaultModel": "default-model",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -4391,7 +4391,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -4417,7 +4417,7 @@
                     "baseUrl": "https://example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:26]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -4451,7 +4451,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -4481,7 +4481,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:17]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -4507,7 +4507,7 @@
                     "baseUrl": "https://none.example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:29]",
                     "modelDiscovery": "openrouter-models",
                     "models": [
                       {
@@ -4537,7 +4537,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:24]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -4567,7 +4567,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -13174,7 +13174,7 @@
                     },
                     "defaultModel": "default-model",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -13214,7 +13214,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -13240,7 +13240,7 @@
                     "baseUrl": "https://example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:26]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -13274,7 +13274,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -13304,7 +13304,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:17]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -13330,7 +13330,7 @@
                     "baseUrl": "https://none.example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:29]",
                     "modelDiscovery": "openrouter-models",
                     "models": [
                       {
@@ -13360,7 +13360,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:24]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -13390,7 +13390,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -13522,7 +13522,7 @@
                     },
                     "defaultModel": "default-model",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -13562,7 +13562,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -13588,7 +13588,7 @@
                     "baseUrl": "https://example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:26]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -13622,7 +13622,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -13652,7 +13652,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:17]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -13678,7 +13678,7 @@
                     "baseUrl": "https://none.example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:29]",
                     "modelDiscovery": "openrouter-models",
                     "models": [
                       {
@@ -13708,7 +13708,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:24]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -13738,7 +13738,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -13921,7 +13921,7 @@
                     },
                     "defaultModel": "default-model",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -13961,7 +13961,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -13987,7 +13987,7 @@
                     "baseUrl": "https://example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:26]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -14021,7 +14021,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -14051,7 +14051,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:17]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -14077,7 +14077,7 @@
                     "baseUrl": "https://none.example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:29]",
                     "modelDiscovery": "openrouter-models",
                     "models": [
                       {
@@ -14107,7 +14107,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:24]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -14137,7 +14137,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -14269,7 +14269,7 @@
                     },
                     "defaultModel": "default-model",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -14309,7 +14309,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": true,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "openai-models",
                     "models": [
                       {
@@ -14335,7 +14335,7 @@
                     "baseUrl": "https://example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:26]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -14369,7 +14369,7 @@
                     },
                     "defaultModel": "r1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:23]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -14399,7 +14399,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:17]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -14425,7 +14425,7 @@
                     "baseUrl": "https://none.example.invalid",
                     "defaultModel": "a1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:29]",
                     "modelDiscovery": "openrouter-models",
                     "models": [
                       {
@@ -14455,7 +14455,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:24]",
                     "modelDiscovery": "none",
                     "models": [
                       {
@@ -14485,7 +14485,7 @@
                     },
                     "defaultModel": "m1",
                     "hasApiKey": false,
-                    "id": "[..]",
+                    "id": "[..base64url:20]",
                     "modelDiscovery": "none",
                     "models": [
                       {

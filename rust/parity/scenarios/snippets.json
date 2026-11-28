@@ -1472,6 +1472,24 @@
           "context": {
             "type": "new-chat",
             "chatId": "1000000000000001",
+            "projectPath": "{{projectDir}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-new-chat-project-path-with-a-backslash",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "join-path",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "new-chat",
+            "chatId": "1000000000000001",
             "projectPath": "{{projectDir}}/C:\\"
           }
         }
@@ -1756,7 +1774,27 @@
       }
     },
     {
-      "name": "expand-scheduled-path-ending-in-backslash",
+      "name": "expand-scheduled-join-path",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/snippets/expand",
+        "json": {
+          "shortName": "join-path",
+          "arguments": {
+            "type": "default"
+          },
+          "context": {
+            "type": "scheduled-prompt",
+            "target": {
+              "type": "new-chat",
+              "projectPath": "{{projectDir}}"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "expand-scheduled-project-path-with-a-backslash",
       "http": {
         "method": "POST",
         "path": "/api/v1/snippets/expand",
