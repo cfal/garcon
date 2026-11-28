@@ -963,19 +963,25 @@ dependencies = [
 name = "garcon-agent-codex"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "garcon-base",
  "garcon-cases",
  "garcon-contract",
+ "garcon-interface",
  "garcon-js",
  "indexmap",
+ "libc",
  "oxc_allocator",
  "oxc_ast",
  "oxc_parser",
  "oxc_semantic",
  "oxc_span",
+ "regress",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
