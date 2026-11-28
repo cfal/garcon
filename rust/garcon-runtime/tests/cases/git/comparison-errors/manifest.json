@@ -1,0 +1,14 @@
+{
+  "module": "server/runtime/git/comparison-errors.ts",
+  "tests": [
+    "server/runtime/git/__tests__/comparison-errors.test.js",
+    "rust/parity/fixtures/git/pure.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 132,
+  "sha256": "66a655b1b7c730b5d0f26055c46a429e243f6d92fc8c819bc7f523437ee774d2"
+}

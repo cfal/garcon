@@ -1,0 +1,23 @@
+{
+  "module": "server/runtime/git/porcelain-status.ts",
+  "tests": [
+    "server/runtime/git/__tests__/porcelain-status.test.js",
+    "rust/parity/fixtures/git/pure.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "fn": "changeKindForStatus",
+      "where": "result",
+      "path": "$.result",
+      "type": "a function",
+      "count": 3,
+      "at": null
+    }
+  ],
+  "cases": 248,
+  "sha256": "95921287fc3da71c0b744f377d8382d50ce52a2ef26dcfe5f9e0c5b86bd31cab"
+}

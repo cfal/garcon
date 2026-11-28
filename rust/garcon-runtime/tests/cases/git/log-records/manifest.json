@@ -1,0 +1,21 @@
+{
+  "module": "server/runtime/git/log-records.ts",
+  "tests": [
+    "rust/parity/fixtures/git/pure.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "nulRecords",
+      "argument": 1,
+      "guard": "rust/parity/fixtures/git/guards.ts#recordWidth",
+      "dropped": 26,
+      "kept": 8
+    }
+  ],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 64,
+  "sha256": "79203e971cd203fed66b4660666c9c9f5ca5c1dfe9723b9f07d9e3e109bc9619"
+}
