@@ -22,6 +22,7 @@ const ACTION_CLOSE: &str = "</garcon-schedule-action>";
 const EMPTY_ACTION: &str = "<garcon-schedule-action />";
 
 static MINUTE_INSTANT: LazyLock<Regex> = LazyLock::new(|| {
+    // INFALLIBLE: the minute-instant pattern is a fixed, tested literal.
     Regex::new(
         r"^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:00)(?:\.000)?(?:Z|([+-])([0-9]{2}):([0-9]{2}))$",
     )

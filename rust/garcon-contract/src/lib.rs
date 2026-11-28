@@ -143,6 +143,7 @@ pub mod usage;
 pub mod user_message_presentation;
 pub mod workspace_layout;
 pub mod ws_auth;
+pub mod ws_events;
 pub mod ws_requests;
 pub mod ws_revision_invalidations;
 pub mod ws_value_parsing;
