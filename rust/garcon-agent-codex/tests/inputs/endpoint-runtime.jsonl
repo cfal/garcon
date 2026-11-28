@@ -1,0 +1,13 @@
+{"fn":"buildCodexAppServerEndpointRuntime","args":[{"selection":{"apiProviderId":"fixture","endpointId":"acme_openai","providerLabel":"Acme","protocol":"openai-compatible","baseUrl":"https://example.invalid/v1","capabilities":{"chatCompletions":false,"responses":true},"model":"fixture-code","isLocal":false,"credential":null,"headers":{"HTTP-Referer":"https://example.invalid/garcon","X-OpenRouter-Title":"Garcon"}},"credential":"synthetic-fixture-key"}]}
+{"fn":"buildCodexAppServerEndpointRuntime","args":[{"selection":{"apiProviderId":"fixture","endpointId":"dots.and-dash","providerLabel":"","protocol":"openai-compatible","baseUrl":"https://example.invalid/v1","capabilities":{"chatCompletions":true,"responses":true},"model":"fixture-code","isLocal":false,"credential":null,"headers":{"X.Empty.Header":"","X-Blank":"  ","X-Gateway.Key":"synthetic-header-secret"}},"credential":null}]}
+{"fn":"buildCodexAppServerEndpointRuntime","args":[{"selection":{"apiProviderId":"fixture","endpointId":"acme_openai","providerLabel":"Acme","protocol":"openai-compatible","baseUrl":"https://example.invalid/v1","capabilities":{"chatCompletions":false,"responses":true},"model":"fixture-code","isLocal":false,"credential":null,"headers":{}},"credential":""}]}
+{"fn":"buildCodexAppServerEndpointRuntime","args":[{"selection":{"apiProviderId":"fixture","endpointId":"acme_openai","providerLabel":"Acme","protocol":"openai-compatible","baseUrl":"https://example.invalid/v1","capabilities":{"chatCompletions":true,"responses":false},"model":"fixture-code","isLocal":false,"credential":null,"headers":{}},"credential":null}]}
+{"fn":"buildCodexAppServerEndpointRuntime","args":[{"selection":{"apiProviderId":"fixture","endpointId":"acme_openai","providerLabel":"Acme","protocol":"anthropic-messages","baseUrl":"https://example.invalid/v1","capabilities":null,"model":"fixture-code","isLocal":false,"credential":null,"headers":{}},"credential":null}]}
+{"fn":"buildCodexHostProviderConfig","args":[{"kind":"chatgpt"}]}
+{"fn":"buildCodexHostProviderConfig","args":[{"kind":"none"}]}
+{"fn":"buildCodexHostProviderConfig","args":[{"kind":"api-key"}]}
+{"fn":"buildCodexHostProviderConfig","args":[{"kind":"external"}]}
+{"fn":"assertCodexSessionEndpoint","args":[null,null]}
+{"fn":"assertCodexSessionEndpoint","args":["codex","codex"]}
+{"fn":"assertCodexSessionEndpoint","args":["codex",null]}
+{"fn":"assertCodexSessionEndpoint","args":["codex","another"]}

@@ -1,12 +1,14 @@
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const trace = process.env.SYNTHETIC_CODEX_TRACE;
 const mode = process.env.SYNTHETIC_CODEX_MODE;
+const nativePath = process.env.SYNTHETIC_CODEX_NATIVE_PATH;
 if (mode === 'stubborn') process.on('SIGTERM', () => {});
 if (trace) appendFileSync(trace, JSON.stringify({ argv: process.argv.slice(2) }) + '\n');
 const input = createInterface({ input: process.stdin });
 const write = (value: unknown) => process.stdout.write(JSON.stringify(value) + '\n');
+let threadListAttempts = 0;
 
 for await (const line of input) {
   if (trace) appendFileSync(trace, line + '\n');
@@ -31,6 +33,26 @@ for await (const line of input) {
         { name: 'ignored', path: '/synthetic/disabled', enabled: false },
       ] }] } });
       break;
+    case 'thread/list': {
+      threadListAttempts++;
+      if (mode === 'utility-exit') process.exit(8);
+      if (mode === 'utility-overload' && threadListAttempts < 3) {
+        write({ id, error: { code: -32001, message: 'Synthetic overload' } });
+        break;
+      }
+      if (mode === 'utility-error' && threadListAttempts === 1) {
+        write({ id, error: { code: -32603, message: 'Synthetic discovery failed' } });
+        break;
+      }
+      const hasPath = nativePath && existsSync(nativePath);
+      const data = hasPath ? [{ id: 'thread', path: nativePath }] : [];
+      if (mode === 'utility-overload' && params.cursor === null) {
+        write({ id, result: { data: [], nextCursor: 'second-page' } });
+      } else {
+        write({ id, result: { data, nextCursor: null } });
+      }
+      break;
+    }
     case 'send-events':
       process.stdout.write('invalid native output with synthetic private content\n');
       write({ method: 'one', params: { value: 1 } });

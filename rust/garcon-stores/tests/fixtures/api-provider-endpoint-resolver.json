@@ -1,0 +1,100 @@
+{
+  "version": 2,
+  "legacyProviderIds": [],
+  "apiProviders": [
+    {
+      "id": "acme",
+      "revision": 3,
+      "label": "Acme",
+      "templateId": "custom",
+      "endpoints": [
+        {
+          "id": "acme_openai",
+          "protocol": "openai-compatible",
+          "baseUrl": "https://api.acme.test/v1",
+          "apiKey": "SyntheticCloudKey",
+          "capabilities": {"chatCompletions": true, "responses": true},
+          "defaultModel": "acme-code",
+          "models": [{"value":"acme-code","label":"Acme Code","supportsImages":false}],
+          "supportsImages": true,
+          "modelDiscovery": "openai-models",
+          "headers": {"HTTP-Referer":"https://github.com/cfal/garcon","X-OpenRouter-Title":"Garcon"}
+        },
+        {
+          "id": "acme_openai_blank",
+          "protocol": "openai-compatible",
+          "baseUrl": "http://localhost:11434/v1",
+          "apiKey": "",
+          "capabilities": {"chatCompletions": false, "responses": true},
+          "defaultModel": "llama3",
+          "models": [{"value":"llama3","label":"llama3 (local)","isLocal":true}],
+          "supportsImages": false,
+          "modelDiscovery": "ollama-tags"
+        },
+        {
+          "id": "acme_anthropic",
+          "protocol": "anthropic-messages",
+          "baseUrl": "https://api.acme.test/anthropic",
+          "apiKey": "SyntheticClaudeKey",
+          "defaultModel": "acme-claude",
+          "models": [{"value":"acme-claude","label":"Acme Claude","supportsImages":true}],
+          "supportsImages": true,
+          "modelDiscovery": "none"
+        },
+        {
+          "id": "acme_anthropic_blank",
+          "protocol": "anthropic-messages",
+          "baseUrl": "http://localhost:11434",
+          "apiKey": "",
+          "defaultModel": "llama3",
+          "models": [{"value":"llama3","label":"llama3 (local)","isLocal":true}],
+          "supportsImages": false,
+          "modelDiscovery": "ollama-tags"
+        }
+      ],
+      "createdAt": "2026-05-03T00:00:00.000Z",
+      "updatedAt": "2026-05-03T00:00:00.000Z"
+    },
+    {
+      "id": "remote_only",
+      "revision": 1,
+      "label": "Remote",
+      "templateId": "custom",
+      "endpoints": [
+        {
+          "id": "remote_anthropic",
+          "protocol": "anthropic-messages",
+          "baseUrl": "https://worker.provider.test/v1",
+          "apiKey": "",
+          "defaultModel": "option",
+          "models": [{"value":"option","label":"Raw alias","isLocal":true,"rawModel":"llama:latest"}],
+          "supportsImages": true,
+          "modelDiscovery": "none"
+        }
+      ],
+      "createdAt": "2026-05-03T00:00:00.000Z",
+      "updatedAt": "2026-05-03T00:00:00.000Z"
+    },
+    {
+      "id": "unassigned_ollama",
+      "revision": 1,
+      "label": "Ollama",
+      "templateId": "ollama",
+      "endpoints": [
+        {
+          "id": "ollama_openai",
+          "protocol": "openai-compatible",
+          "baseUrl": "http://localhost:11434/v1",
+          "apiKey": "",
+          "capabilities": {"chatCompletions": true, "responses": false},
+          "defaultModel": "installed",
+          "models": [{"value":"installed","label":"Installed"}],
+          "supportsImages": false,
+          "modelDiscovery": "none"
+        }
+      ],
+      "createdAt": "2026-05-03T00:00:00.000Z",
+      "updatedAt": "2026-05-03T00:00:00.000Z"
+    }
+  ]
+}
