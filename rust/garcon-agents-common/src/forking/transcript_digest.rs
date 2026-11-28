@@ -11,15 +11,20 @@ pub struct OrderedTranscriptDigest {
 
 impl OrderedTranscriptDigest {
     pub fn add(&mut self, message: &ChatMessage) -> ExecutorResult<()> {
-        self.count += 1;
         let serialized = serde_json::to_vec(message)?;
+        self.add_serialized(&serialized)
+    }
+
+    /// Adds a row whose provider-specific semantic projection has already been serialized.
+    pub fn add_serialized(&mut self, serialized: &[u8]) -> ExecutorResult<()> {
+        self.count += 1;
         let position = format!(r#"{{"seq":{}}}"#, self.count);
         let hash_a = mix_hash(
-            XxHash32::oneshot(0x9e37_79b9, &serialized),
+            XxHash32::oneshot(0x9e37_79b9, serialized),
             XxHash32::oneshot(0xc2b2_ae35, b"ordered-message"),
         );
         let hash_b = mix_hash(
-            murmur(&serialized, 0x85eb_ca6b)?,
+            murmur(serialized, 0x85eb_ca6b)?,
             murmur(b"ordered-message", 0x27d4_eb2d)?,
         );
         self.sum_a = self.sum_a.wrapping_add(mix_hash(

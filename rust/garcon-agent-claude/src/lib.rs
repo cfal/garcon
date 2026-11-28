@@ -15,6 +15,7 @@ pub mod context_window_control;
 pub mod disk_attachments;
 pub mod endpoint_runtime;
 pub mod execution;
+pub mod fork_transcript;
 pub mod history_loader;
 pub mod interrupt_receipt;
 pub mod model_context;
