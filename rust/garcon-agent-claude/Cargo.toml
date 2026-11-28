@@ -10,10 +10,11 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+garcon-contract.workspace = true
 garcon-interface.workspace = true
 garcon-js.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 garcon-cases.workspace = true
-serde_json.workspace = true
