@@ -72,7 +72,7 @@ fn drafts() -> Vec<LedgerRowDraft> {
         .collect()
 }
 
-struct AdoptExisting(Rc<TranscriptLedgerStore>);
+pub(super) struct AdoptExisting(pub Rc<TranscriptLedgerStore>);
 
 impl TranscriptViewAdoption for AdoptExisting {
     fn ensure<'a>(
@@ -118,9 +118,9 @@ impl TranscriptClearRegistry for Registry {
 }
 
 #[derive(Default)]
-struct Execution {
+pub(super) struct Execution {
     reserved: Cell<usize>,
-    released: Rc<Cell<usize>>,
+    pub released: Rc<Cell<usize>>,
     pending: Cell<bool>,
     release_fails: Rc<Cell<bool>>,
     at_promotion: RefCell<Option<PromotionHook>>,
@@ -170,7 +170,7 @@ struct Fixture {
     mutation_lock: Rc<KeyedLock>,
 }
 
-fn store(root: &Path, replacement: &str) -> Rc<TranscriptLedgerStore> {
+pub(super) fn store(root: &Path, replacement: &str) -> Rc<TranscriptLedgerStore> {
     let replacement = transcript_view_id(replacement).unwrap();
     Rc::new(
         TranscriptLedgerStore::new(
@@ -275,7 +275,7 @@ fn bun(root: &Path, mode: &str) -> String {
     String::from_utf8(out.stdout).unwrap().trim_end().into()
 }
 
-async fn snapshot(store: &TranscriptLedgerStore) -> String {
+pub(super) async fn snapshot(store: &TranscriptLedgerStore) -> String {
     #[derive(Serialize)]
     struct Snapshot {
         view: TranscriptView,

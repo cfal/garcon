@@ -13,6 +13,7 @@ mod presentation_views;
 mod producer_lease;
 mod producer_publication;
 mod producer_service;
+mod reload;
 mod replay_views;
 mod service;
 mod store_behavior;
