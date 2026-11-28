@@ -26,6 +26,7 @@ pub mod queue_drainer;
 pub mod queue_steer_error;
 pub mod queued_steer_delivery;
 pub mod reference_writes;
+pub mod remote_client;
 pub mod runtime_router;
 pub mod runtime_router_errors;
 pub mod session_loss_retry;
