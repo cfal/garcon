@@ -1114,6 +1114,8 @@ dependencies = [
  "garcon-cases",
  "garcon-contract",
  "garcon-js",
+ "icu_normalizer",
+ "regress",
  "serde",
  "serde_json",
 ]
