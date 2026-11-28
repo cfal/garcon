@@ -7,7 +7,7 @@ use std::{
 use futures::future::LocalBoxFuture;
 use garcon_interface::producer::AgentFinalResponse;
 use indexmap::IndexMap;
-use tokio::sync::Notify;
+use tokio::sync::{Mutex, Notify};
 
 use crate::app_server::{
     client::CodexAppServerClient,
@@ -18,6 +18,7 @@ use crate::app_server::{
 };
 
 use super::{interrupt::CodexInterrupt, thread_settings::CodexSourceThreadSettings};
+use crate::service_tier::CodexServiceTier;
 
 pub struct CodexSourceActivation {
     pub native_path: Option<String>,
@@ -28,6 +29,7 @@ pub struct CodexSourceActivation {
     pub confirmed_settings: CodexConfirmedThreadSettings,
     pub provider_owns_effort: bool,
     pub settings_timeout: Duration,
+    pub admitted_tier: CodexServiceTier,
 }
 
 pub(super) struct PendingFinish {
@@ -52,6 +54,11 @@ pub struct CodexSessionSource {
     pub(super) cleanup_attachments: RefCell<Option<LocalBoxFuture<'static, ()>>>,
     pub(super) deliveries: Cell<usize>,
     pub(super) pending_finish: RefCell<Option<PendingFinish>>,
+    pub(super) input_lane: Mutex<()>,
+    pub(super) admitted_tier: Cell<CodexServiceTier>,
+    pub(super) admitted_model: RefCell<String>,
+    pub(super) capacity_retry_count: Cell<usize>,
+    pub(super) pending_capacity_failure: RefCell<Option<(String, String)>>,
     pub(super) interrupt: Rc<CodexInterrupt>,
     pub(super) terminal: Notify,
     pub(super) turn_attempt: Cell<u64>,
@@ -66,6 +73,7 @@ impl CodexSessionSource {
         operation: Rc<CodexOperation>,
         activation: CodexSourceActivation,
     ) -> Self {
+        let model = activation.confirmed_settings.model.clone();
         let settings = CodexSourceThreadSettings::new(
             client.clone(),
             thread_id.clone(),
@@ -89,6 +97,11 @@ impl CodexSessionSource {
             cleanup_attachments: RefCell::default(),
             deliveries: Cell::new(0),
             pending_finish: RefCell::default(),
+            input_lane: Mutex::new(()),
+            admitted_tier: Cell::new(activation.admitted_tier),
+            admitted_model: RefCell::new(model),
+            capacity_retry_count: Cell::new(0),
+            pending_capacity_failure: RefCell::default(),
             interrupt: Rc::new(CodexInterrupt::default()),
             terminal: Notify::new(),
             turn_attempt: Cell::new(0),
@@ -270,6 +283,7 @@ mod tests {
                 ),
                 provider_owns_effort: true,
                 settings_timeout: Duration::from_secs(1),
+                admitted_tier: CodexServiceTier::Default,
             },
         ));
         assert!(CodexTurnRoutes::adopt_turn(

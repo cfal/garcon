@@ -37,9 +37,9 @@ use crate::{
         },
         runtime_session_state::{CodexTurnRoutes, FinishSessionOptions, RunningStatus},
         runtime_support::{
-            NoopLogger, denial_response_for_request, has_terminal_pending_finish,
-            humanize_codex_app_server_error, is_active_session_status, is_terminal_session_status,
-            merge_finish_options,
+            CAPACITY_RETRY_DELAYS, MAX_CAPACITY_RETRIES, NoopLogger, denial_response_for_request,
+            has_terminal_pending_finish, humanize_codex_app_server_error, is_active_session_status,
+            is_capacity_error, is_terminal_session_status, merge_finish_options,
         },
         steering::{rejected_codex_steer, steer_codex_session},
     },
@@ -62,6 +62,8 @@ use super::{
     utility::CodexAppServerUtility,
 };
 
+mod capacity_retry;
+
 type CodexClientFactory = Rc<
     dyn Fn(Option<IndexMap<String, String>>, Option<&CodexProviderConfig>) -> CodexAppServerClient,
 >;
@@ -73,6 +75,7 @@ pub struct CodexAppServerRuntimeOptions {
     pub clock: Rc<dyn Clock>,
     pub materialization_timeout: Duration,
     pub settings_timeout: Duration,
+    pub capacity_retry_delays: Vec<Duration>,
     pub refresh: NativePathDiscoveryRefreshLimiter,
 }
 
@@ -88,6 +91,7 @@ impl CodexAppServerRuntimeOptions {
             clock: Rc::new(SystemClock),
             materialization_timeout: Duration::from_secs(10),
             settings_timeout: Duration::from_secs(10),
+            capacity_retry_delays: CAPACITY_RETRY_DELAYS.to_vec(),
             refresh: NativePathDiscoveryRefreshLimiter::default(),
         }
     }
@@ -104,6 +108,7 @@ struct ManagedRuntime {
     skills: CodexSkillDiscovery,
     materialization_timeout: Duration,
     settings_timeout: Duration,
+    capacity_retry_delays: Vec<Duration>,
     closed: Cell<bool>,
 }
 
@@ -143,6 +148,11 @@ impl CodexAppServerRuntime {
             skills,
             materialization_timeout: options.materialization_timeout,
             settings_timeout: options.settings_timeout,
+            capacity_retry_delays: options
+                .capacity_retry_delays
+                .into_iter()
+                .take(MAX_CAPACITY_RETRIES)
+                .collect(),
             closed: Cell::new(false),
         }))
     }
@@ -280,7 +290,7 @@ impl CodexAppServerRuntime {
             .client
             .request("turn/start", Some(&build_turn_start_params(&input)), None)
             .await?;
-        if self.is_current(source) && source.turn_attempt.get() == generation {
+        if self.can_apply_turn_attempt(source, generation) {
             let turn_id = response["turn"]["id"]
                 .as_str()
                 .ok_or("Invalid Codex turn/start response id")?;
@@ -328,6 +338,7 @@ impl CodexAppServerRuntime {
                 confirmed_settings,
                 provider_owns_effort: requested.effort.is_none(),
                 settings_timeout: self.0.settings_timeout,
+                admitted_tier,
             },
         ));
         let previous = self.0.sources.borrow_mut().activate(source.clone());
@@ -463,6 +474,12 @@ impl CodexAppServerRuntime {
                     if self.is_current(&source)
                         && source.routes.borrow().active_turn_id() == Some(turn_id)
                     {
+                        if is_capacity_error(Some(raw)) {
+                            source
+                                .pending_capacity_failure
+                                .replace(Some((turn_id.into(), message.into())));
+                            return Ok(());
+                        }
                         self.finish_session(
                             &source,
                             FinishSessionOptions {
@@ -509,7 +526,31 @@ impl CodexAppServerRuntime {
             return;
         }
         source.turn_attempt.set(source.turn_attempt.get() + 1);
+        let capacity =
+            source
+                .pending_capacity_failure
+                .borrow_mut()
+                .take()
+                .filter(|(turn_id, _)| {
+                    completion.turn.status == Some(CodexTurnStatus::Failed)
+                        && *turn_id == completion.turn.id
+                });
         if let Some(message) = failure {
+            if completion.turn.status == Some(CodexTurnStatus::Failed)
+                && (capacity.is_some() || is_capacity_error(completion.turn.error.as_deref()))
+            {
+                let message = capacity
+                    .as_ref()
+                    .map_or(message.as_str(), |(_, message)| message);
+                if self.schedule_capacity_retry(
+                    source.clone(),
+                    completion.operation.clone(),
+                    message,
+                ) {
+                    return;
+                }
+            }
+            let message = capacity.map_or(message, |(_, message)| message);
             self.finish_session(
                 source,
                 FinishSessionOptions {
@@ -520,6 +561,7 @@ impl CodexAppServerRuntime {
             );
             return;
         }
+        source.capacity_retry_count.set(0);
         let aborted = completion.turn.status == Some(CodexTurnStatus::Interrupted)
             || source.status.get() == RunningStatus::Interrupting;
         source.status.set(RunningStatus::Completing);
