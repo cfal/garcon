@@ -77,6 +77,18 @@ pub async fn encode_carry_over_pages(
     messages: Vec<ChatMessage>,
     signal: Option<&CancellationToken>,
 ) -> Result<Vec<EncodedCarryOverPage>, CarryOverPageCodecError> {
+    Ok(encode_segment_pages(messages, signal).await?.pages)
+}
+
+pub(super) struct EncodedSegmentPages {
+    pub pages: Vec<EncodedCarryOverPage>,
+    pub canonical_messages_sha256: String,
+}
+
+pub(super) async fn encode_segment_pages(
+    messages: Vec<ChatMessage>,
+    signal: Option<&CancellationToken>,
+) -> Result<EncodedSegmentPages, CarryOverPageCodecError> {
     let signal = signal.cloned();
     task::spawn_blocking(move || encode_pages(messages, signal.as_ref())).await?
 }
@@ -84,14 +96,19 @@ pub async fn encode_carry_over_pages(
 fn encode_pages(
     messages: Vec<ChatMessage>,
     signal: Option<&CancellationToken>,
-) -> Result<Vec<EncodedCarryOverPage>, CarryOverPageCodecError> {
+) -> Result<EncodedSegmentPages, CarryOverPageCodecError> {
     let mut pages = Vec::new();
+    let mut canonical_digest = Sha256::new_with_prefix(b"[");
     let mut contents = vec![b'['];
     let mut first_sequence = 0;
     let mut count = 0;
-    for message in messages {
+    for (index, message) in messages.into_iter().enumerate() {
         check_signal(signal)?;
         let serialized = serde_json::to_vec(&message)?;
+        if index != 0 {
+            canonical_digest.update(b",");
+        }
+        canonical_digest.update(&serialized);
         if count != 0
             && (count >= CARRYOVER_PAGE_MAX_MESSAGES
                 || contents.len() + serialized.len() + 2 > CARRYOVER_PAGE_TARGET_BYTES)
@@ -122,7 +139,11 @@ fn encode_pages(
             signal,
         )?);
     }
-    Ok(pages)
+    canonical_digest.update(b"]");
+    Ok(EncodedSegmentPages {
+        pages,
+        canonical_messages_sha256: format!("{:x}", canonical_digest.finalize()),
+    })
 }
 
 fn encode_page(
@@ -272,7 +293,7 @@ impl<R: Read> Read for PageSource<R> {
     }
 }
 
-fn integrity(message: &'static str) -> CarryOverPageCodecError {
+pub(super) fn integrity(message: &'static str) -> CarryOverPageCodecError {
     CarryOverPageIntegrityError {
         message,
         cause: None,

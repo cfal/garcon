@@ -43,9 +43,10 @@ pub struct CarryOverSegmentIndex {
 pub struct CarryOverSegmentIndexError(String);
 
 pub fn is_carry_over_segment_id(value: &Value) -> bool {
-    let Some(text) = value.as_str() else {
-        return false;
-    };
+    value.as_str().is_some_and(has_segment_id)
+}
+
+pub(super) fn has_segment_id(text: &str) -> bool {
     let bytes = text.as_bytes();
     bytes.len() == 36
         && bytes.iter().enumerate().all(|(index, &byte)| match index {
