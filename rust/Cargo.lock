@@ -1192,10 +1192,13 @@ dependencies = [
  "async-trait",
  "garcon-base",
  "garcon-cases",
+ "garcon-chats",
  "garcon-contract",
+ "garcon-execution",
  "garcon-http",
  "garcon-interface",
  "garcon-js",
+ "garcon-ledger",
  "garcon-stores",
  "serde",
  "serde_json",
@@ -1204,6 +1207,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -1456,10 +1460,19 @@ dependencies = [
 name = "garcon-server"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "bytes",
  "flate2",
+ "futures",
+ "garcon-base",
+ "garcon-chats",
+ "garcon-contract",
  "garcon-controller",
+ "garcon-execution",
+ "garcon-executor",
  "garcon-http",
+ "garcon-interface",
+ "garcon-ledger",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -1469,6 +1482,7 @@ dependencies = [
  "socket2",
  "tempfile",
  "tokio",
+ "tokio-util",
  "tower-service",
 ]
 
