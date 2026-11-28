@@ -23,6 +23,17 @@ fn run(unit: &str, dispatch: impl Fn(&str, &[Value]) -> Result<Value, CaseError>
 }
 
 #[test]
+fn filter_keys_follow_their_first_valid_operator() {
+    let spec = chat_filter_query::parse_chat_search(
+        "status:invalid source:1783725900000201 status:active is:pinned status:unread",
+    );
+    assert_eq!(
+        serde_json::to_string(&spec).unwrap(),
+        r#"{"textTokens":[],"titles":[],"tags":[],"agents":[],"models":[],"project":[],"sources":[["1783725900000201"]],"status":"unread","orderGroup":{"group":"pinned","negated":false}}"#,
+    );
+}
+
+#[test]
 fn chat_filter_query_cases_match() {
     use chat_filter_query::*;
 
