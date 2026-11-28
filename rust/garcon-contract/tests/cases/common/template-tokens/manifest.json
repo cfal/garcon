@@ -1,0 +1,55 @@
+{
+  "module": "common/template-tokens.ts",
+  "tests": [
+    "rust/garcon-contract/tests/interface_cases/template-token-recording.cases.ts"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/template-tokens.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "expandTemplate",
+      "argument": 1
+    },
+    {
+      "fn": "expandTemplate",
+      "argument": 2
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "rust/garcon-contract/tests/interface_cases/template-token-recording.cases.ts:5:10",
+      "fn": "matchTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "rust/garcon-contract/tests/interface_cases/template-token-recording.cases.ts:8:10",
+      "fn": "matchTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "rust/garcon-contract/tests/interface_cases/template-token-recording.cases.ts:11:84",
+      "fn": "matchTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "rust/garcon-contract/tests/interface_cases/template-token-recording.cases.ts:12:104",
+      "fn": "matchTemplateTokens",
+      "count": 1
+    }
+  ],
+  "cases": 80,
+  "sha256": "b1b9e6178cd159be05a52e61ef5d9c5feaee66aca9cf3d16943c16292e79a4f9"
+}
