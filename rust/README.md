@@ -110,6 +110,24 @@ What is compared, per case:
   creates; review each one, since order and count differences are exactly what
   a port can get wrong for real.
 
+An HTTP step can append `rawHeaders`, an ordered array of `[name, value]` pairs,
+to its regular `headers`. Unlike Fetch, this writes each pair as a separate
+HTTP/1.1 field, including repeated names. For example:
+
+```json
+"rawHeaders": [
+  ["Authorization", "Bearer invalid-fixture-token"],
+  ["Content-Type", "application/json"],
+  ["Content-Type", "text/plain"]
+]
+```
+
+Default `auth: "token"` puts the provisioned Authorization before the raw
+fields, so this sends the session credential first and the invalid value
+second. For an exact order within the raw list, use `auth: "none"` and
+`["Authorization", "Bearer {{token}}"]` as a pair. Raw values accept
+placeholders and are recorded with those placeholders unexpanded.
+
 A request can hold these placeholders, in a path, a query, a header, or a body:
 
 - `{{token}}`, `{{username}}`, `{{password}}`, `{{projectDir}}`, and
