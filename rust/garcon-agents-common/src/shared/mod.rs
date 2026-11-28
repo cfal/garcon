@@ -1,4 +1,6 @@
+pub mod attachment_files;
 pub mod attachments;
+pub mod file_mention_context;
 pub mod idle_session_purger;
 pub(crate) mod json_response;
 pub mod native_message_source;
