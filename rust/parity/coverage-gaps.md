@@ -165,3 +165,9 @@ The cases are `request-target-over-listener-limit` and
   excludes seeding and process startup. This is a workload observation, not a
   latency limit or a comparison of release builds; the test checks that
   current and retained staging rows survive and abandoned rows are gone.
+- Append-and-compose still scans backward inside its synchronous write
+  transaction. In a build-machine comparison over 20,000 transparent
+  notice rows, appending the next input and composing its prompt took
+  70.84 ms on Bun 1.4.3 and 507.10 ms in the Rust debug build. The timer
+  excludes seeding, reopening, and process startup. Both implementations
+  committed the same address and returned the same input and prompt.
