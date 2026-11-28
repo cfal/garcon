@@ -43,7 +43,7 @@ pub fn ensure_ledger_chat_directory(
     Ok(canonical)
 }
 
-fn private_directory_builder() -> fs::DirBuilder {
+pub(crate) fn private_directory_builder() -> fs::DirBuilder {
     let builder = fs::DirBuilder::new();
     #[cfg(unix)]
     let builder = {
