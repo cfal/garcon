@@ -1,4 +1,4 @@
-import type { CapturedBody, Capture } from './capture.js';
+import type { Capture } from './capture.js';
 import type { StartedServer } from './environment.js';
 import type { ScenarioStep } from './scenario.js';
 import { isObject, type Json } from './wildcard.js';
@@ -15,7 +15,8 @@ const WHOLE_VALUE = new RegExp(`^\\{\\{(${NAME})\\}\\}$`);
 
 // `{{<step>.body.<path>}}`: the value at `path` in the JSON body of the
 // response to the step named `<step>`.
-const RESPONSE_VALUE = /^([\w~-]+)\.body\.(\w+(?:\[\d+\])?(?:\.\w+(?:\[\d+\])?)*)$/;
+const RESPONSE_BODY = /^([\w~-]+)\.body\.(\w+(?:\[\d+\])?(?:\.\w+(?:\[\d+\])?)*)$/;
+const RESPONSE_HEADER = /^([\w~-]+)\.headers\.([a-z0-9_.-]+)$/;
 const PATH_TOKEN = /[^\.[\]]+|\[\d+\]/g;
 
 const DAY_NAME = /^today(?:Plus(?<plus>\d+)|Minus(?<minus>\d+))?$/;
@@ -95,11 +96,16 @@ export interface Placeholders {
 // in later responses.
 const MIN_CARRIED_LENGTH = 8;
 
-function responseValue(step: ScenarioStep, name: string, stepName: string, path: string, captures: ReadonlyMap<string, Capture>): unknown {
+function responseValue(step: ScenarioStep, name: string, stepName: string, path: string, captures: ReadonlyMap<string, Capture>, source: 'headers' | 'body'): unknown {
   const missing = (what: string) => new Error(`${step.name}: {{${name}}} has no value: ${what}.`);
-  const capture = captures.get(stepName) as { body?: CapturedBody } | undefined;
+  const capture = captures.get(stepName);
   if (!capture) throw missing(`no step named "${stepName}" ran before it`);
-  if (capture.body?.kind !== 'json') throw missing(`the response of "${stepName}" has no JSON body`);
+  if (source === 'headers') {
+    const value = 'body' in capture ? capture.rawHeaders?.get(path) : null;
+    if (value == null) throw missing(`the response of "${stepName}" has no header ${path}`);
+    return value;
+  }
+  if (!('body' in capture) || capture.body.kind !== 'json') throw missing(`the response of "${stepName}" has no JSON body`);
   let value: unknown = capture.body.value;
   for (const token of path.match(PATH_TOKEN) ?? []) {
     if (token.startsWith('[')) {
@@ -130,13 +136,15 @@ export function resolvePlaceholders(server: StartedServer, step: ScenarioStep, c
   const resolved: Placeholders = { values: {}, typed: {}, carried: [] };
   for (const name of placeholderNames(step)) {
     const day = dayOf(name, now);
+    const header = RESPONSE_HEADER.exec(name);
+    const reference = header ?? RESPONSE_BODY.exec(name);
     if (day !== null) {
       resolved.values[name] = day;
     } else if (name in seeded) {
       resolved.values[name] = seeded[name];
-    } else if (RESPONSE_VALUE.test(name)) {
-      const [, stepName, path] = RESPONSE_VALUE.exec(name)!;
-      const value = responseValue(step, name, stepName!, path!, captures);
+    } else if (reference) {
+      const [, stepName, path] = reference;
+      const value = responseValue(step, name, stepName!, path!, captures, header ? 'headers' : 'body');
       if (typeof value !== 'string') resolved.typed[name] = value as Json;
       resolved.values[name] = typeof value === 'string' ? value : JSON.stringify(value);
       if (typeof value === 'string' && value.length >= MIN_CARRIED_LENGTH) resolved.carried.push([value, `{{${name}}}`]);

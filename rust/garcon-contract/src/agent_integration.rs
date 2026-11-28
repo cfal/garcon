@@ -1,14 +1,17 @@
 //! Ports `common/agent-integration.ts`.
+//!
+//! Known difference: parsing `{"__proto__":{"ownerId":"__proto__","schemaVersion":1,"values":{}}}`
+//! as settings by ID replaces the original object's prototype and writes
+//! `{}` to JSON. The Rust map retains the key.
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use garcon_js::{Number, is_safe_integer};
+use garcon_js::{Number, array_index, is_safe_integer, json::Opaque};
 
 use crate::api_providers::ApiProtocol;
 use crate::chat_modes::{PermissionMode, ThinkingMode};
-use crate::json::JsonObject;
 
 /// What an integration declares about itself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -44,12 +47,12 @@ pub enum AgentConfigurationSource {
 }
 
 /// The settings a chat holds for one agent.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSettingsEnvelope {
     pub owner_id: String,
     pub schema_version: i64,
-    pub values: JsonObject,
+    pub values: Opaque,
 }
 
 /// The label keys a setting can have.
@@ -232,11 +235,12 @@ pub fn parse_agent_settings_envelope(value: &Value) -> Option<AgentSettingsEnvel
     let schema_version =
         safe_integer(envelope.get("schemaVersion")?).filter(|version| *version >= 1)?;
     // `values` must hold JSON only, which a parsed value always does.
-    let values = envelope.get("values")?.as_object()?;
+    let values = envelope.get("values")?;
+    values.as_object()?;
     Some(AgentSettingsEnvelope {
         owner_id: owner_id.to_owned(),
         schema_version,
-        values: values.clone(),
+        values: Opaque::from_value(values.clone()),
     })
 }
 
@@ -248,7 +252,9 @@ pub fn parse_agent_settings_by_id(
 ) -> Option<IndexMap<String, AgentSettingsEnvelope>> {
     let settings = value.as_object()?;
     let mut parsed = IndexMap::with_capacity(settings.len());
-    for (agent_id, candidate) in settings {
+    let mut entries: Vec<_> = settings.iter().collect();
+    entries.sort_by_key(|(agent_id, _)| array_index(agent_id).unwrap_or(u64::MAX));
+    for (agent_id, candidate) in entries {
         let envelope = parse_agent_settings_envelope(candidate)?;
         if envelope.owner_id != *agent_id {
             return None;
@@ -267,7 +273,7 @@ mod tests {
         AgentSettingsEnvelope {
             owner_id: owner_id.to_owned(),
             schema_version,
-            values: JsonObject::new(),
+            values: Opaque::from_value(json!({})),
         }
     }
 
@@ -279,7 +285,7 @@ mod tests {
             Some(AgentSettingsEnvelope {
                 owner_id: "chat-1".to_owned(),
                 schema_version: 2,
-                values: json!({ "a": [1, "x"] }).as_object().unwrap().clone(),
+                values: Opaque::from_value(json!({ "a": [1, "x"] })),
             })
         );
         // A JSON `1.0` is the safe integer 1, as the original reads it.
@@ -364,7 +370,49 @@ mod tests {
             "values": values,
         }))
         .unwrap();
-        assert_eq!(parsed.values, values.as_object().unwrap().clone());
+        assert_eq!(parsed.values, Opaque::from_value(values));
+    }
+
+    #[test]
+    fn settings_numbers_round_trip_as_bun_json() {
+        let input = r#"{"ownerId":"synthetic","schemaVersion":1,"values":{"n":1.0,"big":9007199254740993,"exp21":1e21,"zero":-0}}"#;
+        let raw = garcon_js::json::from_str(input).unwrap();
+        let ours = serde_json::to_string(&parse_agent_settings_envelope(&raw).unwrap()).unwrap();
+        let original = std::process::Command::new("bun")
+            .current_dir(env!("CARGO_MANIFEST_DIR"))
+            .args([
+                "-e",
+                "import {parseAgentSettingsEnvelope} from '../../common/agent-integration.ts'; process.stdout.write(JSON.stringify(parseAgentSettingsEnvelope(JSON.parse(process.argv.at(-1)))));",
+                "--",
+                input,
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            original.status.success(),
+            "{}",
+            String::from_utf8_lossy(&original.stderr)
+        );
+        assert_eq!(ours.as_bytes(), original.stdout);
+        assert_eq!(
+            ours,
+            r#"{"ownerId":"synthetic","schemaVersion":1,"values":{"n":1,"big":9007199254740992,"exp21":1e+21,"zero":0}}"#
+        );
+    }
+
+    #[test]
+    fn settings_by_id_follow_javascript_property_order() {
+        let source = json!({
+            "other": {"ownerId":"other","schemaVersion":1,"values":{}},
+            "10": {"ownerId":"10","schemaVersion":1,"values":{}},
+            "2": {"ownerId":"2","schemaVersion":1,"values":{}},
+            "first": {"ownerId":"first","schemaVersion":1,"values":{}},
+        });
+        let parsed = parse_agent_settings_by_id(&source).unwrap();
+        assert_eq!(
+            parsed.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["2", "10", "other", "first"]
+        );
     }
 
     #[test]

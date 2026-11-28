@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { readFile, stat } from 'node:fs/promises';
+import { lstat, readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { resolve } from 'node:path';
 import { startServer, type ServerBuild, type StartedServer } from '../environment.js';
@@ -19,14 +19,22 @@ afterEach(async () => {
 });
 
 describe('startServer', () => {
-  test('gives the server a fixed PATH, whatever PATH the harness itself has', async () => {
+  test('exposes only private links to sh, bash and git, regardless of the parent PATH', async () => {
     const harnessPath = process.env.PATH;
     process.env.PATH = '/agent-clis-on-this-machine:/usr/bin:/bin';
     try {
-      const server = await start({ account: 'none' });
+      const server = await start({ account: 'none', environment: { PATH: '/usr/bin:/bin' } });
       const response = await fetch(`${server.baseUrl}/api/v1/path`);
-      // No agent CLI installed on the machine is on it, so catalogs do not depend on the machine.
-      expect(await response.text()).toBe('/usr/bin:/bin');
+      const path = join(server.dirs.root, 'bin');
+      expect(await response.text()).toBe(path);
+      expect((await stat(path)).mode & 0o777).toBe(0o700);
+      expect((await readdir(path)).sort()).toEqual(['bash', 'git', 'sh']);
+      for (const tool of ['bash', 'git', 'sh']) {
+        expect((await lstat(join(path, tool))).isSymbolicLink()).toBe(true);
+        expect(Bun.which(tool, { PATH: path })).toBe(join(path, tool));
+      }
+      expect(Bun.which('zsh', { PATH: path })).toBeNull();
+      expect(Bun.which('claude', { PATH: path })).toBeNull();
     } finally {
       if (harnessPath === undefined) delete process.env.PATH;
       else process.env.PATH = harnessPath;

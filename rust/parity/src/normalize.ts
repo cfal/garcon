@@ -79,7 +79,7 @@ function textDigest(text: string): Json {
 export function normalizeCapture(capture: Capture, server: StartedServer, extra: Normalization = {}): Json {
   const normalization = { ...extra, carried: replacements(server, extra.carried) };
   if ('body' in capture) {
-    const { body, ...rest } = capture;
+    const { body, rawHeaders: _rawHeaders, ...rest } = capture;
     return { ...normalizeValue(rest as unknown as Json, normalization) as Record<string, Json>, body: normalizeBody(body, normalization) };
   }
   return normalizeValue(capture as unknown as Json, normalization);

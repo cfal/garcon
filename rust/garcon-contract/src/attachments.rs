@@ -2,8 +2,9 @@
 //!
 //! Known difference: with an empty declared type, filenames `constructor`
 //! and `__proto__` make the original return `Object` and `Object.prototype`,
-//! respectively, via an inherited lookup. The Rust lookup treats them as
-//! unknown names.
+//! respectively, via an inherited lookup. A declared type of `__proto__`
+//! also throws instead of inferring the type from the file name. The Rust
+//! lookup treats inherited names as unknown.
 
 use std::sync::LazyLock;
 

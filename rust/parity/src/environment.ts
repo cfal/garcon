@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { Deferred, withTimeout } from '../../../integration-tests/support/deferred.js';
@@ -9,9 +9,10 @@ const READY_PATTERN = /Started at (http:\/\/[^\s]+)/;
 const STARTUP_TIMEOUT_MS = 60_000;
 // A fixed web build keeps static-asset recordings independent of local builds.
 const WEB_BUILD_FIXTURE = 'rust/parity/fixtures/web-build';
-// The only PATH the server sees. It inherits none, so an agent CLI installed
-// on the recording machine does not change a catalog response.
-const SERVER_PATH = '/usr/bin:/bin';
+// Shell discovery and project Git commands need these; all other tools are
+// intentionally absent from the server's PATH.
+const SERVER_TOOLS = ['sh', 'bash', 'git'];
+const SYSTEM_PATH = '/usr/bin:/bin';
 
 export interface ParityDirectories {
   root: string;
@@ -98,6 +99,17 @@ async function createDirectories(): Promise<ParityDirectories> {
   return dirs;
 }
 
+async function createToolPath(root: string): Promise<string> {
+  const path = join(root, 'bin');
+  await mkdir(path, { mode: PRIVATE_DIRECTORY });
+  for (const tool of SERVER_TOOLS) {
+    const executable = Bun.which(tool, { PATH: SYSTEM_PATH });
+    if (!executable) throw new Error(`Parity scenarios require ${tool} on ${SYSTEM_PATH}`);
+    await symlink(executable, join(path, tool));
+  }
+  return path;
+}
+
 // A seed under config/ or workspace/ stands in for a file the original
 // wrote, so it gets that file's modes. A project is the user's own directory.
 async function seedFiles(dirs: ParityDirectories, files: Record<string, string>): Promise<void> {
@@ -121,6 +133,10 @@ async function seedFiles(dirs: ParityDirectories, files: Record<string, string>)
 
 export async function startServer(repoRoot: string, build: ServerBuild, options: ServerOptions = {}): Promise<StartedServer> {
   const dirs = await createDirectories();
+  const path = await createToolPath(dirs.root).catch(async (error: unknown) => {
+    await rm(dirs.root, { recursive: true, force: true });
+    throw error;
+  });
   const unprovisioned = options.account === 'none';
   // A fixed username keeps recorded responses that echo it comparable.
   const credentials = unprovisioned
@@ -145,13 +161,13 @@ export async function startServer(repoRoot: string, build: ServerBuild, options:
     cwd: repoRoot,
     // A fixed time zone and locale keep recordings comparable across machines.
     env: isolatedEnvironment(dirs.homeDir, {
-      PATH: SERVER_PATH,
       TZ: 'UTC',
       LANG: 'C.UTF-8',
       ...frontDoorEnvironment(),
       GARCON_RS_FALLBACK_LOG: fallbackLogPath,
       GARCON_WEB_BUILD_DIR: options.webBuildDir ?? join(repoRoot, WEB_BUILD_FIXTURE),
       ...options.environment,
+      PATH: path,
     }),
     stdin: 'ignore',
     stdout: 'pipe',

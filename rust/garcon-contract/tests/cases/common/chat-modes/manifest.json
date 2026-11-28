@@ -4,7 +4,31 @@
     "common/__tests__/chat-modes.test.js"
   ],
   "inputs": "rust/garcon-contract/tests/inputs/common/chat-modes.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isPermissionMode",
+      "argument": 0
+    },
+    {
+      "fn": "isThinkingMode",
+      "argument": 0
+    },
+    {
+      "fn": "normalizePermissionMode",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeThinkingMode",
+      "argument": 0
+    },
+    {
+      "fn": "coerceThinkingMode",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
   "notCaptured": [],
-  "cases": 308,
-  "sha256": "e79be6c2d8e5412d32683d77098715678c45707184bf40dd4bb5667d9f61a2ca"
+  "cases": 303,
+  "sha256": "e9b70cddcc7f844a3388b61b0ca89277f00aebb0af1b0756c17fe077acfdfc4f"
 }

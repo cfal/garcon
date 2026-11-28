@@ -4,7 +4,7 @@ use std::path::Path;
 
 use garcon_js::clock::{Clock, InvalidTimeValue, SystemClock, to_iso_string};
 use garcon_js::json::Opaque;
-use garcon_js::path::posix;
+use garcon_js::path::native;
 use serde::Serialize;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -29,7 +29,7 @@ pub struct CorruptStateFileError {
 
 impl CorruptStateFileError {
     fn new(file_path: &str, quarantine_path: Option<String>, cause: BoxError) -> Self {
-        let basename = posix::basename(file_path);
+        let basename = native::basename(file_path);
         let message = if quarantine_path.is_some() {
             format!(
                 "State file {basename} is corrupt. Restore a valid state file before starting; keep the quarantine."
@@ -119,9 +119,10 @@ impl<C: Clock, G: Fn() -> Uuid> JsonFileStore<C, G> {
             Err(error) => return Err(error.into()),
         };
 
-        let parsed = parse_stored_json(&String::from_utf8_lossy(&raw), &posix::basename(file_path))
-            .map_err(BoxError::from)
-            .and_then(normalize);
+        let parsed =
+            parse_stored_json(&String::from_utf8_lossy(&raw), &native::basename(file_path))
+                .map_err(BoxError::from)
+                .and_then(normalize);
         match parsed {
             Ok(state) => Ok(state),
             Err(cause) => Err(self.quarantine_state_file(file_path, cause).await),
@@ -130,7 +131,7 @@ impl<C: Clock, G: Fn() -> Uuid> JsonFileStore<C, G> {
 
     async fn quarantine_state_file(&self, file_path: &str, cause: BoxError) -> ReadJsonStateError {
         let logger = create_logger("json-file-store");
-        let dir = posix::dirname(file_path);
+        let dir = native::dirname(file_path);
         let timestamp = match to_iso_string(self.clock.now_ms()) {
             Ok(timestamp) => timestamp.replace(['-', ':', '.'], ""),
             Err(error) => return error.into(),
@@ -184,10 +185,10 @@ impl<C: Clock, G: Fn() -> Uuid> JsonFileStore<C, G> {
         payload: &[u8],
         mode: Option<u32>,
     ) -> Result<(), WriteFileError> {
-        let dir = posix::dirname(file_path);
-        let base = posix::basename(file_path);
+        let dir = native::dirname(file_path);
+        let base = native::basename(file_path);
         let temporary_name = format!(".{base}.{}.{}.tmp", std::process::id(), (self.uuid)());
-        let temporary_path = posix::join(&[&dir, &temporary_name]);
+        let temporary_path = native::join(&[&dir, &temporary_name]);
         fs::create_dir_all(&dir).await?;
         let result = write_candidate(&temporary_path, file_path, &dir, &base, payload, mode).await;
         if result.is_err() {
@@ -198,8 +199,8 @@ impl<C: Clock, G: Fn() -> Uuid> JsonFileStore<C, G> {
 }
 
 async fn newest_quarantine_path(file_path: &str) -> io::Result<Option<String>> {
-    let dir = posix::dirname(file_path);
-    let prefix = format!("{}{QUARANTINE_INFIX}", posix::basename(file_path));
+    let dir = native::dirname(file_path);
+    let prefix = format!("{}{QUARANTINE_INFIX}", native::basename(file_path));
     let mut entries = match fs::read_dir(&dir).await {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -216,7 +217,7 @@ async fn newest_quarantine_path(file_path: &str) -> io::Result<Option<String>> {
             newest = Some(entry);
         }
     }
-    Ok(newest.map(|entry| posix::join(&[&dir, &entry])))
+    Ok(newest.map(|entry| native::join(&[&dir, &entry])))
 }
 
 async fn write_candidate(
@@ -262,14 +263,34 @@ pub async fn sync_directory(dir: impl AsRef<Path>) -> io::Result<()> {
     }
     .await;
     match result {
-        Err(error)
-            if matches!(
-                error.raw_os_error(),
-                Some(libc::EISDIR | libc::EINVAL | libc::EPERM | libc::ENOTSUP)
-            ) =>
-        {
-            Ok(())
-        }
+        Err(error) if is_unsupported_directory_sync_error(&error) => Ok(()),
         result => result,
     }
+}
+
+#[cfg(unix)]
+fn is_unsupported_directory_sync_error(error: &io::Error) -> bool {
+    matches!(
+        error.raw_os_error(),
+        Some(libc::EISDIR | libc::EINVAL | libc::EPERM | libc::ENOTSUP)
+    )
+}
+
+#[cfg(windows)]
+fn is_unsupported_directory_sync_error(error: &io::Error) -> bool {
+    const ERROR_INVALID_FUNCTION: i32 = 1;
+    const ERROR_ACCESS_DENIED: i32 = 5;
+    const ERROR_NOT_SUPPORTED: i32 = 50;
+    const ERROR_INVALID_PARAMETER: i32 = 87;
+    const ERROR_DIRECTORY: i32 = 267;
+    matches!(
+        error.raw_os_error(),
+        Some(
+            ERROR_INVALID_FUNCTION
+                | ERROR_ACCESS_DENIED
+                | ERROR_NOT_SUPPORTED
+                | ERROR_INVALID_PARAMETER
+                | ERROR_DIRECTORY
+        ),
+    )
 }
