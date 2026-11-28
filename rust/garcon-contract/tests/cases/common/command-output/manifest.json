@@ -3,7 +3,7 @@
   "tests": [
     "common/__tests__/command-output.test.js"
   ],
-  "inputs": null,
+  "inputs": "rust/garcon-contract/tests/inputs/common/command-output.jsonl",
   "guards": [
     {
       "fn": "commandOutcomeText",
@@ -16,7 +16,7 @@
       "fn": "isCleanCommandSuccess",
       "argument": 0,
       "guard": "parseCommandOutcome",
-      "dropped": 80,
+      "dropped": 92,
       "kept": 1
     }
   ],
@@ -48,6 +48,6 @@
   ],
   "bunVersion": "1.4.3",
   "notCaptured": [],
-  "cases": 345,
-  "sha256": "4b47b502d1f17beb8a3a1ba906886695d6c6d9651a7e1dd26b2392561cbed732"
+  "cases": 353,
+  "sha256": "0360a34d3be25d98fb88c31f15530563b216c4a1d93fa35b361348cdbef74204"
 }

@@ -21,6 +21,7 @@ mod git_request_validation;
 mod git_wire;
 mod helpers;
 mod tags;
+mod template_tokens;
 mod terminal;
 mod terminal_error;
 mod tickets;
