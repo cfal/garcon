@@ -1,0 +1,25 @@
+{"fn":"messagesUrl","args":["https://example.invalid"]}
+{"fn":"messagesUrl","args":["https://example.invalid/v1//"]}
+{"fn":"messagesUrl","args":["https://example.invalid/api/"]}
+{"fn":"messagesContent","args":["hello",[]]}
+{"fn":"messagesContent","args":["hello",[{"kind":"image","mimeType":"image/png","data":"data:image/png;base64,cG5n"},{"kind":"image","mimeType":"application/pdf","name":"fixture.pdf","data":"data:application/pdf;base64,cGRm"},{"kind":"image","mimeType":"text/markdown","name":"fixture.md","data":"data:text/markdown;base64,IyB0ZXh0"}]]}
+{"fn":"messagesContent","args":["hello",[{"kind":"image","mimeType":"image/png","data":"bad image"}]]}
+{"fn":"chatContent","args":["hello",[]]}
+{"fn":"chatContent","args":["hello",[{"kind":"image","mimeType":"image/png","data":"data:image/png;base64,cG5n"},{"kind":"image","mimeType":"image/png","data":""}]]}
+{"fn":"responsesContent","args":["hello",[]]}
+{"fn":"responsesContent","args":["hello",[{"kind":"image","mimeType":"image/png","data":"data:image/png;base64,cG5n"},{"kind":"image","mimeType":"image/png","data":""}]]}
+{"fn":"responsesOutput","args":[null]}
+{"fn":"responsesOutput","args":[{"output_text":"  preferred  ","output":[{"content":[{"type":"output_text","text":"not selected"}]}]}]}
+{"fn":"responsesOutput","args":[{"output":[null,{}, {"content":[null,{"type":"output_text","text":" first"},{"type":"refusal","text":"ignored"},{"type":"output_text","text":0}]},{"content":[{"type":"output_text","text":" and last "}]}]}]}
+{"fn":"responsesStream","args":[[null,{}, {"type":"response.output_text.delta","delta":""},{"type":"response.output_text.delta","delta":4},{"type":"response.completed","response":{"id":" "}}]]}
+{"fn":"responsesStream","args":[[{"type":"response.output_text.delta","delta":" "},{"type":"response.completed","response":{"id":" id "}}]]}
+{"fn":"responsesStream","args":[[{"type":"response.output_text.delta","delta":"partial"},{"type":"error","error":{"code":"synthetic","message":"stream rejected"}}]]}
+{"fn":"responsesStream","args":[[{"type":"error"}]]}
+{"fn":"responsesStream","args":[[{"type":"response.failed","response":{"error":{"code":"previous_response_not_found","message":"expired"},"status_details":{"error":{"code":"ignored","message":"ignored"}}}}]]}
+{"fn":"responsesStream","args":[[{"type":"response.failed","response":{"status_details":{"error":{"code":"previous_response_not_found","message":"expired"}}}}]]}
+{"fn":"responsesStream","args":[[{"type":"response.incomplete","response":{"incomplete_details":{"reason":"token limit"}}}]]}
+{"fn":"responsesStream","args":[[{"type":"response.incomplete"}]]}
+{"fn":"unresolvedCheckpoint","args":["previous_response_not_found",false]}
+{"fn":"unresolvedCheckpoint","args":["previous_response_not_found",true]}
+{"fn":"unresolvedCheckpoint","args":["other",false]}
+{"fn":"unresolvedCheckpoint","args":[null,false]}
