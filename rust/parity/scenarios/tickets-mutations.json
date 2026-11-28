@@ -17,49 +17,49 @@
       }
     },
     {
-      "name": "listEmpty",
+      "name": "list-empty",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets"
       }
     },
     {
-      "name": "countsEmpty",
+      "name": "counts-empty",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/counts"
       }
     },
     {
-      "name": "detailMissing",
+      "name": "detail-missing",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/detail?ticketId=G-1"
       }
     },
     {
-      "name": "commentsMissing",
+      "name": "comments-missing",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/comments?ticketId=G-1"
       }
     },
     {
-      "name": "historyMissing",
+      "name": "history-missing",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/history?ticketId=G-1"
       }
     },
     {
-      "name": "facetsEmpty",
+      "name": "facets-empty",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/facets?field=project"
       }
     },
     {
-      "name": "createFirst",
+      "name": "create-first",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -83,7 +83,7 @@
       }
     },
     {
-      "name": "createFirstReplayed",
+      "name": "create-first-replayed",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -107,7 +107,7 @@
       }
     },
     {
-      "name": "createFirstReplayedWithOtherPayload",
+      "name": "create-first-replayed-with-other-payload",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -131,7 +131,7 @@
       }
     },
     {
-      "name": "createSecond",
+      "name": "create-second",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -149,7 +149,7 @@
       }
     },
     {
-      "name": "createWithMissingParent",
+      "name": "create-with-missing-parent",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -168,7 +168,7 @@
       }
     },
     {
-      "name": "createAssignedToUser",
+      "name": "create-assigned-to-user",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -190,7 +190,7 @@
       }
     },
     {
-      "name": "createAssignedToOtherUser",
+      "name": "create-assigned-to-other-user",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -212,7 +212,7 @@
       }
     },
     {
-      "name": "createAssignedToExecutor",
+      "name": "create-assigned-to-executor",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -234,7 +234,7 @@
       }
     },
     {
-      "name": "createAssignedToMissingChat",
+      "name": "create-assigned-to-missing-chat",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -256,7 +256,7 @@
       }
     },
     {
-      "name": "createAssignedToChat",
+      "name": "create-assigned-to-chat",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -278,7 +278,7 @@
       }
     },
     {
-      "name": "createDeclaredFromChat",
+      "name": "create-declared-from-chat",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -297,7 +297,7 @@
       }
     },
     {
-      "name": "createDeclaredFromMissingChat",
+      "name": "create-declared-from-missing-chat",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -316,7 +316,7 @@
       }
     },
     {
-      "name": "createSixth",
+      "name": "create-sixth",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -338,7 +338,7 @@
       }
     },
     {
-      "name": "createSeventh",
+      "name": "create-seventh",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -374,91 +374,91 @@
       }
     },
     {
-      "name": "countsFiltered",
+      "name": "counts-filtered",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/counts?status=in-progress&includeClosed=true&priority=3&label=x&assignee=user:parity&ready=false&query=SIXTH"
       }
     },
     {
-      "name": "listFiltered",
+      "name": "list-filtered",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets?project=parity&status=open&includeClosed=false&priority=3&label=x&assignee=unassigned&query=x"
       }
     },
     {
-      "name": "detailFirst",
+      "name": "detail-first",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/detail?ticketId=G-1"
       }
     },
     {
-      "name": "detailThird",
+      "name": "detail-third",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/detail?ticketId=G-3"
       }
     },
     {
-      "name": "detailFourth",
+      "name": "detail-fourth",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/detail?ticketId=G-4"
       }
     },
     {
-      "name": "commentsFirst",
+      "name": "comments-first",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/comments?ticketId=G-1"
       }
     },
     {
-      "name": "historyFirst",
+      "name": "history-first",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/history?ticketId=G-1"
       }
     },
     {
-      "name": "facetsProject",
+      "name": "facets-project",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/facets?field=project"
       }
     },
     {
-      "name": "facetsProjectWithPrefix",
+      "name": "facets-project-with-prefix",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/facets?field=project&prefix=o"
       }
     },
     {
-      "name": "facetsLabel",
+      "name": "facets-label",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/facets?field=label"
       }
     },
     {
-      "name": "facetsLabelWithPrefix",
+      "name": "facets-label-with-prefix",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/facets?field=label&prefix="
       }
     },
     {
-      "name": "bootstrapAfterCreate",
+      "name": "bootstrap-after-create",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/bootstrap"
       }
     },
     {
-      "name": "updateFirst",
+      "name": "update-first",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -468,7 +468,7 @@
           "payload": {
             "action": "update",
             "ticketId": "G-1",
-            "expectedRevision": "{{createFirst.body.ticket.revision}}",
+            "expectedRevision": "{{create-first.body.ticket.revision}}",
             "patch": {
               "title": "First renamed",
               "priority": 3,
@@ -485,7 +485,7 @@
       }
     },
     {
-      "name": "updateFirstStale",
+      "name": "update-first-stale",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -504,7 +504,7 @@
       }
     },
     {
-      "name": "updateUnknown",
+      "name": "update-unknown",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -523,7 +523,7 @@
       }
     },
     {
-      "name": "updateFirstUnchanged",
+      "name": "update-first-unchanged",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -533,7 +533,7 @@
           "payload": {
             "action": "update",
             "ticketId": "G-1",
-            "expectedRevision": "{{updateFirst.body.ticket.revision}}",
+            "expectedRevision": "{{update-first.body.ticket.revision}}",
             "patch": {
               "title": "First renamed",
               "priority": 3,
@@ -548,7 +548,7 @@
       }
     },
     {
-      "name": "updateFirstParentMissing",
+      "name": "update-first-parent-missing",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -558,7 +558,7 @@
           "payload": {
             "action": "update",
             "ticketId": "G-1",
-            "expectedRevision": "{{updateFirst.body.ticket.revision}}",
+            "expectedRevision": "{{update-first.body.ticket.revision}}",
             "patch": {
               "parentId": "G-99"
             }
@@ -567,7 +567,7 @@
       }
     },
     {
-      "name": "updateFirstParentSelf",
+      "name": "update-first-parent-self",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -577,7 +577,7 @@
           "payload": {
             "action": "update",
             "ticketId": "G-1",
-            "expectedRevision": "{{updateFirst.body.ticket.revision}}",
+            "expectedRevision": "{{update-first.body.ticket.revision}}",
             "patch": {
               "parentId": "G-1"
             }
@@ -586,7 +586,7 @@
       }
     },
     {
-      "name": "updateSecondParentMakesCycle",
+      "name": "update-second-parent-makes-cycle",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -596,7 +596,7 @@
           "payload": {
             "action": "update",
             "ticketId": "G-2",
-            "expectedRevision": "{{createSecond.body.ticket.revision}}",
+            "expectedRevision": "{{create-second.body.ticket.revision}}",
             "patch": {
               "parentId": "G-1"
             }
@@ -605,7 +605,7 @@
       }
     },
     {
-      "name": "updateFirstAssigneeOtherUser",
+      "name": "update-first-assignee-other-user",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -615,7 +615,7 @@
           "payload": {
             "action": "update",
             "ticketId": "G-1",
-            "expectedRevision": "{{updateFirst.body.ticket.revision}}",
+            "expectedRevision": "{{update-first.body.ticket.revision}}",
             "patch": {
               "assignee": {
                 "kind": "user",
@@ -627,7 +627,7 @@
       }
     },
     {
-      "name": "updateFirstAssigneeMissingChat",
+      "name": "update-first-assignee-missing-chat",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -637,7 +637,7 @@
           "payload": {
             "action": "update",
             "ticketId": "G-1",
-            "expectedRevision": "{{updateFirst.body.ticket.revision}}",
+            "expectedRevision": "{{update-first.body.ticket.revision}}",
             "patch": {
               "assignee": {
                 "kind": "chat",
@@ -649,7 +649,7 @@
       }
     },
     {
-      "name": "updateFirstAssignsUser",
+      "name": "update-first-assigns-user",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -659,7 +659,7 @@
           "payload": {
             "action": "update",
             "ticketId": "G-1",
-            "expectedRevision": "{{updateFirst.body.ticket.revision}}",
+            "expectedRevision": "{{update-first.body.ticket.revision}}",
             "patch": {
               "assignee": {
                 "kind": "user",
@@ -671,7 +671,7 @@
       }
     },
     {
-      "name": "updateFirstClearsAssignee",
+      "name": "update-first-clears-assignee",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -681,7 +681,7 @@
           "payload": {
             "action": "update",
             "ticketId": "G-1",
-            "expectedRevision": "{{updateFirstAssignsUser.body.ticket.revision}}",
+            "expectedRevision": "{{update-first-assigns-user.body.ticket.revision}}",
             "patch": {
               "assignee": null
             }
@@ -690,7 +690,7 @@
       }
     },
     {
-      "name": "updateFirstClearsParent",
+      "name": "update-first-clears-parent",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -700,7 +700,7 @@
           "payload": {
             "action": "update",
             "ticketId": "G-1",
-            "expectedRevision": "{{updateFirstClearsAssignee.body.ticket.revision}}",
+            "expectedRevision": "{{update-first-clears-assignee.body.ticket.revision}}",
             "patch": {
               "parentId": null
             }
@@ -709,7 +709,7 @@
       }
     },
     {
-      "name": "claimSecond",
+      "name": "claim-second",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -719,13 +719,13 @@
           "payload": {
             "action": "claim",
             "ticketId": "G-2",
-            "expectedRevision": "{{createSecond.body.ticket.revision}}"
+            "expectedRevision": "{{create-second.body.ticket.revision}}"
           }
         }
       }
     },
     {
-      "name": "claimSecondAgain",
+      "name": "claim-second-again",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -735,13 +735,13 @@
           "payload": {
             "action": "claim",
             "ticketId": "G-2",
-            "expectedRevision": "{{claimSecond.body.ticket.revision}}"
+            "expectedRevision": "{{claim-second.body.ticket.revision}}"
           }
         }
       }
     },
     {
-      "name": "claimSecondStale",
+      "name": "claim-second-stale",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -757,7 +757,7 @@
       }
     },
     {
-      "name": "claimThird",
+      "name": "claim-third",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -767,13 +767,13 @@
           "payload": {
             "action": "claim",
             "ticketId": "G-3",
-            "expectedRevision": "{{createAssignedToUser.body.ticket.revision}}"
+            "expectedRevision": "{{create-assigned-to-user.body.ticket.revision}}"
           }
         }
       }
     },
     {
-      "name": "claimFourthHeldByChat",
+      "name": "claim-fourth-held-by-chat",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -783,13 +783,13 @@
           "payload": {
             "action": "claim",
             "ticketId": "G-4",
-            "expectedRevision": "{{createAssignedToChat.body.ticket.revision}}"
+            "expectedRevision": "{{create-assigned-to-chat.body.ticket.revision}}"
           }
         }
       }
     },
     {
-      "name": "claimUnknown",
+      "name": "claim-unknown",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -805,7 +805,7 @@
       }
     },
     {
-      "name": "releaseSecond",
+      "name": "release-second",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -815,13 +815,13 @@
           "payload": {
             "action": "release",
             "ticketId": "G-2",
-            "expectedRevision": "{{claimSecond.body.ticket.revision}}"
+            "expectedRevision": "{{claim-second.body.ticket.revision}}"
           }
         }
       }
     },
     {
-      "name": "releaseSecondAgain",
+      "name": "release-second-again",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -831,13 +831,13 @@
           "payload": {
             "action": "release",
             "ticketId": "G-2",
-            "expectedRevision": "{{releaseSecond.body.ticket.revision}}"
+            "expectedRevision": "{{release-second.body.ticket.revision}}"
           }
         }
       }
     },
     {
-      "name": "releaseFourthHeldByChat",
+      "name": "release-fourth-held-by-chat",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -847,13 +847,13 @@
           "payload": {
             "action": "release",
             "ticketId": "G-4",
-            "expectedRevision": "{{createAssignedToChat.body.ticket.revision}}"
+            "expectedRevision": "{{create-assigned-to-chat.body.ticket.revision}}"
           }
         }
       }
     },
     {
-      "name": "reopenSecondWhileOpen",
+      "name": "reopen-second-while-open",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -863,13 +863,13 @@
           "payload": {
             "action": "reopen",
             "ticketId": "G-2",
-            "expectedRevision": "{{releaseSecondAgain.body.ticket.revision}}"
+            "expectedRevision": "{{release-second-again.body.ticket.revision}}"
           }
         }
       }
     },
     {
-      "name": "closeSecond",
+      "name": "close-second",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -879,7 +879,7 @@
           "payload": {
             "action": "close",
             "ticketId": "G-2",
-            "expectedRevision": "{{releaseSecondAgain.body.ticket.revision}}",
+            "expectedRevision": "{{release-second-again.body.ticket.revision}}",
             "resolution": "done",
             "comment": "Closing"
           }
@@ -887,7 +887,7 @@
       }
     },
     {
-      "name": "closeSecondOtherResolution",
+      "name": "close-second-other-resolution",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -897,14 +897,14 @@
           "payload": {
             "action": "close",
             "ticketId": "G-2",
-            "expectedRevision": "{{closeSecond.body.ticket.revision}}",
+            "expectedRevision": "{{close-second.body.ticket.revision}}",
             "resolution": "canceled"
           }
         }
       }
     },
     {
-      "name": "closeSecondAgain",
+      "name": "close-second-again",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -914,14 +914,14 @@
           "payload": {
             "action": "close",
             "ticketId": "G-2",
-            "expectedRevision": "{{closeSecond.body.ticket.revision}}",
+            "expectedRevision": "{{close-second.body.ticket.revision}}",
             "resolution": "done"
           }
         }
       }
     },
     {
-      "name": "closeSecondAnotherComment",
+      "name": "close-second-another-comment",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -931,7 +931,7 @@
           "payload": {
             "action": "close",
             "ticketId": "G-2",
-            "expectedRevision": "{{closeSecondAgain.body.ticket.revision}}",
+            "expectedRevision": "{{close-second-again.body.ticket.revision}}",
             "resolution": "done",
             "comment": "Still closing"
           }
@@ -939,7 +939,7 @@
       }
     },
     {
-      "name": "claimSecondClosed",
+      "name": "claim-second-closed",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -949,13 +949,13 @@
           "payload": {
             "action": "claim",
             "ticketId": "G-2",
-            "expectedRevision": "{{closeSecondAnotherComment.body.ticket.revision}}"
+            "expectedRevision": "{{close-second-another-comment.body.ticket.revision}}"
           }
         }
       }
     },
     {
-      "name": "updateSecondClosedStatus",
+      "name": "update-second-closed-status",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -965,7 +965,7 @@
           "payload": {
             "action": "update",
             "ticketId": "G-2",
-            "expectedRevision": "{{closeSecondAnotherComment.body.ticket.revision}}",
+            "expectedRevision": "{{close-second-another-comment.body.ticket.revision}}",
             "patch": {
               "status": "in-progress"
             }
@@ -974,7 +974,7 @@
       }
     },
     {
-      "name": "updateSecondClosedTitle",
+      "name": "update-second-closed-title",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -984,7 +984,7 @@
           "payload": {
             "action": "update",
             "ticketId": "G-2",
-            "expectedRevision": "{{closeSecondAnotherComment.body.ticket.revision}}",
+            "expectedRevision": "{{close-second-another-comment.body.ticket.revision}}",
             "patch": {
               "title": "Second closed"
             }
@@ -993,7 +993,7 @@
       }
     },
     {
-      "name": "releaseSecondClosed",
+      "name": "release-second-closed",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1003,13 +1003,13 @@
           "payload": {
             "action": "release",
             "ticketId": "G-2",
-            "expectedRevision": "{{updateSecondClosedTitle.body.ticket.revision}}"
+            "expectedRevision": "{{update-second-closed-title.body.ticket.revision}}"
           }
         }
       }
     },
     {
-      "name": "reopenSecond",
+      "name": "reopen-second",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1019,13 +1019,13 @@
           "payload": {
             "action": "reopen",
             "ticketId": "G-2",
-            "expectedRevision": "{{releaseSecondClosed.body.ticket.revision}}"
+            "expectedRevision": "{{release-second-closed.body.ticket.revision}}"
           }
         }
       }
     },
     {
-      "name": "reopenSecondAgain",
+      "name": "reopen-second-again",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1035,13 +1035,13 @@
           "payload": {
             "action": "reopen",
             "ticketId": "G-2",
-            "expectedRevision": "{{reopenSecond.body.ticket.revision}}"
+            "expectedRevision": "{{reopen-second.body.ticket.revision}}"
           }
         }
       }
     },
     {
-      "name": "closeSecondDefaultResolution",
+      "name": "close-second-default-resolution",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1051,13 +1051,13 @@
           "payload": {
             "action": "close",
             "ticketId": "G-2",
-            "expectedRevision": "{{reopenSecondAgain.body.ticket.revision}}"
+            "expectedRevision": "{{reopen-second-again.body.ticket.revision}}"
           }
         }
       }
     },
     {
-      "name": "closeSecondOtherResolutionWhileClosed",
+      "name": "close-second-other-resolution-while-closed",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1067,14 +1067,14 @@
           "payload": {
             "action": "close",
             "ticketId": "G-2",
-            "expectedRevision": "{{closeSecondDefaultResolution.body.ticket.revision}}",
+            "expectedRevision": "{{close-second-default-resolution.body.ticket.revision}}",
             "resolution": "canceled"
           }
         }
       }
     },
     {
-      "name": "reopenSecondFromDone",
+      "name": "reopen-second-from-done",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1084,13 +1084,13 @@
           "payload": {
             "action": "reopen",
             "ticketId": "G-2",
-            "expectedRevision": "{{closeSecondDefaultResolution.body.ticket.revision}}"
+            "expectedRevision": "{{close-second-default-resolution.body.ticket.revision}}"
           }
         }
       }
     },
     {
-      "name": "closeSecondCanceled",
+      "name": "close-second-canceled",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1100,14 +1100,14 @@
           "payload": {
             "action": "close",
             "ticketId": "G-2",
-            "expectedRevision": "{{reopenSecondFromDone.body.ticket.revision}}",
+            "expectedRevision": "{{reopen-second-from-done.body.ticket.revision}}",
             "resolution": "canceled"
           }
         }
       }
     },
     {
-      "name": "closeSecondCanceledAgain",
+      "name": "close-second-canceled-again",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1117,14 +1117,14 @@
           "payload": {
             "action": "close",
             "ticketId": "G-2",
-            "expectedRevision": "{{closeSecondCanceled.body.ticket.revision}}",
+            "expectedRevision": "{{close-second-canceled.body.ticket.revision}}",
             "resolution": "canceled"
           }
         }
       }
     },
     {
-      "name": "reopenSecondCanceled",
+      "name": "reopen-second-canceled",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1134,27 +1134,27 @@
           "payload": {
             "action": "reopen",
             "ticketId": "G-2",
-            "expectedRevision": "{{closeSecondCanceledAgain.body.ticket.revision}}"
+            "expectedRevision": "{{close-second-canceled-again.body.ticket.revision}}"
           }
         }
       }
     },
     {
-      "name": "detailSecondClosed",
+      "name": "detail-second-closed",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/detail?ticketId=G-2"
       }
     },
     {
-      "name": "commentsSecond",
+      "name": "comments-second",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/comments?ticketId=G-2"
       }
     },
     {
-      "name": "commentFirst",
+      "name": "comment-first",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1170,7 +1170,7 @@
       }
     },
     {
-      "name": "commentUnknownTicket",
+      "name": "comment-unknown-ticket",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1186,7 +1186,7 @@
       }
     },
     {
-      "name": "commentFirstAgain",
+      "name": "comment-first-again",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1202,7 +1202,7 @@
       }
     },
     {
-      "name": "commentEdit",
+      "name": "comment-edit",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1212,15 +1212,15 @@
           "payload": {
             "action": "comment-edit",
             "ticketId": "G-1",
-            "commentId": "{{commentFirst.body.comment.id}}",
-            "expectedRevision": "{{commentFirst.body.comment.revision}}",
+            "commentId": "{{comment-first.body.comment.id}}",
+            "expectedRevision": "{{comment-first.body.comment.revision}}",
             "body": "Edited"
           }
         }
       }
     },
     {
-      "name": "commentEditStale",
+      "name": "comment-edit-stale",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1230,7 +1230,7 @@
           "payload": {
             "action": "comment-edit",
             "ticketId": "G-1",
-            "commentId": "{{commentFirst.body.comment.id}}",
+            "commentId": "{{comment-first.body.comment.id}}",
             "expectedRevision": 1,
             "body": "Edited again"
           }
@@ -1238,7 +1238,7 @@
       }
     },
     {
-      "name": "commentEditUnchanged",
+      "name": "comment-edit-unchanged",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1248,15 +1248,15 @@
           "payload": {
             "action": "comment-edit",
             "ticketId": "G-1",
-            "commentId": "{{commentFirst.body.comment.id}}",
-            "expectedRevision": "{{commentEdit.body.comment.revision}}",
+            "commentId": "{{comment-first.body.comment.id}}",
+            "expectedRevision": "{{comment-edit.body.comment.revision}}",
             "body": "Edited"
           }
         }
       }
     },
     {
-      "name": "commentEditUnknownComment",
+      "name": "comment-edit-unknown-comment",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1274,7 +1274,7 @@
       }
     },
     {
-      "name": "commentEditCommentOfOtherTicket",
+      "name": "comment-edit-comment-of-other-ticket",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1284,15 +1284,15 @@
           "payload": {
             "action": "comment-edit",
             "ticketId": "G-2",
-            "commentId": "{{commentFirst.body.comment.id}}",
-            "expectedRevision": "{{commentEdit.body.comment.revision}}",
+            "commentId": "{{comment-first.body.comment.id}}",
+            "expectedRevision": "{{comment-edit.body.comment.revision}}",
             "body": "Edited elsewhere"
           }
         }
       }
     },
     {
-      "name": "commentFromChat",
+      "name": "comment-from-chat",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1309,7 +1309,7 @@
       }
     },
     {
-      "name": "commentEditDeclaredWithoutDeclaring",
+      "name": "comment-edit-declared-without-declaring",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1319,15 +1319,15 @@
           "payload": {
             "action": "comment-edit",
             "ticketId": "G-1",
-            "commentId": "{{commentFromChat.body.comment.id}}",
-            "expectedRevision": "{{commentFromChat.body.comment.revision}}",
+            "commentId": "{{comment-from-chat.body.comment.id}}",
+            "expectedRevision": "{{comment-from-chat.body.comment.revision}}",
             "body": "Edited without declaring"
           }
         }
       }
     },
     {
-      "name": "commentEditDeclaredDeclaring",
+      "name": "comment-edit-declared-declaring",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1338,15 +1338,15 @@
           "payload": {
             "action": "comment-edit",
             "ticketId": "G-1",
-            "commentId": "{{commentFromChat.body.comment.id}}",
-            "expectedRevision": "{{commentEditDeclaredWithoutDeclaring.body.comment.revision}}",
+            "commentId": "{{comment-from-chat.body.comment.id}}",
+            "expectedRevision": "{{comment-edit-declared-without-declaring.body.comment.revision}}",
             "body": "Edited declaring the chat"
           }
         }
       }
     },
     {
-      "name": "commentEditDeclaredDeclaringOtherChat",
+      "name": "comment-edit-declared-declaring-other-chat",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1357,15 +1357,15 @@
           "payload": {
             "action": "comment-edit",
             "ticketId": "G-1",
-            "commentId": "{{commentFromChat.body.comment.id}}",
-            "expectedRevision": "{{commentEditDeclaredDeclaring.body.comment.revision}}",
+            "commentId": "{{comment-from-chat.body.comment.id}}",
+            "expectedRevision": "{{comment-edit-declared-declaring.body.comment.revision}}",
             "body": "Edited declaring another chat"
           }
         }
       }
     },
     {
-      "name": "commentSecond",
+      "name": "comment-second",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1381,7 +1381,7 @@
       }
     },
     {
-      "name": "commentDeleteFirst",
+      "name": "comment-delete-first",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1391,14 +1391,14 @@
           "payload": {
             "action": "comment-delete",
             "ticketId": "G-1",
-            "commentId": "{{commentFirst.body.comment.id}}",
-            "expectedRevision": "{{commentEditUnchanged.body.comment.revision}}"
+            "commentId": "{{comment-first.body.comment.id}}",
+            "expectedRevision": "{{comment-edit-unchanged.body.comment.revision}}"
           }
         }
       }
     },
     {
-      "name": "commentDeleteFirstAgain",
+      "name": "comment-delete-first-again",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1408,14 +1408,14 @@
           "payload": {
             "action": "comment-delete",
             "ticketId": "G-1",
-            "commentId": "{{commentFirst.body.comment.id}}",
-            "expectedRevision": "{{commentDeleteFirst.body.comment.revision}}"
+            "commentId": "{{comment-first.body.comment.id}}",
+            "expectedRevision": "{{comment-delete-first.body.comment.revision}}"
           }
         }
       }
     },
     {
-      "name": "commentEditDeleted",
+      "name": "comment-edit-deleted",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1425,15 +1425,15 @@
           "payload": {
             "action": "comment-edit",
             "ticketId": "G-1",
-            "commentId": "{{commentFirst.body.comment.id}}",
-            "expectedRevision": "{{commentDeleteFirstAgain.body.comment.revision}}",
+            "commentId": "{{comment-first.body.comment.id}}",
+            "expectedRevision": "{{comment-delete-first-again.body.comment.revision}}",
             "body": "Back"
           }
         }
       }
     },
     {
-      "name": "commentThird",
+      "name": "comment-third",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1449,7 +1449,7 @@
       }
     },
     {
-      "name": "commentFourth",
+      "name": "comment-fourth",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1465,77 +1465,77 @@
       }
     },
     {
-      "name": "commentsFirstPage",
+      "name": "comments-first-page",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/comments?ticketId=G-1&limit=2"
       }
     },
     {
-      "name": "commentsFirstPageContinued",
+      "name": "comments-first-page-continued",
       "http": {
         "method": "GET",
-        "path": "/api/v1/tickets/comments?ticketId=G-1&limit=2&beforeSequence={{commentsFirstPage.body.nextBeforeSequence}}&expectedCollectionRevision={{commentsFirstPage.body.collectionRevision}}"
+        "path": "/api/v1/tickets/comments?ticketId=G-1&limit=2&beforeSequence={{comments-first-page.body.nextBeforeSequence}}&expectedCollectionRevision={{comments-first-page.body.collectionRevision}}"
       }
     },
     {
-      "name": "commentsFirstPageContinuedStale",
+      "name": "comments-first-page-continued-stale",
       "http": {
         "method": "GET",
-        "path": "/api/v1/tickets/comments?ticketId=G-1&limit=2&beforeSequence={{commentsFirstPage.body.nextBeforeSequence}}&expectedCollectionRevision=0"
+        "path": "/api/v1/tickets/comments?ticketId=G-1&limit=2&beforeSequence={{comments-first-page.body.nextBeforeSequence}}&expectedCollectionRevision=0"
       }
     },
     {
-      "name": "commentsFirstAll",
+      "name": "comments-first-all",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/comments?ticketId=G-1"
       }
     },
     {
-      "name": "detailFirstComments",
+      "name": "detail-first-comments",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/detail?ticketId=G-1&commentLimit=1"
       }
     },
     {
-      "name": "detailFirstCommentsContinued",
+      "name": "detail-first-comments-continued",
       "http": {
         "method": "GET",
-        "path": "/api/v1/tickets/detail?ticketId=G-1&commentLimit=1&beforeCommentSequence={{detailFirstComments.body.comments.nextBeforeSequence}}&expectedCollectionRevision={{detailFirstComments.body.collectionRevision}}"
+        "path": "/api/v1/tickets/detail?ticketId=G-1&commentLimit=1&beforeCommentSequence={{detail-first-comments.body.comments.nextBeforeSequence}}&expectedCollectionRevision={{detail-first-comments.body.collectionRevision}}"
       }
     },
     {
-      "name": "detailFirstWithoutDescription",
+      "name": "detail-first-without-description",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/detail?ticketId=G-1&includeDescription=false"
       }
     },
     {
-      "name": "historyFirstPage",
+      "name": "history-first-page",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/history?ticketId=G-1&limit=3"
       }
     },
     {
-      "name": "historyFirstPageContinued",
+      "name": "history-first-page-continued",
       "http": {
         "method": "GET",
-        "path": "/api/v1/tickets/history?ticketId=G-1&limit=3&beforeSequence={{historyFirstPage.body.nextBeforeSequence}}"
+        "path": "/api/v1/tickets/history?ticketId=G-1&limit=3&beforeSequence={{history-first-page.body.nextBeforeSequence}}"
       }
     },
     {
-      "name": "historyFirstAll",
+      "name": "history-first-all",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/history?ticketId=G-1"
       }
     },
     {
-      "name": "linkFirstBlocksSecond",
+      "name": "link-first-blocks-second",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1545,16 +1545,16 @@
           "payload": {
             "action": "link",
             "ticketId": "G-1",
-            "expectedRevision": "{{updateFirstClearsParent.body.ticket.revision}}",
+            "expectedRevision": "{{update-first-clears-parent.body.ticket.revision}}",
             "targetId": "G-2",
-            "targetRevision": "{{reopenSecondCanceled.body.ticket.revision}}",
+            "targetRevision": "{{reopen-second-canceled.body.ticket.revision}}",
             "kind": "blocks"
           }
         }
       }
     },
     {
-      "name": "linkFirstBlocksSecondAgain",
+      "name": "link-first-blocks-second-again",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1564,16 +1564,16 @@
           "payload": {
             "action": "link",
             "ticketId": "G-1",
-            "expectedRevision": "{{linkFirstBlocksSecond.body.ticket.revision}}",
+            "expectedRevision": "{{link-first-blocks-second.body.ticket.revision}}",
             "targetId": "G-2",
-            "targetRevision": "{{linkFirstBlocksSecond.body.relatedTicket.revision}}",
+            "targetRevision": "{{link-first-blocks-second.body.relatedTicket.revision}}",
             "kind": "blocks"
           }
         }
       }
     },
     {
-      "name": "linkTargetStale",
+      "name": "link-target-stale",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1583,7 +1583,7 @@
           "payload": {
             "action": "link",
             "ticketId": "G-1",
-            "expectedRevision": "{{linkFirstBlocksSecond.body.ticket.revision}}",
+            "expectedRevision": "{{link-first-blocks-second.body.ticket.revision}}",
             "targetId": "G-2",
             "targetRevision": 1,
             "kind": "related"
@@ -1592,7 +1592,7 @@
       }
     },
     {
-      "name": "linkSourceStale",
+      "name": "link-source-stale",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1604,14 +1604,14 @@
             "ticketId": "G-1",
             "expectedRevision": 1,
             "targetId": "G-2",
-            "targetRevision": "{{linkFirstBlocksSecond.body.relatedTicket.revision}}",
+            "targetRevision": "{{link-first-blocks-second.body.relatedTicket.revision}}",
             "kind": "related"
           }
         }
       }
     },
     {
-      "name": "linkToItself",
+      "name": "link-to-itself",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1621,16 +1621,16 @@
           "payload": {
             "action": "link",
             "ticketId": "G-1",
-            "expectedRevision": "{{linkFirstBlocksSecond.body.ticket.revision}}",
+            "expectedRevision": "{{link-first-blocks-second.body.ticket.revision}}",
             "targetId": "G-1",
-            "targetRevision": "{{linkFirstBlocksSecond.body.ticket.revision}}",
+            "targetRevision": "{{link-first-blocks-second.body.ticket.revision}}",
             "kind": "related"
           }
         }
       }
     },
     {
-      "name": "linkUnknownTarget",
+      "name": "link-unknown-target",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1640,7 +1640,7 @@
           "payload": {
             "action": "link",
             "ticketId": "G-1",
-            "expectedRevision": "{{linkFirstBlocksSecond.body.ticket.revision}}",
+            "expectedRevision": "{{link-first-blocks-second.body.ticket.revision}}",
             "targetId": "G-99",
             "targetRevision": 1,
             "kind": "related"
@@ -1649,7 +1649,7 @@
       }
     },
     {
-      "name": "linkSecondBlocksFirstCycle",
+      "name": "link-second-blocks-first-cycle",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1659,16 +1659,16 @@
           "payload": {
             "action": "link",
             "ticketId": "G-2",
-            "expectedRevision": "{{linkFirstBlocksSecond.body.relatedTicket.revision}}",
+            "expectedRevision": "{{link-first-blocks-second.body.relatedTicket.revision}}",
             "targetId": "G-1",
-            "targetRevision": "{{linkFirstBlocksSecond.body.ticket.revision}}",
+            "targetRevision": "{{link-first-blocks-second.body.ticket.revision}}",
             "kind": "blocks"
           }
         }
       }
     },
     {
-      "name": "linkSecondBlocksFirstRelated",
+      "name": "link-second-blocks-first-related",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1678,16 +1678,16 @@
           "payload": {
             "action": "link",
             "ticketId": "G-2",
-            "expectedRevision": "{{linkFirstBlocksSecond.body.relatedTicket.revision}}",
+            "expectedRevision": "{{link-first-blocks-second.body.relatedTicket.revision}}",
             "targetId": "G-1",
-            "targetRevision": "{{linkFirstBlocksSecond.body.ticket.revision}}",
+            "targetRevision": "{{link-first-blocks-second.body.ticket.revision}}",
             "kind": "related"
           }
         }
       }
     },
     {
-      "name": "linkFirstRelatedThird",
+      "name": "link-first-related-third",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1697,16 +1697,16 @@
           "payload": {
             "action": "link",
             "ticketId": "G-1",
-            "expectedRevision": "{{linkSecondBlocksFirstRelated.body.relatedTicket.revision}}",
+            "expectedRevision": "{{link-second-blocks-first-related.body.relatedTicket.revision}}",
             "targetId": "G-3",
-            "targetRevision": "{{claimThird.body.ticket.revision}}",
+            "targetRevision": "{{claim-third.body.ticket.revision}}",
             "kind": "related"
           }
         }
       }
     },
     {
-      "name": "linkThirdRelatedFirstAgain",
+      "name": "link-third-related-first-again",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1716,16 +1716,16 @@
           "payload": {
             "action": "link",
             "ticketId": "G-3",
-            "expectedRevision": "{{linkFirstRelatedThird.body.relatedTicket.revision}}",
+            "expectedRevision": "{{link-first-related-third.body.relatedTicket.revision}}",
             "targetId": "G-1",
-            "targetRevision": "{{linkFirstRelatedThird.body.ticket.revision}}",
+            "targetRevision": "{{link-first-related-third.body.ticket.revision}}",
             "kind": "related"
           }
         }
       }
     },
     {
-      "name": "unlinkFirstBlocksSecond",
+      "name": "unlink-first-blocks-second",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1735,16 +1735,16 @@
           "payload": {
             "action": "unlink",
             "ticketId": "G-1",
-            "expectedRevision": "{{linkThirdRelatedFirstAgain.body.relatedTicket.revision}}",
+            "expectedRevision": "{{link-third-related-first-again.body.relatedTicket.revision}}",
             "targetId": "G-2",
-            "targetRevision": "{{linkSecondBlocksFirstRelated.body.ticket.revision}}",
+            "targetRevision": "{{link-second-blocks-first-related.body.ticket.revision}}",
             "kind": "blocks"
           }
         }
       }
     },
     {
-      "name": "unlinkFirstBlocksSecondAgain",
+      "name": "unlink-first-blocks-second-again",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1754,16 +1754,16 @@
           "payload": {
             "action": "unlink",
             "ticketId": "G-1",
-            "expectedRevision": "{{unlinkFirstBlocksSecond.body.ticket.revision}}",
+            "expectedRevision": "{{unlink-first-blocks-second.body.ticket.revision}}",
             "targetId": "G-2",
-            "targetRevision": "{{unlinkFirstBlocksSecond.body.relatedTicket.revision}}",
+            "targetRevision": "{{unlink-first-blocks-second.body.relatedTicket.revision}}",
             "kind": "blocks"
           }
         }
       }
     },
     {
-      "name": "unlinkNeverLinked",
+      "name": "unlink-never-linked",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1773,72 +1773,72 @@
           "payload": {
             "action": "unlink",
             "ticketId": "G-1",
-            "expectedRevision": "{{unlinkFirstBlocksSecondAgain.body.ticket.revision}}",
+            "expectedRevision": "{{unlink-first-blocks-second-again.body.ticket.revision}}",
             "targetId": "G-6",
-            "targetRevision": "{{createSixth.body.ticket.revision}}",
+            "targetRevision": "{{create-sixth.body.ticket.revision}}",
             "kind": "related"
           }
         }
       }
     },
     {
-      "name": "detailFirstLinked",
+      "name": "detail-first-linked",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/detail?ticketId=G-1"
       }
     },
     {
-      "name": "detailSecondLinked",
+      "name": "detail-second-linked",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/detail?ticketId=G-2"
       }
     },
     {
-      "name": "listStaleRevision",
+      "name": "list-stale-revision",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets?expectedCollectionRevision=0"
       }
     },
     {
-      "name": "listPage",
+      "name": "list-page",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets?limit=3"
       }
     },
     {
-      "name": "listPageContinued",
+      "name": "list-page-continued",
       "http": {
         "method": "GET",
-        "path": "/api/v1/tickets?limit=3&beforeNumber={{listPage.body.nextBeforeNumber}}&expectedCollectionRevision={{listPage.body.collectionRevision}}"
+        "path": "/api/v1/tickets?limit=3&beforeNumber={{list-page.body.nextBeforeNumber}}&expectedCollectionRevision={{list-page.body.collectionRevision}}"
       }
     },
     {
-      "name": "listPageContinuedStale",
+      "name": "list-page-continued-stale",
       "http": {
         "method": "GET",
-        "path": "/api/v1/tickets?limit=3&beforeNumber={{listPage.body.nextBeforeNumber}}&expectedCollectionRevision=0"
+        "path": "/api/v1/tickets?limit=3&beforeNumber={{list-page.body.nextBeforeNumber}}&expectedCollectionRevision=0"
       }
     },
     {
-      "name": "countsStaleRevision",
+      "name": "counts-stale-revision",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/counts?expectedCollectionRevision=0"
       }
     },
     {
-      "name": "facetsLabelAfter",
+      "name": "facets-label-after",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/facets?field=label"
       }
     },
     {
-      "name": "disableTicketCommands",
+      "name": "disable-ticket-commands",
       "http": {
         "method": "PUT",
         "path": "/api/v1/app/settings",
@@ -1852,7 +1852,7 @@
       }
     },
     {
-      "name": "createDeclaredFromChatCommandsDisabled",
+      "name": "create-declared-from-chat-commands-disabled",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1871,7 +1871,7 @@
       }
     },
     {
-      "name": "commentFromChatCommandsDisabled",
+      "name": "comment-from-chat-commands-disabled",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1888,7 +1888,7 @@
       }
     },
     {
-      "name": "createWhileCommandsDisabled",
+      "name": "create-while-commands-disabled",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1906,7 +1906,7 @@
       }
     },
     {
-      "name": "updateFirstWhileCommandsDisabled",
+      "name": "update-first-while-commands-disabled",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1916,7 +1916,7 @@
           "payload": {
             "action": "update",
             "ticketId": "G-1",
-            "expectedRevision": "{{unlinkNeverLinked.body.ticket.revision}}",
+            "expectedRevision": "{{unlink-never-linked.body.ticket.revision}}",
             "patch": {
               "title": "Still renamed"
             }
@@ -1925,7 +1925,7 @@
       }
     },
     {
-      "name": "enableTicketCommands",
+      "name": "enable-ticket-commands",
       "http": {
         "method": "PUT",
         "path": "/api/v1/app/settings",
@@ -1939,7 +1939,7 @@
       }
     },
     {
-      "name": "commentFromChatCommandsEnabled",
+      "name": "comment-from-chat-commands-enabled",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1956,7 +1956,7 @@
       }
     },
     {
-      "name": "commentEditStaleAfterEnable",
+      "name": "comment-edit-stale-after-enable",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1966,7 +1966,7 @@
           "payload": {
             "action": "comment-edit",
             "ticketId": "G-1",
-            "commentId": "{{commentFromChatCommandsEnabled.body.comment.id}}",
+            "commentId": "{{comment-from-chat-commands-enabled.body.comment.id}}",
             "expectedRevision": 0,
             "body": "Not mine"
           }
@@ -1974,7 +1974,7 @@
       }
     },
     {
-      "name": "claimDeclaredChatTicket",
+      "name": "claim-declared-chat-ticket",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -1984,13 +1984,13 @@
           "payload": {
             "action": "claim",
             "ticketId": "G-5",
-            "expectedRevision": "{{createDeclaredFromChat.body.ticket.revision}}"
+            "expectedRevision": "{{create-declared-from-chat.body.ticket.revision}}"
           }
         }
       }
     },
     {
-      "name": "updateDeclaredChatTicket",
+      "name": "update-declared-chat-ticket",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -2001,7 +2001,7 @@
           "payload": {
             "action": "update",
             "ticketId": "G-5",
-            "expectedRevision": "{{claimDeclaredChatTicket.body.ticket.revision}}",
+            "expectedRevision": "{{claim-declared-chat-ticket.body.ticket.revision}}",
             "patch": {
               "title": "Fifth ticket updated"
             }
@@ -2010,7 +2010,7 @@
       }
     },
     {
-      "name": "updateDeclaredChatTicketWithOtherRevision",
+      "name": "update-declared-chat-ticket-with-other-revision",
       "http": {
         "method": "POST",
         "path": "/api/v1/tickets/mutate",
@@ -2030,14 +2030,14 @@
       }
     },
     {
-      "name": "historyFifth",
+      "name": "history-fifth",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/history?ticketId=G-5"
       }
     },
     {
-      "name": "bootstrapAtEnd",
+      "name": "bootstrap-at-end",
       "http": {
         "method": "GET",
         "path": "/api/v1/tickets/bootstrap"

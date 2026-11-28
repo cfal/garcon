@@ -2,7 +2,7 @@
   "scenario": "scheduled-prompts-seeded",
   "cases": [
     {
-      "name": "promptsSeeded",
+      "name": "prompts-seeded",
       "expected": {
         "body": {
           "kind": "json",
@@ -165,7 +165,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeededAgain",
+      "name": "prompts-seeded-again",
       "expected": {
         "body": {
           "kind": "json",
@@ -328,7 +328,7 @@
       "noise": []
     },
     {
-      "name": "enableUnknownId",
+      "name": "enable-unknown-id",
       "expected": {
         "body": {
           "kind": "json",
@@ -354,7 +354,7 @@
       "noise": []
     },
     {
-      "name": "enableStaleRevision",
+      "name": "enable-stale-revision-checked-after-run-time",
       "expected": {
         "body": {
           "kind": "json",
@@ -380,7 +380,7 @@
       "noise": []
     },
     {
-      "name": "enableIgnoredRecord",
+      "name": "enable-ignored-record",
       "expected": {
         "body": {
           "kind": "json",
@@ -406,7 +406,7 @@
       "noise": []
     },
     {
-      "name": "enableMissedOneOff",
+      "name": "enable-missed-one-off",
       "expected": {
         "body": {
           "kind": "json",
@@ -432,7 +432,7 @@
       "noise": []
     },
     {
-      "name": "enableDisabledRecurring",
+      "name": "enable-disabled-recurring",
       "expected": {
         "body": {
           "kind": "json",
@@ -598,7 +598,7 @@
       "noise": []
     },
     {
-      "name": "enableThenLeaveUnchanged",
+      "name": "enable-then-leave-unchanged",
       "expected": {
         "body": {
           "kind": "json",
@@ -764,7 +764,7 @@
       "noise": []
     },
     {
-      "name": "promptsAfterEnable",
+      "name": "prompts-after-enable",
       "expected": {
         "body": {
           "kind": "json",
@@ -927,7 +927,7 @@
       "noise": []
     },
     {
-      "name": "updateAdvancedRecurring",
+      "name": "update-advanced-recurring",
       "expected": {
         "body": {
           "kind": "json",
@@ -1099,7 +1099,7 @@
       "noise": []
     },
     {
-      "name": "updateRemovedOneOff",
+      "name": "update-removed-one-off",
       "expected": {
         "body": {
           "kind": "json",
@@ -1125,7 +1125,7 @@
       "noise": []
     },
     {
-      "name": "updateFutureToRunNextYear",
+      "name": "update-future-to-run-next-year",
       "expected": {
         "body": {
           "kind": "json",
@@ -1303,7 +1303,7 @@
       "noise": []
     },
     {
-      "name": "removeDisabledMissedOneOff",
+      "name": "remove-disabled-missed-one-off",
       "expected": {
         "body": {
           "kind": "json",
@@ -1617,7 +1617,7 @@
       "noise": []
     },
     {
-      "name": "promptsAtEnd",
+      "name": "prompts-at-end",
       "expected": {
         "body": {
           "kind": "json",
@@ -1771,7 +1771,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeeded~unauthenticated",
+      "name": "prompts-seeded~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -1797,7 +1797,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeeded~forged-token",
+      "name": "prompts-seeded~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -1823,7 +1823,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeeded~head",
+      "name": "prompts-seeded~head",
       "expected": {
         "body": {
           "kind": "empty"
@@ -1842,7 +1842,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeeded~trailing-slash",
+      "name": "prompts-seeded~trailing-slash",
       "expected": {
         "body": {
           "kind": "text",
@@ -1862,7 +1862,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeeded~dot-segment",
+      "name": "prompts-seeded~dot-segment",
       "expected": {
         "body": {
           "kind": "json",
@@ -2016,7 +2016,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeeded~encoded-traversal",
+      "name": "prompts-seeded~encoded-traversal",
       "expected": {
         "body": {
           "kind": "text",
@@ -2036,7 +2036,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeeded~non-ascii",
+      "name": "prompts-seeded~non-ascii",
       "expected": {
         "body": {
           "kind": "text",
@@ -2056,7 +2056,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeeded~double-slash",
+      "name": "prompts-seeded~double-slash",
       "expected": {
         "body": {
           "kind": "json",
@@ -2210,7 +2210,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeededAgain~unauthenticated",
+      "name": "prompts-seeded-again~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -2236,7 +2236,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeededAgain~forged-token",
+      "name": "prompts-seeded-again~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -2262,7 +2262,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeededAgain~head",
+      "name": "prompts-seeded-again~head",
       "expected": {
         "body": {
           "kind": "empty"
@@ -2281,7 +2281,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeededAgain~trailing-slash",
+      "name": "prompts-seeded-again~trailing-slash",
       "expected": {
         "body": {
           "kind": "text",
@@ -2301,7 +2301,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeededAgain~dot-segment",
+      "name": "prompts-seeded-again~dot-segment",
       "expected": {
         "body": {
           "kind": "json",
@@ -2455,7 +2455,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeededAgain~encoded-traversal",
+      "name": "prompts-seeded-again~encoded-traversal",
       "expected": {
         "body": {
           "kind": "text",
@@ -2475,7 +2475,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeededAgain~non-ascii",
+      "name": "prompts-seeded-again~non-ascii",
       "expected": {
         "body": {
           "kind": "text",
@@ -2495,7 +2495,7 @@
       "noise": []
     },
     {
-      "name": "promptsSeededAgain~double-slash",
+      "name": "prompts-seeded-again~double-slash",
       "expected": {
         "body": {
           "kind": "json",
@@ -2649,7 +2649,7 @@
       "noise": []
     },
     {
-      "name": "enableUnknownId~unauthenticated",
+      "name": "enable-unknown-id~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -2675,7 +2675,7 @@
       "noise": []
     },
     {
-      "name": "enableUnknownId~forged-token",
+      "name": "enable-unknown-id~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -2701,7 +2701,7 @@
       "noise": []
     },
     {
-      "name": "enableUnknownId~malformed-json",
+      "name": "enable-unknown-id~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -2727,7 +2727,7 @@
       "noise": []
     },
     {
-      "name": "enableUnknownId~non-ascii-json",
+      "name": "enable-unknown-id~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -2753,7 +2753,7 @@
       "noise": []
     },
     {
-      "name": "enableStaleRevision~unauthenticated",
+      "name": "enable-stale-revision-checked-after-run-time~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -2779,7 +2779,7 @@
       "noise": []
     },
     {
-      "name": "enableStaleRevision~forged-token",
+      "name": "enable-stale-revision-checked-after-run-time~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -2805,7 +2805,7 @@
       "noise": []
     },
     {
-      "name": "enableStaleRevision~malformed-json",
+      "name": "enable-stale-revision-checked-after-run-time~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -2831,7 +2831,7 @@
       "noise": []
     },
     {
-      "name": "enableStaleRevision~non-ascii-json",
+      "name": "enable-stale-revision-checked-after-run-time~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -2857,7 +2857,7 @@
       "noise": []
     },
     {
-      "name": "enableIgnoredRecord~unauthenticated",
+      "name": "enable-ignored-record~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -2883,7 +2883,7 @@
       "noise": []
     },
     {
-      "name": "enableIgnoredRecord~forged-token",
+      "name": "enable-ignored-record~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -2909,7 +2909,7 @@
       "noise": []
     },
     {
-      "name": "enableIgnoredRecord~malformed-json",
+      "name": "enable-ignored-record~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -2935,7 +2935,7 @@
       "noise": []
     },
     {
-      "name": "enableIgnoredRecord~non-ascii-json",
+      "name": "enable-ignored-record~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -2961,7 +2961,7 @@
       "noise": []
     },
     {
-      "name": "enableMissedOneOff~unauthenticated",
+      "name": "enable-missed-one-off~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -2987,7 +2987,7 @@
       "noise": []
     },
     {
-      "name": "enableMissedOneOff~forged-token",
+      "name": "enable-missed-one-off~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -3013,7 +3013,7 @@
       "noise": []
     },
     {
-      "name": "enableMissedOneOff~malformed-json",
+      "name": "enable-missed-one-off~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -3039,7 +3039,7 @@
       "noise": []
     },
     {
-      "name": "enableMissedOneOff~non-ascii-json",
+      "name": "enable-missed-one-off~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -3065,7 +3065,7 @@
       "noise": []
     },
     {
-      "name": "enableDisabledRecurring~unauthenticated",
+      "name": "enable-disabled-recurring~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -3091,7 +3091,7 @@
       "noise": []
     },
     {
-      "name": "enableDisabledRecurring~forged-token",
+      "name": "enable-disabled-recurring~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -3117,7 +3117,7 @@
       "noise": []
     },
     {
-      "name": "enableDisabledRecurring~malformed-json",
+      "name": "enable-disabled-recurring~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -3143,7 +3143,7 @@
       "noise": []
     },
     {
-      "name": "enableDisabledRecurring~non-ascii-json",
+      "name": "enable-disabled-recurring~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -3169,7 +3169,7 @@
       "noise": []
     },
     {
-      "name": "enableThenLeaveUnchanged~unauthenticated",
+      "name": "enable-then-leave-unchanged~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -3195,7 +3195,7 @@
       "noise": []
     },
     {
-      "name": "enableThenLeaveUnchanged~forged-token",
+      "name": "enable-then-leave-unchanged~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -3221,7 +3221,7 @@
       "noise": []
     },
     {
-      "name": "enableThenLeaveUnchanged~malformed-json",
+      "name": "enable-then-leave-unchanged~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -3247,7 +3247,7 @@
       "noise": []
     },
     {
-      "name": "enableThenLeaveUnchanged~non-ascii-json",
+      "name": "enable-then-leave-unchanged~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -3273,7 +3273,7 @@
       "noise": []
     },
     {
-      "name": "promptsAfterEnable~unauthenticated",
+      "name": "prompts-after-enable~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -3299,7 +3299,7 @@
       "noise": []
     },
     {
-      "name": "promptsAfterEnable~forged-token",
+      "name": "prompts-after-enable~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -3325,7 +3325,7 @@
       "noise": []
     },
     {
-      "name": "promptsAfterEnable~head",
+      "name": "prompts-after-enable~head",
       "expected": {
         "body": {
           "kind": "empty"
@@ -3344,7 +3344,7 @@
       "noise": []
     },
     {
-      "name": "promptsAfterEnable~trailing-slash",
+      "name": "prompts-after-enable~trailing-slash",
       "expected": {
         "body": {
           "kind": "text",
@@ -3364,7 +3364,7 @@
       "noise": []
     },
     {
-      "name": "promptsAfterEnable~dot-segment",
+      "name": "prompts-after-enable~dot-segment",
       "expected": {
         "body": {
           "kind": "json",
@@ -3518,7 +3518,7 @@
       "noise": []
     },
     {
-      "name": "promptsAfterEnable~encoded-traversal",
+      "name": "prompts-after-enable~encoded-traversal",
       "expected": {
         "body": {
           "kind": "text",
@@ -3538,7 +3538,7 @@
       "noise": []
     },
     {
-      "name": "promptsAfterEnable~non-ascii",
+      "name": "prompts-after-enable~non-ascii",
       "expected": {
         "body": {
           "kind": "text",
@@ -3558,7 +3558,7 @@
       "noise": []
     },
     {
-      "name": "promptsAfterEnable~double-slash",
+      "name": "prompts-after-enable~double-slash",
       "expected": {
         "body": {
           "kind": "json",
@@ -3712,7 +3712,7 @@
       "noise": []
     },
     {
-      "name": "updateAdvancedRecurring~unauthenticated",
+      "name": "update-advanced-recurring~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -3738,7 +3738,7 @@
       "noise": []
     },
     {
-      "name": "updateAdvancedRecurring~forged-token",
+      "name": "update-advanced-recurring~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -3764,7 +3764,7 @@
       "noise": []
     },
     {
-      "name": "updateAdvancedRecurring~malformed-json",
+      "name": "update-advanced-recurring~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -3790,7 +3790,7 @@
       "noise": []
     },
     {
-      "name": "updateAdvancedRecurring~non-ascii-json",
+      "name": "update-advanced-recurring~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -3816,7 +3816,7 @@
       "noise": []
     },
     {
-      "name": "updateRemovedOneOff~unauthenticated",
+      "name": "update-removed-one-off~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -3842,7 +3842,7 @@
       "noise": []
     },
     {
-      "name": "updateRemovedOneOff~forged-token",
+      "name": "update-removed-one-off~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -3868,7 +3868,7 @@
       "noise": []
     },
     {
-      "name": "updateRemovedOneOff~malformed-json",
+      "name": "update-removed-one-off~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -3894,7 +3894,7 @@
       "noise": []
     },
     {
-      "name": "updateRemovedOneOff~non-ascii-json",
+      "name": "update-removed-one-off~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -3920,7 +3920,7 @@
       "noise": []
     },
     {
-      "name": "updateFutureToRunNextYear~unauthenticated",
+      "name": "update-future-to-run-next-year~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -3946,7 +3946,7 @@
       "noise": []
     },
     {
-      "name": "updateFutureToRunNextYear~forged-token",
+      "name": "update-future-to-run-next-year~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -3972,7 +3972,7 @@
       "noise": []
     },
     {
-      "name": "updateFutureToRunNextYear~malformed-json",
+      "name": "update-future-to-run-next-year~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -3998,7 +3998,7 @@
       "noise": []
     },
     {
-      "name": "updateFutureToRunNextYear~non-ascii-json",
+      "name": "update-future-to-run-next-year~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -4024,7 +4024,7 @@
       "noise": []
     },
     {
-      "name": "removeDisabledMissedOneOff~unauthenticated",
+      "name": "remove-disabled-missed-one-off~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -4050,7 +4050,7 @@
       "noise": []
     },
     {
-      "name": "removeDisabledMissedOneOff~forged-token",
+      "name": "remove-disabled-missed-one-off~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -4076,7 +4076,7 @@
       "noise": []
     },
     {
-      "name": "removeDisabledMissedOneOff~malformed-json",
+      "name": "remove-disabled-missed-one-off~malformed-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -4102,7 +4102,7 @@
       "noise": []
     },
     {
-      "name": "removeDisabledMissedOneOff~non-ascii-json",
+      "name": "remove-disabled-missed-one-off~non-ascii-json",
       "expected": {
         "body": {
           "kind": "json",
@@ -4232,7 +4232,7 @@
       "noise": []
     },
     {
-      "name": "promptsAtEnd~unauthenticated",
+      "name": "prompts-at-end~unauthenticated",
       "expected": {
         "body": {
           "kind": "json",
@@ -4258,7 +4258,7 @@
       "noise": []
     },
     {
-      "name": "promptsAtEnd~forged-token",
+      "name": "prompts-at-end~forged-token",
       "expected": {
         "body": {
           "kind": "json",
@@ -4284,7 +4284,7 @@
       "noise": []
     },
     {
-      "name": "promptsAtEnd~head",
+      "name": "prompts-at-end~head",
       "expected": {
         "body": {
           "kind": "empty"
@@ -4303,7 +4303,7 @@
       "noise": []
     },
     {
-      "name": "promptsAtEnd~trailing-slash",
+      "name": "prompts-at-end~trailing-slash",
       "expected": {
         "body": {
           "kind": "text",
@@ -4323,7 +4323,7 @@
       "noise": []
     },
     {
-      "name": "promptsAtEnd~dot-segment",
+      "name": "prompts-at-end~dot-segment",
       "expected": {
         "body": {
           "kind": "json",
@@ -4477,7 +4477,7 @@
       "noise": []
     },
     {
-      "name": "promptsAtEnd~encoded-traversal",
+      "name": "prompts-at-end~encoded-traversal",
       "expected": {
         "body": {
           "kind": "text",
@@ -4497,7 +4497,7 @@
       "noise": []
     },
     {
-      "name": "promptsAtEnd~non-ascii",
+      "name": "prompts-at-end~non-ascii",
       "expected": {
         "body": {
           "kind": "text",
@@ -4517,7 +4517,7 @@
       "noise": []
     },
     {
-      "name": "promptsAtEnd~double-slash",
+      "name": "prompts-at-end~double-slash",
       "expected": {
         "body": {
           "kind": "json",
