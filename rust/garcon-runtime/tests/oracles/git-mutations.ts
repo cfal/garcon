@@ -4,7 +4,8 @@ import { GitRuntime } from '../../../../server/runtime/git/runtime.js';
 if (Bun.version !== '1.4.3') throw new Error('The Git mutation oracle requires the pinned Bun 1.4.3');
 
 type Method = 'getStashes' | 'applyStash' | 'popStash' | 'dropStash' | 'discard'
-  | 'getConflicts' | 'getConflictDetails' | 'markConflictResolved' | 'acceptConflictSide';
+  | 'getConflicts' | 'getConflictDetails' | 'markConflictResolved' | 'acceptConflictSide'
+  | 'getStatus' | 'getRefs' | 'stagePaths' | 'commit' | 'getRemoteStatus' | 'push';
 type Operation = {
   [K in Method]: { method: K; request: ExecutionGitRequests[K] };
 }[Method];
@@ -30,6 +31,12 @@ try {
         case 'getConflictDetails': results.push({ ok: await runtime.git.getConflictDetails(operation.request) }); break;
         case 'markConflictResolved': results.push({ ok: await runtime.git.markConflictResolved(operation.request) }); break;
         case 'acceptConflictSide': results.push({ ok: await runtime.git.acceptConflictSide(operation.request) }); break;
+        case 'getStatus': results.push({ ok: await runtime.git.getStatus(operation.request) }); break;
+        case 'getRefs': results.push({ ok: await runtime.git.getRefs(operation.request) }); break;
+        case 'stagePaths': results.push({ ok: await runtime.git.stagePaths(operation.request) }); break;
+        case 'commit': results.push({ ok: await runtime.git.commit(operation.request) }); break;
+        case 'getRemoteStatus': results.push({ ok: await runtime.git.getRemoteStatus(operation.request) }); break;
+        case 'push': results.push({ ok: await runtime.git.push(operation.request) }); break;
       }
     } catch (error) {
       if (!(error instanceof Error)) throw error;

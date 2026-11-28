@@ -7,6 +7,7 @@ use serde_json::{Map, Value, json};
 use crate::compare::{self, Difference};
 use crate::manifest::{self, RecordedCase};
 use crate::markers;
+use crate::result_order::{OrderExceptions, ResultOrderException};
 
 /// How many failing cases are listed before the grouped differences.
 const LISTED_FAILURES: usize = 50;
@@ -131,6 +132,7 @@ fn check_result<'a>(
     actual: &Value,
     known_differences: &mut usize,
     order_issues: Option<&mut Vec<Failure<'a>>>,
+    exceptions: &mut OrderExceptions<'_>,
 ) -> Option<Difference> {
     let original = compare::first_difference(&case.result, actual);
     let expected = if let Some(known) = &case.known {
@@ -154,7 +156,9 @@ fn check_result<'a>(
         &case.result
     };
     if let Some(issues) = order_issues
-        && let Some(difference) = compare::first_key_order_difference(expected, actual)
+        && let Some(difference) = compare::first_key_order_difference(expected, actual, |path| {
+            exceptions.visit(&case.function, path)
+        })
     {
         issues.push(Failure {
             case,
@@ -175,7 +179,8 @@ fn check<'a, F>(
     recording: &'a manifest::Recording,
     dispatch: &mut F,
     with_wildcards: usize,
-    audit_key_order: bool,
+    check_key_order: bool,
+    exceptions: &mut OrderExceptions<'_>,
 ) -> Report<'a>
 where
     F: FnMut(&str, &[Value]) -> Result<Value, CaseError>,
@@ -189,14 +194,16 @@ where
                 case,
                 &value,
                 &mut known_differences,
-                audit_key_order.then_some(&mut order_issues),
+                check_key_order.then_some(&mut order_issues),
+                exceptions,
             ),
             Err(error) => match &error.outcome {
                 Outcome::Error { .. } | Outcome::Thrown(_) => check_result(
                     case,
                     &error.recorded(),
                     &mut known_differences,
-                    audit_key_order.then_some(&mut order_issues),
+                    check_key_order.then_some(&mut order_issues),
+                    exceptions,
                 ),
                 Outcome::Unhandled => Some(Difference {
                     path: "$".to_owned(),
@@ -326,11 +333,38 @@ where
 pub fn replay_with_expected_wildcards<F>(
     cases_dir: impl AsRef<Path>,
     expected_wildcards: usize,
+    dispatch: F,
+) -> Stats
+where
+    F: FnMut(&str, &[Value]) -> Result<Value, CaseError>,
+{
+    replay_with_options(
+        cases_dir,
+        ReplayOptions {
+            expected_wildcards,
+            ..Default::default()
+        },
+        dispatch,
+    )
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ReplayOptions<'a> {
+    pub expected_wildcards: usize,
+    pub result_order_exceptions: &'a [ResultOrderException<'a>],
+}
+
+/// Replays with explicitly scoped result order exceptions. Each exception
+/// must match at least one structurally comparable result subtree.
+pub fn replay_with_options<F>(
+    cases_dir: impl AsRef<Path>,
+    options: ReplayOptions<'_>,
     mut dispatch: F,
 ) -> Stats
 where
     F: FnMut(&str, &[Value]) -> Result<Value, CaseError>,
 {
+    let mut exceptions = OrderExceptions::new(options.result_order_exceptions);
     let recording =
         manifest::read(cases_dir.as_ref()).unwrap_or_else(|message| panic!("{message}"));
     let mut count = 0;
@@ -338,6 +372,7 @@ where
         println!("  WILDCARD {case} at {}", paths.join(", "));
         count += 1;
     }
+    let expected_wildcards = options.expected_wildcards;
     assert!(
         count == expected_wildcards,
         "{}: expected {expected_wildcards} wildcard cases, found {count}",
@@ -345,7 +380,13 @@ where
     );
     let audit_key_order =
         std::env::var_os("GARCON_CASES_AUDIT_KEY_ORDER").is_some_and(|value| value == "1");
-    let report = check(&recording, &mut dispatch, count, audit_key_order);
+    let report = check(
+        &recording,
+        &mut dispatch,
+        count,
+        audit_key_order || !exceptions.is_empty(),
+        &mut exceptions,
+    );
     if audit_key_order {
         let directory = cases_dir.as_ref();
         let directory = directory
@@ -369,6 +410,13 @@ where
             })
         );
     }
+    let unused = exceptions.report();
+    assert!(
+        unused.is_empty(),
+        "{}\nUnused result key-order exceptions: {}",
+        render(&report),
+        unused.join("; ")
+    );
     if report.failures.is_empty() {
         println!("{}", summary(&report));
         return report.stats;
@@ -391,6 +439,7 @@ mod tests {
             dispatch,
             wildcard_cases(recording).count(),
             false,
+            &mut OrderExceptions::new(&[]),
         )
     }
 
@@ -407,12 +456,99 @@ mod tests {
             },
             0,
             true,
+            &mut OrderExceptions::new(&[]),
         );
         assert_eq!(report.stats.passed, 1);
         assert_eq!(report.failures[0].difference.kind, "value");
         assert_eq!(report.order_issues.len(), 1);
         assert_eq!(report.order_issues[0].case.function, "orderOnly");
         assert_eq!(report.order_issues[0].difference.path, "$.result");
+    }
+
+    #[test]
+    fn exceptions_only_cover_the_function_and_result_subtree_they_name() {
+        let snapshot = json!({"z": 1, "a": {"z": 2, "a": 3}});
+        let reordered = json!({"a": {"a": 3, "z": 2}, "z": 1});
+        let stable_outer = json!({"connection": snapshot, "outer": true});
+        let (_dir, recording) = recording(&[
+            ("parseUpdate", json!([]), stable_outer.clone()),
+            (
+                "parseUpdate",
+                json!(["reorder outer"]),
+                json!({"outer": true, "connection": snapshot}),
+            ),
+            ("other", json!([]), stable_outer),
+            ("parseSnapshot", json!([]), snapshot.clone()),
+            ("parseAll", json!([]), json!([snapshot, snapshot])),
+            (
+                "parseSnapshot",
+                json!(["wrong value"]),
+                json!({"stays": true}),
+            ),
+        ]);
+        let entries = [
+            ResultOrderException {
+                function: "parseUpdate",
+                path: "$.result.connection",
+                reason: "Caller-owned connection.",
+            },
+            ResultOrderException {
+                function: "parseSnapshot",
+                path: "$.result",
+                reason: "Caller-owned snapshot.",
+            },
+            ResultOrderException {
+                function: "parseAll",
+                path: "$.result[*]",
+                reason: "Caller-owned elements.",
+            },
+        ];
+        let mut exceptions = OrderExceptions::new(&entries);
+        let report = super::check(
+            &recording,
+            &mut |function, args| {
+                Ok(match function {
+                    "parseUpdate" | "other" => json!({"connection": reordered, "outer": true}),
+                    "parseSnapshot" if args.is_empty() => reordered.clone(),
+                    "parseAll" => json!([reordered, reordered]),
+                    _ => json!({"stays": false}),
+                })
+            },
+            0,
+            true,
+            &mut exceptions,
+        );
+        assert_eq!(report.failures.len(), 1);
+        assert_eq!(report.failures[0].difference.path, "$.result.stays");
+        assert_eq!(
+            report
+                .order_issues
+                .iter()
+                .map(|issue| issue.difference.path.as_str())
+                .collect::<Vec<_>>(),
+            ["$.result", "$.result.connection",]
+        );
+        assert!(exceptions.report().is_empty());
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "Unused result key-order exceptions: parse at $.result.removed (Passed through.)"
+    )]
+    fn fails_an_unused_order_exception_even_without_auditing() {
+        let (dir, _) = recording(&[("parse", json!([]), json!({"renamed": {"x": 1}}))]);
+        replay_with_options(
+            dir.path(),
+            ReplayOptions {
+                result_order_exceptions: &[ResultOrderException {
+                    function: "parse",
+                    path: "$.result.removed",
+                    reason: "Passed through.",
+                }],
+                ..Default::default()
+            },
+            |_, _| Ok(json!({"renamed": {"x": 1}})),
+        );
     }
 
     // A recording on disk with the given cases of one function.
