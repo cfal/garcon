@@ -1,0 +1,31 @@
+{
+  "module": "common/chat-transient-feed.ts",
+  "tests": [
+    "common/__tests__/chat-transient-feed.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-transient-feed.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseTransientFeedRow",
+      "argument": 0
+    },
+    {
+      "fn": "parseChatTransientFeedSnapshot",
+      "argument": 0
+    },
+    {
+      "fn": "parseChatTransientFeedMutation",
+      "argument": 0
+    },
+    {
+      "fn": "parseChatTransientControlAction",
+      "argument": 0
+    }
+  ],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 259,
+  "sha256": "56751e4aad01687638221644500493dc5b7877229c9ba11d19e812d9a0073d36"
+}
