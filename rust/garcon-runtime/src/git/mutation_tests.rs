@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 use std::process::Stdio;
 
-use garcon_contract::git::{ConflictAcceptOptions, FileOptions, GitConflictSide, StashRefOptions};
+use garcon_contract::git::{
+    CommitOptions, ConflictAcceptOptions, FileOptions, GitConflictSide, GitRefsOptions,
+    GitStageMode, PushOptions, StagePathsOptions, StashRefOptions,
+};
 use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
@@ -14,6 +17,8 @@ use super::conflicts::{
 use super::discard::discard;
 use super::git_domain_error::GitDomainError;
 use super::stashes::{apply_stash, drop_stash, get_stashes};
+use super::status::{commit, get_refs, get_remote_status, get_status, push, stage_paths};
+use super::temporary_index::TemporaryGitIndexEnvironment;
 use super::working_tree_comparison::{UntrackedSummaryBudget, summarize_untracked_file};
 
 use super::git_fixture::GitFixture;
@@ -315,4 +320,203 @@ async fn counts_unterminated_untracked_lines_and_honors_the_remaining_budget() {
         .await
         .unwrap();
     assert!(binary.is_binary);
+}
+
+async fn selected_commit_fixture() -> GitFixture {
+    let repo = GitFixture::with_commit().await;
+    for (path, bytes) in [
+        ("a.txt", "selected\n"),
+        ("new[1].txt", "new\n"),
+        ("new1.txt", "do not match the glob\n"),
+        ("unrelated.txt", "staged\n"),
+    ] {
+        tokio::fs::write(repo.path().join(path), bytes)
+            .await
+            .unwrap();
+    }
+    repo.run(&["add", "unrelated.txt"]).await;
+    repo.run(&["branch", "topic"]).await;
+    repo
+}
+
+#[tokio::test]
+async fn staging_and_unstaging_a_literal_path_matches_the_original() {
+    LocalSet::new()
+        .run_until(async {
+            let rust = selected_commit_fixture().await;
+            let original = selected_commit_fixture().await;
+            let original_path = original.path().to_str().unwrap();
+            let rust_path = rust.path().to_str().unwrap();
+            let selection = |project: &str, mode| StagePathsOptions {
+                project_path: project.into(),
+                paths: vec!["new[1].txt".into()],
+                mode,
+            };
+            let expected = original_operations(
+                original_path,
+                vec![
+                    request("stagePaths", selection(original_path, GitStageMode::Stage)),
+                    request("getStatus", json!({"projectPath": original_path})),
+                    request(
+                        "stagePaths",
+                        selection(original_path, GitStageMode::Unstage),
+                    ),
+                    request("getStatus", json!({"projectPath": original_path})),
+                ],
+            )
+            .await;
+            for (index, mode) in [GitStageMode::Stage, GitStageMode::Unstage]
+                .into_iter()
+                .enumerate()
+            {
+                assert_eq!(
+                    serialized(stage_paths(&selection(rust_path, mode)).await.unwrap()),
+                    expected[2 * index]["ok"]
+                );
+                assert_eq!(
+                    serialized(get_status(rust_path).await.unwrap()),
+                    expected[2 * index + 1]["ok"]
+                );
+            }
+            assert_eq!(
+                rust.run(&["diff", "--cached", "--name-only"]).await,
+                "unrelated.txt\n"
+            );
+            assert_eq!(
+                rust.run(&["status", "--porcelain", "-z"]).await,
+                original.run(&["status", "--porcelain", "-z"]).await
+            );
+        })
+        .await;
+}
+
+async fn replace_committed_oid(repo: &GitFixture, result: &mut Value) {
+    let oid = repo.run(&["rev-parse", "--short", "HEAD"]).await;
+    let output = result["output"].as_str().unwrap();
+    assert!(
+        output.starts_with(&format!("[main {}]", oid.trim_end())),
+        "{output}"
+    );
+    result["output"] = json!(output.replacen(oid.trim_end(), "<commit>", 1));
+}
+
+#[tokio::test]
+async fn compares_status_refs_and_literal_selected_commits_without_losing_unrelated_changes() {
+    LocalSet::new()
+        .run_until(async {
+            let rust = selected_commit_fixture().await;
+            let original = selected_commit_fixture().await;
+            let rust_path = rust.path().to_str().unwrap();
+            let original_path = original.path().to_str().unwrap();
+            let refs = |project: &str| GitRefsOptions {
+                project_path: project.into(),
+                query: Some("top".into()),
+                limit: Some(4),
+                sort: None,
+            };
+            let commit_options = |project: &str| CommitOptions {
+                project_path: project.into(),
+                message: "selected change".into(),
+                files: ["a.txt", "new[1].txt"].map(str::to_owned).into(),
+            };
+            let mut expected = original_operations(
+                original_path,
+                vec![
+                    request("getStatus", json!({ "projectPath": original_path })),
+                    request("getRefs", refs(original_path)),
+                    request("commit", commit_options(original_path)),
+                    request("getStatus", json!({ "projectPath": original_path })),
+                ],
+            )
+            .await;
+            assert_eq!(
+                serialized(get_status(rust_path).await.unwrap()),
+                expected[0]["ok"]
+            );
+            assert_eq!(
+                serialized(get_refs(&refs(rust_path), None).await.unwrap()),
+                expected[1]["ok"]
+            );
+            assert_eq!(expected[1]["ok"]["refs"][0]["name"], "topic");
+            let index_env = TemporaryGitIndexEnvironment::default();
+            let mut committed = serialized(
+                commit(&commit_options(rust_path), &index_env)
+                    .await
+                    .unwrap(),
+            );
+            replace_committed_oid(&original, &mut expected[2]["ok"]).await;
+            replace_committed_oid(&rust, &mut committed).await;
+            assert_eq!(committed, expected[2]["ok"]);
+            assert_eq!(committed["commitScope"], "selected-files");
+            assert_eq!(committed["indexSynchronized"], true);
+            assert_eq!(
+                serialized(get_status(rust_path).await.unwrap()),
+                expected[3]["ok"]
+            );
+            assert_eq!(
+                rust.run(&["show", "--format=", "--name-only", "HEAD", "--"])
+                    .await,
+                "a.txt\nnew[1].txt\n"
+            );
+            assert_eq!(
+                rust.run(&["diff", "--cached", "--name-only"]).await,
+                "unrelated.txt\n"
+            );
+        })
+        .await;
+}
+
+async fn push_fixture() -> (GitFixture, GitFixture) {
+    let repo = GitFixture::with_commit().await;
+    let remote = GitFixture::empty();
+    remote.run(&["init", "--bare", "-b", "main"]).await;
+    repo.run(&["remote", "add", "origin", remote.path().to_str().unwrap()])
+        .await;
+    (repo, remote)
+}
+
+#[tokio::test]
+async fn compares_a_push_to_a_real_bare_remote_after_checking_the_current_branch() {
+    LocalSet::new()
+        .run_until(async {
+            let (rust, rust_remote) = push_fixture().await;
+            let (original, original_remote) = push_fixture().await;
+            let rust_path = rust.path().to_str().unwrap();
+            let original_path = original.path().to_str().unwrap();
+            let target = |project: &str, branch: &str| PushOptions {
+                project_path: project.into(),
+                remote: Some("origin".into()),
+                remote_branch: Some(branch.into()),
+            };
+            let expected = original_operations(
+                original_path,
+                vec![
+                    request("getRemoteStatus", json!({ "projectPath": original_path })),
+                    request("push", target(original_path, "other")),
+                    request("push", target(original_path, "main")),
+                ],
+            )
+            .await;
+            assert_eq!(
+                serialized(get_remote_status(rust_path).await.unwrap()),
+                expected[0]["ok"]
+            );
+            let error = push(&target(rust_path, "other")).await.unwrap_err();
+            let error = super::service_errors::git_service_error(error)
+                .downcast::<garcon_contract::git_error::GitServiceError>()
+                .unwrap();
+            assert_eq!(error.code.as_str(), expected[1]["error"]["code"]);
+            assert_eq!(error.message, expected[1]["error"]["message"]);
+            assert_eq!(rust_remote.run(&["for-each-ref"]).await, "");
+            assert_eq!(
+                serialized(push(&target(rust_path, "main")).await.unwrap()),
+                expected[2]["ok"]
+            );
+            assert_eq!(
+                rust_remote.run(&["show-ref"]).await,
+                original_remote.run(&["show-ref"]).await
+            );
+            assert_eq!(rust_remote.run(&["show", "main:a.txt"]).await, "one\n");
+        })
+        .await;
 }

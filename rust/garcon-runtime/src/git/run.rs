@@ -5,12 +5,13 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::future::{Future, pending};
 use std::io;
+use std::path::Path;
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
 use futures::TryStreamExt;
 use garcon_base::bounded_text_stream::{read_text_stream_prefix, read_text_stream_with_limit};
-use garcon_base::errors::{DiagnosticError, ErrorMetadata};
+use garcon_base::errors::{DiagnosticError, ErrorMetadata, NamedError};
 use garcon_base::path_boundary::ProjectBoundaryError;
 use garcon_interface::resources::ExecutorResult;
 use garcon_js::{math_round, path::native, trim};
@@ -100,6 +101,65 @@ fn apply_environment(command: &mut Command, options: &GitCommandOptions) {
     if let Some(env) = git_command_env(options) {
         command.env_clear().envs(env);
     }
+}
+
+fn git_on_command_path(cwd: &str, options: &GitCommandOptions) -> bool {
+    let path = git_command_env(options).map_or_else(
+        || std::env::var_os("PATH"),
+        |env| {
+            env.into_iter().find_map(|(name, value)| {
+                let name = name.as_encoded_bytes();
+                let is_path = if cfg!(windows) {
+                    name.eq_ignore_ascii_case(b"PATH")
+                } else {
+                    name == b"PATH"
+                };
+                is_path.then_some(value)
+            })
+        },
+    );
+    #[cfg(unix)]
+    let default_path = OsString::from("/usr/bin:/bin");
+    #[cfg(windows)]
+    let default_path = OsString::new();
+    let path = path.filter(|path| !path.is_empty()).unwrap_or(default_path);
+    std::env::split_paths(&path)
+        .filter(|directory| !directory.as_os_str().is_empty())
+        .any(|directory| {
+            let directory = Path::new(cwd).join(directory);
+            #[cfg(unix)]
+            {
+                let candidate = directory.join("git");
+                candidate.is_file()
+                    && rustix::fs::access(candidate, rustix::fs::Access::EXEC_OK).is_ok()
+            }
+            #[cfg(windows)]
+            {
+                ["git.exe", "git.com", "git.cmd", "git.bat"]
+                    .iter()
+                    .any(|candidate| directory.join(candidate).is_file())
+            }
+        })
+}
+
+fn git_spawn_error(
+    cwd: &str,
+    options: &GitCommandOptions,
+    error: io::Error,
+) -> Box<dyn std::error::Error> {
+    if matches!(
+        error.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+    ) && !git_on_command_path(cwd, options)
+    {
+        return NamedError {
+            name: "Error".into(),
+            code: Some("ENOENT".into()),
+            message: "Executable not found in $PATH: \"git\"".into(),
+        }
+        .into();
+    }
+    error.into()
 }
 
 fn is_lock_error(stderr: &str) -> bool {
@@ -388,7 +448,7 @@ fn start_git_attempt(
     let child = match command.spawn() {
         Ok(child) => child,
         Err(_) if signals_aborted(options) => return Err(aborted().into()),
-        Err(error) => return Err(error.into()),
+        Err(error) => return Err(git_spawn_error(cwd, &options.options, error)),
     };
     if !options.options.disable_optional_locks {
         mark_git_mutation_dispatched();
@@ -574,14 +634,16 @@ pub fn read_git_blob_prefix(
         }
         let mut command = Command::new("git");
         command
-            .current_dir(cwd)
+            .current_dir(&cwd)
             .args(["show", &object])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true);
         apply_environment(&mut command, &options.options);
-        let mut child = command.spawn()?;
+        let mut child = command
+            .spawn()
+            .map_err(|error| git_spawn_error(&cwd, &options.options, error))?;
         let mut prefix = Vec::new();
         let stdout = child
             .stdout
