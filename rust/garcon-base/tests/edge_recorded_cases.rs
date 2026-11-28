@@ -26,6 +26,14 @@ fn required_text<'a>(function: &str, value: Option<&'a Value>) -> Result<&'a str
     text(function, value)?.ok_or_else(|| CaseError::unhandled(function))
 }
 
+fn duplicate_header_values(
+    function: &str,
+    argument: Option<&Value>,
+) -> Result<Vec<String>, CaseError> {
+    let raw = unknown(function, argument)?;
+    serde_json::from_value(raw.into_owned()).map_err(|_| CaseError::unhandled(function))
+}
+
 fn runtime_state(
     function: &str,
     raw: &Value,
@@ -297,6 +305,35 @@ fn edge_parity_cases_match() {
                     request = request.header(header::AUTHORIZATION, authorization);
                 }
                 let request = request
+                    .body(())
+                    .map_err(|error| CaseError::new("Error", error.to_string()))?;
+                Ok(json!(http_body::get_token_from_request(&request)))
+            }
+            "duplicateJsonBodyFixture" => {
+                let mut builder = Request::builder();
+                for header in duplicate_header_values(function, args.first())? {
+                    builder = builder.header(header::CONTENT_TYPE, header);
+                }
+                let bytes =
+                    Bytes::copy_from_slice(required_text(function, args.get(1))?.as_bytes());
+                let request = builder
+                    .body(Full::new(bytes))
+                    .map_err(|error| CaseError::new("Error", error.to_string()))?;
+                runtime
+                    .block_on(http_body::parse_json_body(request))
+                    .map_err(|error| match error {
+                        http_body::JsonBodyError::Malformed(error) => {
+                            CaseError::new("MalformedJsonError", error.to_string())
+                        }
+                        http_body::JsonBodyError::Read(never) => match never {},
+                    })
+            }
+            "duplicateBearerFixture" => {
+                let mut builder = Request::builder();
+                for header in duplicate_header_values(function, args.first())? {
+                    builder = builder.header(header::AUTHORIZATION, header);
+                }
+                let request = builder
                     .body(())
                     .map_err(|error| CaseError::new("Error", error.to_string()))?;
                 Ok(json!(http_body::get_token_from_request(&request)))

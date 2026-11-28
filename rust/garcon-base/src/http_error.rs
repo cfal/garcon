@@ -87,7 +87,7 @@ pub fn json_error_from_unknown(
     error_code: Option<&str>,
     retryable: Option<bool>,
 ) -> Result<Response<Bytes>, JsonErrorResponseError> {
-    if let ErrorInput::Error(error) = error {
+    if let Some(error) = error.as_error() {
         if let Some(error) = as_agent_call_error(error) {
             let (status, retryable) = match (error.outcome, error.code) {
                 (AgentDeliveryOutcome::NotDispatched, AgentIntegrationErrorCode::EXECUTOR_BUSY) => {
