@@ -1,0 +1,13 @@
+{
+  "module": "server/runtime/git/ref-validation.ts",
+  "tests": [
+    "rust/parity/fixtures/git/pure.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 145,
+  "sha256": "647201acdfa409ea5498c21a28ff1ce57cfffef7343f83a56cbef6e25e2dfabf"
+}

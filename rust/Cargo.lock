@@ -627,6 +627,7 @@ dependencies = [
  "garcon-contract",
  "garcon-interface",
  "garcon-js",
+ "indexmap",
  "libc",
  "rustix",
  "serde",
