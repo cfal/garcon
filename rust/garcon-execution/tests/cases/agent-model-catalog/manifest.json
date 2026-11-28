@@ -1,0 +1,14 @@
+{
+  "module": "rust/garcon-execution/tests/support/agent-model-catalog-oracle.ts",
+  "tests": [
+    "server/controller/agents/__tests__/model-catalog-cache.test.js",
+    "server/controller/agents/__tests__/catalog-service.test.js"
+  ],
+  "inputs": "rust/garcon-execution/tests/inputs/agent-model-catalog.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 17,
+  "sha256": "d858f800fd3e446440cd2c3eebdd960f2b7367abc8e021d066e30ddbf09b415c"
+}

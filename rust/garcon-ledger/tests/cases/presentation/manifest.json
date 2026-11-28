@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-ledger/tests/presentation-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-ledger/tests/inputs/presentation.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 19,
+  "sha256": "a5ba352998d874fd65a28b210ab3cc1bfe8aa71cc9412bb752c57b281e931a0e"
+}

@@ -1,0 +1,13 @@
+{
+  "module": "server-agents/claude/src/agents/claude/compaction.ts",
+  "tests": [
+    "server-agents/claude/src/agents/claude/__tests__/compaction.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 177,
+  "sha256": "5f1e393718b63da306491ff75ffe1b24007d8f2c4c0271ca5e469f694b67cfe1"
+}

@@ -1,0 +1,137 @@
+{
+  "scenario": "executors-connection",
+  "cases": [
+    {
+      "name": "derive-advertised-url-under-mount",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "allowUnverifiedTls": false,
+            "connectionUrl": "ws://controller.example.invalid:4100/tools/garcon/executor/{{uuid}}#secret=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ",
+            "noTls": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/executors/{{uuid}}/connection"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "reject-unreachable-public-host",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Public URL must have a reachable HTTP(S) host and no credentials, query, or fragment",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/executors/{{uuid}}/connection"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "preserve-target-url-query-and-tls-policy",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "allowUnverifiedTls": true,
+            "connectionUrl": "wss://worker.example.invalid/worker?tag=a&tag=b#secret=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBAQ",
+            "noTls": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/executors/{{uuid}}/connection"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "deny-unauthenticated-export",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/executors/{{uuid}}/connection"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "no-local-connection",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Executor not found",
+            "errorCode": "EXECUTOR_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/executors/local/connection"
+        },
+        "status": 404
+      },
+      "noise": []
+    }
+  ]
+}

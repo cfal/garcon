@@ -75,6 +75,15 @@ impl fmt::Display for ExecutorSessionLostError {
 
 impl Error for ExecutorSessionLostError {}
 
+/// Views an erased error as the original's AgentCallError base class.
+pub fn as_agent_call_error<'a>(error: &'a (dyn Error + 'static)) -> Option<&'a AgentCallError> {
+    error.downcast_ref::<AgentCallError>().or_else(|| {
+        error
+            .downcast_ref::<ExecutorSessionLostError>()
+            .map(|error| &error.call)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

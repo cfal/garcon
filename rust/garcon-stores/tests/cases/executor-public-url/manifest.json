@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-stores/tests/executor_public_url_oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-stores/tests/inputs/executor-public-url.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 29,
+  "sha256": "80e784ff0b399114d902b7e0aaafac60ebb9e3c80acd335aa6334ba246bfc095"
+}

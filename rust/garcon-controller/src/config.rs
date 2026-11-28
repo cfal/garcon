@@ -8,6 +8,7 @@ use garcon_contract::base_path::parse_base_path;
 use garcon_contract::config_dir::{ConfigDirectoryEnvironment, resolve_config_directory};
 use garcon_js::path::native;
 use garcon_js::{Number, is_integer, parse_int, trim};
+use garcon_stores::executors::public_url::parse_public_url;
 use serde::Serialize;
 use url::Url;
 
@@ -373,45 +374,6 @@ fn has_url_suffix(url: &Url) -> bool {
         || url.password().is_some_and(|value| !value.is_empty())
         || url.query().is_some_and(|value| !value.is_empty())
         || url.fragment().is_some_and(|value| !value.is_empty())
-}
-
-fn parse_public_url(value: &str) -> Result<Url, DomainError> {
-    let mut url = Url::parse(value).map_err(|_| {
-        DomainError::new_validation("Public URL must be an absolute HTTP(S) base URL")
-    })?;
-    let mut bytes = [0; 4];
-    let invalid_input = value
-        .chars()
-        .any(|character| character == '\\' || trim(character.encode_utf8(&mut bytes)).is_empty());
-    if !matches!(url.scheme(), "http" | "https")
-        || has_url_suffix(&url)
-        || invalid_input
-        || !url.host_str().is_some_and(is_reachable_host)
-    {
-        return Err(DomainError::new_validation(
-            "Public URL must have a reachable HTTP(S) host and no credentials, query, or fragment",
-        ));
-    }
-    let path = format!("{}/", url.path().trim_end_matches('/'));
-    url.set_path(&path);
-    Ok(url)
-}
-
-fn is_reachable_host(host: &str) -> bool {
-    if matches!(host, "" | "0.0.0.0" | "[::]" | "example.com") {
-        return false;
-    }
-    if let Some(ipv6) = host
-        .strip_prefix('[')
-        .and_then(|text| text.strip_suffix(']'))
-    {
-        return !ipv6.is_empty()
-            && ipv6
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit() || b":.".contains(&byte));
-    }
-    host.bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
 }
 
 fn parse_auth_disabled(

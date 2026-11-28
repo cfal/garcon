@@ -6,6 +6,7 @@ use std::rc::Rc;
 pub mod agents;
 mod cancellation;
 pub mod files;
+pub mod gh;
 pub mod git;
 pub mod projects;
 pub mod terminals;

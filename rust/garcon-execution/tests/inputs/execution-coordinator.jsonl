@@ -1,0 +1,17 @@
+{"fn":"coordinatorTrace","args":["provider"]}
+{"fn":"coordinatorTrace","args":["startup"]}
+{"fn":"coordinatorTrace","args":["coalesced"]}
+{"fn":"coordinatorTrace","args":["terminal"]}
+{"fn":"coordinatorTrace","args":["snapshot"]}
+{"fn":"coordinatorTrace","args":["hidden"]}
+{"fn":"coordinatorTrace","args":["hidden-paused"]}
+{"fn":"coordinatorTrace","args":["hidden-missing"]}
+{"fn":"coordinatorTrace","args":["receipt"]}
+{"fn":"coordinatorTrace","args":["receipt-failure"]}
+{"fn":"coordinatorTrace","args":["stale"]}
+{"fn":"coordinatorTrace","args":["fallback"]}
+{"fn":"coordinatorTrace","args":["ambiguous"]}
+{"fn":"coordinatorTrace","args":["plain-stop"]}
+{"fn":"coordinatorTrace","args":["shutdown"]}
+{"fn":"coordinatorTrace","args":["deletion"]}
+{"fn":"coordinatorTrace","args":["suppressed-drain"]}

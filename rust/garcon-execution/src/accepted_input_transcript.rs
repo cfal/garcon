@@ -154,13 +154,11 @@ impl AcceptedInputTranscript {
             timestamp: self.timestamp(options)?,
             content: content.into(),
             images: normalize_chat_images(options.images.as_deref()),
-            metadata: options
-                .question_reply
-                .as_ref()
-                .map(|reply| ChatMessageMetadata {
-                    question_reply: Some(reply.clone()),
-                    ..ChatMessageMetadata::default()
-                }),
+            metadata: options.question_reply.as_ref().map(|reply| {
+                let mut metadata = ChatMessageMetadata::default();
+                metadata.question_reply = Some(reply.clone());
+                metadata
+            }),
             presentation: options.user_message_presentation.clone(),
         })
     }
