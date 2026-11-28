@@ -7,7 +7,7 @@ after which the fallback is removed (the lift). The SPA in `web/` stays Svelte.
 Decisions are in [`DECISIONS.md`](DECISIONS.md). A session claims one unit here
 before starting it and marks it done with its gate results.
 
-Plan accepted 2026-11-27 (ADR-012 to ADR-026). A new session reads this file,
+Plan accepted 2026-11-27 (ADR-012 to ADR-027). A new session reads this file,
 then `DECISIONS.md`, `RULES.md`, and `GLOSSARY.md`.
 
 ## Where the port stands
@@ -153,9 +153,10 @@ Parallel. Each needs only wave 0.
 
 | Unit | Needs | Scope | Oracle | State |
 | --- | --- | --- | --- | --- |
+| agent-conformance | interface | `garcon_interface::testing` (the conformance kit), the roster test in `garcon-executor`, and a way to run the SACS modules for one driver (ADR-027) | The kit passes against the direct integrations and fails a planted facet-shape bug; the SACS registry test still locks the roster | open |
 | worker | link, runtime-*, agents-direct | `garcon-executor`: `Executor::start`, `api`, `serve`; RPC dispatch, `ProducerRelay`, CLI gateway, executor arguments, listener secret | `executor-*` and `git-*` suites, TypeScript controller with Rust worker, both dial directions | open |
-| agent-claude | worker | Claude CLI transport, protocol, steering, history, forking | `claude-*` and `scripted-*` suites through the Rust worker; conformance kit | open |
-| agent-codex | worker | App-server client, runtime, converter, history, code-mode parser | `codex-*` suites through the Rust worker; conformance kit | open |
+| agent-claude | worker | Claude CLI transport, protocol, steering, history, forking | `claude-*` and `scripted-*` suites and the SACS modules for its driver through the Rust worker; conformance kit | open |
+| agent-codex | worker | App-server client, runtime, converter, history, code-mode parser | `codex-*` suites and the SACS modules for its driver through the Rust worker; conformance kit | open |
 | agent-pi | worker | Pi RPC runtime | `pi-*` suites | open |
 | agent-opencode | worker | `opencode serve` supervisor, event stream, permissions | `opencode-*` suites | open |
 | agent-antigravity | worker | Shared ACP runtime, Antigravity converter | `antigravity-*` suites | open |
@@ -355,6 +356,7 @@ runs.
 | 024 | The shared crates mirror the original's packages |
 | 025 | Each session works in its own worktree |
 | 026 | Bun 1.4.3 is the reference runtime, and Rust builds leave the development machine |
+| 027 | Each integration is a crate of its own, held to the compatibility suite |
 
 ## Open questions
 
