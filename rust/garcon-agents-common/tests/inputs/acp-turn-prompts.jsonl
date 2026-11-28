@@ -1,0 +1,12 @@
+{"fn":"scriptedAcpTurnPrompts","args":[[["run"],["snapshot"],["reply",0,"end_turn"],["snapshot"]]]}
+{"fn":"scriptedAcpTurnPrompts","args":[[["run"],["steer",12],["sent",1],["snapshot"],["reply",0,"cancelled"],["snapshot"],["reply",1,"end_turn"],["tick",20],["snapshot"]]]}
+{"fn":"scriptedAcpTurnPrompts","args":[[["run"],["steer",12],["reply",0,"cancelled"],["snapshot"],["sent",1],["reply",1,"end_turn"],["snapshot"]]]}
+{"fn":"scriptedAcpTurnPrompts","args":[[["run"],["steer",12],["sent",1],["rpc-error",1,-32001,"Steering refused"],["snapshot"],["reply",0,"end_turn"],["snapshot"]]]}
+{"fn":"scriptedAcpTurnPrompts","args":[[["run"],["steer",12],["sent",1],["tick",11],["snapshot"],["tick",1],["snapshot"],["reply",0,"cancelled"],["snapshot"],["reply",1,"end_turn"],["snapshot"]]]}
+{"fn":"scriptedAcpTurnPrompts","args":[[["run"],["steer",12],["sent",1],["reply",1,"end_turn"],["snapshot"],["reply",0,"end_turn"],["snapshot"]]]}
+{"fn":"scriptedAcpTurnPrompts","args":[[["run"],["steer",12],["sent",1],["reply",1,"end_turn"],["reject",0,"Prior prompt connection lost"],["snapshot"]]]}
+{"fn":"scriptedAcpTurnPrompts","args":[[["run"],["reject",0,"Prompt write failed"],["snapshot"]]]}
+{"fn":"scriptedAcpTurnPrompts","args":[[["run"],["hold"],["reply",0,"end_turn"],["snapshot"],["steer",12],["sent",1],["release"],["snapshot"],["reply",1,"end_turn"],["snapshot"]]]}
+{"fn":"scriptedAcpTurnPrompts","args":[[["run"],["failure","Model overloaded"],["reply",0,"end_turn"],["reply",0,"cancelled"],["snapshot"]]]}
+{"fn":"scriptedAcpTurnPrompts","args":[[["run"],["steer",12],["sent",1],["reply",0,"cancelled"],["failure","Model overloaded"],["reply",1,"end_turn"],["snapshot"]]]}
+{"fn":"scriptedAcpTurnPrompts","args":[[["run"],["steer",12],["rpc-error",1,-32002,"Connection lost"],["snapshot"],["reply",0,"end_turn"],["snapshot"]]]}
