@@ -1,9 +1,15 @@
 pub mod api_providers;
 pub mod auth;
+pub mod chat_messages;
+pub mod chat_rows;
+pub mod chat_snapshot;
+pub mod chats;
+pub mod combined_messages;
 pub mod executors;
 pub mod runtime;
 pub mod r#static;
 pub mod tickets;
+mod transcript_history_error;
 
 use std::rc::Rc;
 
