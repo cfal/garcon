@@ -1,0 +1,13 @@
+{
+  "module": "rust/garcon-execution/tests/support/working-directory-settlement-oracle.ts",
+  "tests": [
+    "server/controller/projects/__tests__/working-directory-settlement.test.js"
+  ],
+  "inputs": "rust/garcon-execution/tests/inputs/working-directory-settlement.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 20,
+  "sha256": "9aa48d3c0ff16556c76cbe3438c4bb558069b32fccdfad8e420fd3f233891ddb"
+}

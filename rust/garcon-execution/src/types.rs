@@ -161,7 +161,11 @@ impl DiagnosticError for ControlTransitionError {
 }
 
 pub fn execution_error_input<'a>(error: &'a (dyn Error + 'static)) -> ErrorInput<'a> {
-    if let Some(error) = error.downcast_ref::<ControlTransitionError>() {
+    if let Some(error) =
+        error.downcast_ref::<crate::command_validation_error::CommandValidationError>()
+    {
+        ErrorInput::Diagnostic(error)
+    } else if let Some(error) = error.downcast_ref::<ControlTransitionError>() {
         ErrorInput::Diagnostic(error)
     } else if let Some(error) = error.downcast_ref::<QueueEntryMutationError>() {
         ErrorInput::Diagnostic(error)

@@ -1,0 +1,19 @@
+{"fn":"attachmentAdmissionTrace","args":["empty"]}
+{"fn":"attachmentAdmissionTrace","args":["missing-model"]}
+{"fn":"attachmentAdmissionTrace","args":["missing-mime"]}
+{"fn":"attachmentAdmissionTrace","args":["native-supported"]}
+{"fn":"attachmentAdmissionTrace","args":["native-unsupported"]}
+{"fn":"attachmentAdmissionTrace","args":["native-lookup-fails"]}
+{"fn":"attachmentAdmissionTrace","args":["endpoint-supported"]}
+{"fn":"attachmentAdmissionTrace","args":["endpoint-unsupported"]}
+{"fn":"attachmentAdmissionTrace","args":["endpoint-lookup-fails"]}
+{"fn":"attachmentAdmissionTrace","args":["offline"]}
+{"fn":"attachmentAdmissionTrace","args":["mixed"]}
+{"fn":"attachmentAdmissionTrace","args":["file-unsupported"]}
+{"fn":"attachmentAdmissionTrace","args":["file-too-large"]}
+{"fn":"attachmentAdmissionTrace","args":["file-too-large-unnamed"]}
+{"fn":"attachmentAdmissionTrace","args":["file-accepted","data:text/csv;base64,AA=="]}
+{"fn":"attachmentAdmissionTrace","args":["file-accepted","data:text/csv;base64,AAA="]}
+{"fn":"attachmentAdmissionTrace","args":["file-accepted","====="]}
+{"fn":"attachmentAdmissionTrace","args":["file-accepted","\nYWJj  "]}
+{"fn":"attachmentAdmissionTrace","args":["file-accepted","\ud83e\uddeaAAAA"]}

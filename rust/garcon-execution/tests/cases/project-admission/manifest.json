@@ -1,0 +1,13 @@
+{
+  "module": "rust/garcon-execution/tests/support/project-admission-oracle.ts",
+  "tests": [
+    "server/controller/projects/__tests__/project-admission.test.js"
+  ],
+  "inputs": "rust/garcon-execution/tests/inputs/project-admission.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 10,
+  "sha256": "37d66f241f345fade7812a0c027ca28313a93754e20a43345615041982d6ae32"
+}

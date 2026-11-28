@@ -16,7 +16,7 @@ use garcon_contract::{
     error_codes::ErrorCode,
     executors::{
         AgentExecutionTarget, ExecutorBulkAvailability, ExecutorBulkStatus,
-        ExecutorSnapshotAvailability,
+        ExecutorSnapshotAvailability, parse_executors,
     },
 };
 use garcon_execution::{
@@ -117,6 +117,10 @@ impl ExecutionRuntimeApi for Runtime {
         self.availability.get()
     }
     async fn get_info(&self, _: Option<ExecutorCallOptions>) -> ExecutorResult<ExecutorInfo> {
+        assert!(
+            self.id != "local" || self.availability() == ExecutorAvailability::Ready,
+            "offline Local has no runtime information to fetch"
+        );
         let hold = self.hold_info.take();
         if let Some(hold) = hold {
             hold.await?;
@@ -231,6 +235,10 @@ impl RemoteExecutorFactory for Factory {
 }
 
 async fn fixture() -> (TempDir, Rc<ExecutorManager>, Rc<Runtime>) {
+    fixture_with_local(Rc::new(Runtime::new("local", ExecutorAvailability::Ready))).await
+}
+
+async fn fixture_with_local(local: Rc<Runtime>) -> (TempDir, Rc<ExecutorManager>, Rc<Runtime>) {
     let root = tempfile::tempdir().unwrap();
     let snapshot = json!({"version":1,"executors":[{
         "id":ID,"label":"Synthetic worker","enabled":true,
@@ -254,7 +262,7 @@ async fn fixture() -> (TempDir, Rc<ExecutorManager>, Rc<Runtime>) {
         .unwrap();
     let factory = Rc::new(Factory::default());
     let manager = ExecutorManager::start(ExecutorManagerOptions {
-        local: Rc::new(Runtime::new("local", ExecutorAvailability::Ready)),
+        local,
         config,
         remote_factory: factory.clone(),
         resolve_credential: Rc::new(|_, _, _| Box::pin(async { Ok(None) })),
@@ -264,6 +272,72 @@ async fn fixture() -> (TempDir, Rc<ExecutorManager>, Rc<Runtime>) {
     .unwrap();
     let remote = factory.0.take().unwrap();
     (root, manager, remote)
+}
+
+#[tokio::test]
+async fn offline_local_starts_and_lists_without_runtime_information() {
+    const OFFLINE_LOCAL_WIRE: &str = concat!(
+        r#"{"id":"local","label":"Local","kind":"local","enabled":true,"direction":null,"#,
+        r#""allowControllerCli":true,"allowExecutorManagement":true,"availability":"offline","#,
+        r#""projectBasePath":null,"instanceId":null,"bulk":null,"#,
+        r#""lastError":{"code":"UNAVAILABLE","message":"Local executor is unavailable"},"#,
+        r#""executorServices":{"files":false,"git":false,"gh":false,"terminals":false,"#,
+        r#""directoryCreation":false}}"#,
+    );
+    LocalSet::new()
+        .run_until(async {
+            let local = Rc::new(Runtime::new("local", ExecutorAvailability::Offline));
+            local
+                .info
+                .borrow_mut()
+                .integration_ids
+                .push("unavailable-agent".into());
+            let (_root, manager, _remote) = fixture_with_local(local).await;
+            assert!(!manager.is_ready("local"));
+            assert!(!manager.is_reconnecting("local"));
+            assert_eq!(
+                manager.instance_id("local").unwrap_err().code,
+                ErrorCode::EXECUTOR_UNAVAILABLE
+            );
+            assert!(
+                manager
+                    .known_integration(&AgentExecutionTarget {
+                        agent_id: "unavailable-agent".into(),
+                        executor_id: "local".into(),
+                    })
+                    .is_none()
+            );
+            assert!(manager.inbound_link(ID).is_some());
+            let wire = manager.list_wire();
+            assert_eq!(serde_json::to_string(&wire[0]).unwrap(), OFFLINE_LOCAL_WIRE);
+            let bytes = serde_json::to_string(&wire).unwrap();
+            let parsed = parse_executors(&garcon_js::json::from_str(&bytes).unwrap());
+            assert_eq!(parsed.unwrap(), manager.list());
+            manager.dispose().await.unwrap();
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn local_listing_does_not_publish_cached_information_after_it_goes_offline() {
+    LocalSet::new()
+        .run_until(async {
+            let local = Rc::new(Runtime::new("local", ExecutorAvailability::Ready));
+            let (_root, manager, _remote) = fixture_with_local(local.clone()).await;
+            let ready = manager.list().remove(0);
+            assert_eq!(ready.availability, ExecutorSnapshotAvailability::Ready);
+            assert_eq!(ready.instance_id.as_deref(), Some("synthetic-instance"));
+            assert!(ready.executor_services.files);
+
+            local.set_availability(ExecutorAvailability::Offline);
+            let offline = manager.list().remove(0);
+            assert_eq!(offline.availability, ExecutorSnapshotAvailability::Offline);
+            assert_eq!(offline.instance_id, None);
+            assert_eq!(offline.project_base_path, None);
+            assert!(!offline.executor_services.files);
+            manager.dispose().await.unwrap();
+        })
+        .await;
 }
 
 fn domain_result<T>(result: ExecutorResult<T>) -> Value {
