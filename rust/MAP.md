@@ -371,8 +371,20 @@ runs.
 
 ## Open questions
 
-None. The six questions of 2026-11-28 are decided in ADR-029, ADR-030, and
-ADR-031.
+The six questions of 2026-11-28 are decided in ADR-029, ADR-030, and
+ADR-031. One is open:
+
+1. Raw model arrays in provider converters. The original's Claude converter
+   hands the model's `changes` and `allowedPrompts` arrays to the message
+   unchanged, and the shared parser trims them at the first read (members
+   other than the declared strings are dropped; an array left empty by that
+   becomes absent). The port's message types hold only the trimmed form, so
+   its converter trims at once. The difference shows only when a model sends
+   members the tool does not declare, and only in the bytes of the link
+   message, the stored row, and the live frame of a Local turn; every reader,
+   the browser included, sees the same message. Two of 141 recorded converter
+   cases. Proceeding as accepted (RULES.md, JSON); refusing it means message
+   types that carry the raw array.
 
 ## Out of scope
 
