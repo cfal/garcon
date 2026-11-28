@@ -27,4 +27,8 @@ url.workspace = true
 
 [dev-dependencies]
 garcon-cases.workspace = true
-tempfile = "3"
+tempfile.workspace = true
+
+[[test]]
+name = "runtime_environment"
+harness = false

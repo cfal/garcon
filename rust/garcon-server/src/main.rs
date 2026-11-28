@@ -218,10 +218,13 @@ async fn run_front_door(config: FrontDoorConfig) -> std::io::Result<ExitCode> {
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if std::env::var_os("GARCON_RS_CONTROLLER").is_some_and(|mode| mode == "native") {
-        return garcon_controller::server::run_native(
-            &args,
-            std::rc::Rc::new(garcon_controller::server::UnavailableLocalExecutor),
-        );
+        // SAFETY: native dispatch runs before either mode starts a runtime or any threads.
+        return unsafe {
+            garcon_controller::server::run_native(
+                &args,
+                std::rc::Rc::new(garcon_controller::server::UnavailableLocalExecutor),
+            )
+        };
     }
     run_front_door_entry(args)
 }
