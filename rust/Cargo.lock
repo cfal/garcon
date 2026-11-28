@@ -963,6 +963,7 @@ dependencies = [
 name = "garcon-agent-codex"
 version = "0.1.0"
 dependencies = [
+ "garcon-base",
  "garcon-cases",
  "garcon-contract",
  "garcon-js",
@@ -974,6 +975,7 @@ dependencies = [
  "oxc_span",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
