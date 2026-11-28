@@ -41,6 +41,7 @@ pub mod session_settings_service;
 pub mod session_types;
 pub mod steer_input_delivery;
 pub mod steering_errors;
+pub mod transcript_mutation;
 pub mod turn_finalization_tracker;
 pub mod turn_identity;
 pub mod turn_operation;

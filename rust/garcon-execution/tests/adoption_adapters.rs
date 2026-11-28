@@ -59,6 +59,8 @@ use serde_json::{Value, json};
 
 #[path = "adoption_adapters/transcript_commits.rs"]
 mod transcript_commits;
+#[path = "adoption_adapters/transcript_mutation.rs"]
+mod transcript_mutation;
 use tokio::task::LocalSet;
 
 const REMOTE: &str = "11111111-1111-4111-8111-111111111111";
