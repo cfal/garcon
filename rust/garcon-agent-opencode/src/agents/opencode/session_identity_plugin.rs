@@ -167,20 +167,21 @@ pub fn path_to_file_url(path: &str) -> String {
     url
 }
 
-// Bun.which and the plugin path were probed on POSIX alone; a Windows path
-// becomes the URL Windows tools expect, with its drive in the pathname.
 #[cfg(windows)]
 pub fn path_to_file_url(path: &str) -> String {
-    let resolved = garcon_js::path::win32::resolve(
-        &std::env::current_dir()
-            .map(|cwd| cwd.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        &[path],
-    );
-    let (host, rest) = match resolved.split_once(r"\\") {
-        Some((host, rest)) if !host.is_empty() => (host, rest),
-        _ => ("", resolved.as_str()),
-    };
+    let cwd = std::env::current_dir()
+        .map(|cwd| cwd.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    windows_path_to_file_url(&cwd, path)
+}
+
+#[cfg(any(windows, test))]
+fn windows_path_to_file_url(cwd: &str, path: &str) -> String {
+    let resolved = garcon_js::path::win32::resolve(cwd, &[path]);
+    let (host, rest) = resolved
+        .strip_prefix(r"\\")
+        .and_then(|rest| rest.split_once('\\'))
+        .unwrap_or(("", resolved.as_str()));
     let mut url = format!("file://{host}/");
     for byte in rest.bytes() {
         match byte {
@@ -203,4 +204,25 @@ pub fn path_to_file_url(path: &str) -> String {
         }
     }
     url
+}
+
+#[cfg(test)]
+mod tests {
+    use super::windows_path_to_file_url;
+
+    #[test]
+    fn windows_unc_plugin_url_uses_the_server_as_its_host() {
+        assert_eq!(
+            windows_path_to_file_url(r"C:\fixture", r"\\server\share\plugin.mjs"),
+            "file://server/share/plugin.mjs"
+        );
+    }
+
+    #[test]
+    fn windows_drive_plugin_url_preserves_the_drive_and_escapes_the_path() {
+        assert_eq!(
+            windows_path_to_file_url(r"C:\fixture", r"C:\Garcon plugins\100% session #1.mjs"),
+            "file:///C:/Garcon%20plugins/100%25%20session%20%231.mjs"
+        );
+    }
 }

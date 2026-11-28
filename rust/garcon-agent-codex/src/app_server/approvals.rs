@@ -17,6 +17,8 @@ use crate::user_input::{
 
 use super::protocol::{JsonRpcId, JsonRpcServerRequest};
 
+pub mod registry;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodexPendingApproval {
     pub permission_occurrence_id: String,

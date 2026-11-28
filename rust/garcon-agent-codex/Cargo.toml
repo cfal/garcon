@@ -9,7 +9,9 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+async-trait.workspace = true
 futures.workspace = true
+garcon-agents-common.workspace = true
 garcon-base.workspace = true
 garcon-contract.workspace = true
 garcon-interface.workspace = true

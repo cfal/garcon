@@ -214,7 +214,7 @@ fn missing_evidence(message: &str) -> NamedError {
     }
 }
 
-fn message_timestamp(message: &ChatMessage) -> &str {
+pub(crate) fn message_timestamp(message: &ChatMessage) -> &str {
     use ChatMessage::*;
     match message {
         User(value) => &value.timestamp,
