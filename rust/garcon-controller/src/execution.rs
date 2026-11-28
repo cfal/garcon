@@ -2,7 +2,13 @@
 //! the Local runtime; only the shell calls this module. Required runtime
 //! bindings are not substituted by fallbacks while their owners are ported.
 
-use std::{collections::HashSet, future::Future, rc::Rc};
+use std::{
+    cell::OnceCell,
+    collections::HashSet,
+    future::Future,
+    ops::Deref,
+    rc::{Rc, Weak},
+};
 
 use async_trait::async_trait;
 use garcon_base::{
@@ -21,13 +27,16 @@ use garcon_execution::{
     agent_registry::{AgentRegistry, AgentRegistryOptions, RegistryCarryOverRevision},
     chat_execution_control_repository::InMemoryChatExecutionControlRepository,
     chat_execution_coordinator::{
-        ChatExecutionCoordinator, ChatExecutionCoordinatorDeps, ChatExecutionCoordinatorHost,
-        ChatExecutionCoordinatorOptions,
+        ChatExecutionCoordinator, ChatExecutionCoordinatorHost, ChatExecutionCoordinatorOptions,
+        ChatExecutionDispatchDeps, ChatExecutionStartup,
     },
     command_ledger::{CommandLedger, CommandLedgerOptions},
     control_state::StoredControlInputEntry,
     directory::AgentDirectory,
-    executor_availability_wiring::{ExecutorAvailabilityWiring, wire_executor_availability},
+    executor_availability_wiring::{
+        ExecutorAvailabilityChats, ExecutorAvailabilityObservers, ExecutorAvailabilityQueue,
+        recover_executor_queue, wire_executor_availability_observers,
+    },
     executor_config_guards::executor_config_guards,
     executor_manager::{ExecutorManager, ExecutorManagerOptions, ResolveExecutorCredential},
     queued_steer_delivery::QueuedSteerContent,
@@ -41,7 +50,7 @@ use garcon_execution::{
     },
     turn_terminal_settlement::WorkingDirectorySettlementPort,
     types::{
-        AgentTurnRunnerPort, ExecutionOperationResult, ProjectAdmissionPort,
+        AgentTurnRunnerPort, ChatExecutionQueries, ExecutionOperationResult, ProjectAdmissionPort,
         QueuedAttachmentAdmissionPort,
     },
 };
@@ -104,13 +113,17 @@ pub type BindExecutionRuntime = dyn FnOnce(
 pub type ExecutionAdoption = TranscriptAdoptionService<Vec<CarryOverSegmentRef>>;
 
 pub struct ExecutionBindings {
+    pub reads: ExecutionReadBindings,
+    pub bind_runtime: Box<BindExecutionRuntime>,
+}
+
+pub struct ExecutionReadBindings {
     pub chats: Rc<ChatRegistry>,
     pub ownership: Rc<AgentOwnershipJournal>,
     pub ledger_store: Rc<TranscriptLedgerStore>,
     pub ledger: Rc<TranscriptLedgerService>,
     pub adoption: Rc<ExecutionAdoption>,
     pub get_carry_over_revision: Rc<RegistryCarryOverRevision>,
-    pub bind_runtime: Box<BindExecutionRuntime>,
     pub selection_admission_lock: Rc<KeyedLock>,
     pub publish_executor_processing: Rc<dyn Fn(&str)>,
 }
@@ -124,27 +137,123 @@ pub struct ExecutionRuntimeBindings {
     pub working_directory_settlement: Rc<dyn WorkingDirectorySettlementPort>,
 }
 
-pub struct ExecutionHandles {
+/// Startup's read phase. Neither a coordinator nor a command facet is
+/// exposed until the required runtime bindings have been installed.
+pub struct ExecutionReadHandles {
     pub manager: Rc<ExecutorManager>,
     pub directory: Rc<AgentDirectory>,
     pub registry: Rc<AgentRegistry>,
-    pub coordinator: Rc<ChatExecutionCoordinator>,
-    pub command_ledger: Rc<CommandLedger>,
+    pub queries: Rc<dyn ChatExecutionQueries>,
+    command_ledger: Rc<CommandLedger>,
     pub adoption: Rc<ExecutionAdoption>,
     pub retain_executor_references: RetainExecutorReferences,
     subscriptions: Vec<Box<dyn Fn()>>,
+    dispatch: Option<PendingDispatch>,
+}
+
+struct PendingDispatch {
+    startup: ChatExecutionStartup,
+    chats: Rc<ChatRegistry>,
+    ledger: Rc<TranscriptLedgerService>,
+    ledger_store: Rc<TranscriptLedgerStore>,
+    selection_admission_lock: Rc<KeyedLock>,
+    unhandled_rejections: Rc<UnhandledRejectionPolicy>,
+    queue: Rc<OnceCell<Weak<ChatExecutionCoordinator>>>,
+}
+
+pub struct ExecutionHandles {
+    pub reads: ExecutionReadHandles,
+    pub coordinator: Rc<ChatExecutionCoordinator>,
+    pub command_ledger: Rc<CommandLedger>,
+}
+
+impl Deref for ExecutionHandles {
+    type Target = ExecutionReadHandles;
+
+    fn deref(&self) -> &Self::Target {
+        &self.reads
+    }
 }
 
 impl ExecutionHandles {
+    pub fn unsubscribe(&mut self) {
+        self.reads.unsubscribe();
+    }
+}
+
+impl ExecutionReadHandles {
     /// Stops event delivery before the caller tears down execution and stores.
     pub fn unsubscribe(&mut self) {
         for unsubscribe in self.subscriptions.drain(..).rev() {
             unsubscribe();
         }
     }
+
+    pub async fn bind_runtime(
+        mut self,
+        bind: Box<BindExecutionRuntime>,
+    ) -> ExecutionOperationResult<ExecutionHandles> {
+        let runtime = match bind(
+            self.registry.clone(),
+            self.command_ledger.clone(),
+            self.adoption.clone(),
+        ) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                self.unsubscribe();
+                dispose_after_failed_start(&self.manager).await;
+                return Err(error);
+            }
+        };
+        // INFALLIBLE: only this consuming method takes the startup state.
+        let dispatch = self.dispatch.take().expect("unbound execution startup");
+        let coordinator = dispatch.startup.bind(
+            ChatExecutionDispatchDeps {
+                turn_runner: runtime.turn_runner,
+                input_transcript: runtime.input_transcript,
+                get_drain_options: Rc::new({
+                    let chats = dispatch.chats.clone();
+                    move |chat_id| queue_drain_options(&chats, chat_id)
+                }),
+                options: ChatExecutionCoordinatorOptions {
+                    host: Rc::new(CoordinatorHost {
+                        chats: dispatch.chats,
+                        manager: self.manager.clone(),
+                        ledger: dispatch.ledger_store,
+                        command_ledger: self.command_ledger.clone(),
+                        commands: runtime.commands,
+                    }),
+                    project_admission: runtime.project_admission,
+                    attachment_admission: runtime.attachment_admission,
+                    working_directory_settlement: Some(runtime.working_directory_settlement),
+                    selection_admission_lock: dispatch.selection_admission_lock,
+                    unhandled_rejections: dispatch.unhandled_rejections,
+                },
+            },
+            Rc::new(SystemClock),
+            performance_now_ms,
+        );
+        self.subscriptions
+            .push(dispatch.ledger.subscribe_run_ended_committed(Rc::new({
+                let coordinator = Rc::downgrade(&coordinator);
+                move |run| {
+                    if let Some(coordinator) = coordinator.upgrade() {
+                        coordinator.mark_run_terminal_committed(&run.chat_id, &run.run_id);
+                    }
+                    Ok(())
+                }
+            })));
+        // INFALLIBLE: the queue slot is new and only this consuming bind writes it.
+        assert!(dispatch.queue.set(Rc::downgrade(&coordinator)).is_ok());
+        Ok(ExecutionHandles {
+            command_ledger: self.command_ledger.clone(),
+            reads: self,
+            coordinator,
+        })
+    }
 }
 
-impl Drop for ExecutionHandles {
+impl Drop for ExecutionReadHandles {
     fn drop(&mut self) {
         self.unsubscribe();
     }
@@ -157,10 +266,43 @@ pub async fn start_execution<Fut>(
 where
     Fut: Future<Output = ExecutionOperationResult<ExecutionBindings>>,
 {
+    let (reads, runtime) = start_reads(options, |foundation| async {
+        let bindings = bind(foundation).await?;
+        Ok((bindings.reads, bindings.bind_runtime))
+    })
+    .await?;
+    reads.bind_runtime(runtime).await
+}
+
+pub async fn start_execution_reads<Fut>(
+    options: ExecutionStartup<'_>,
+    bind: impl FnOnce(ExecutionFoundation) -> Fut,
+) -> ExecutionOperationResult<ExecutionReadHandles>
+where
+    Fut: Future<Output = ExecutionOperationResult<ExecutionReadBindings>>,
+{
+    let (reads, ()) = start_reads(options, |foundation| async {
+        Ok((bind(foundation).await?, ()))
+    })
+    .await?;
+    Ok(reads)
+}
+
+async fn start_reads<T, Fut>(
+    options: ExecutionStartup<'_>,
+    bind: impl FnOnce(ExecutionFoundation) -> Fut,
+) -> ExecutionOperationResult<(ExecutionReadHandles, T)>
+where
+    Fut: Future<Output = ExecutionOperationResult<(ExecutionReadBindings, T)>>,
+{
     let config = match ExecutorConfigStore::open(options.workspace_dir).await {
         Ok(config) => config,
         Err(error) => {
-            dispose_after_failed_start(options.local.as_ref()).await;
+            if let Err(dispose) = options.local.dispose().await {
+                create_logger("executors").warn(&format!(
+                    "Local executor disposal after startup failed: {dispose}"
+                ));
+            }
             return Err(error);
         }
     };
@@ -180,41 +322,38 @@ where
         retain_executor_references: retain_executor_references.clone(),
     })
     .await;
-    let result = bindings.and_then(|bindings| {
-        finish_execution(
+    let result = bindings.and_then(|(bindings, runtime)| {
+        let handles = finish_reads(
             options.server_instance_id,
             options.unhandled_rejections,
             manager.clone(),
             directory,
             retain_executor_references,
             bindings,
-        )
+        )?;
+        Ok((handles, runtime))
     });
-    if result.is_err()
-        && let Err(error) = manager.dispose().await
-    {
-        create_logger("executors")
-            .warn(&format!("Executor disposal after startup failed: {error}"));
+    if result.is_err() {
+        dispose_after_failed_start(&manager).await;
     }
     result
 }
 
-async fn dispose_after_failed_start(local: &dyn ExecutionRuntimeApi) {
-    if let Err(error) = local.dispose().await {
-        create_logger("executors").warn(&format!(
-            "Local executor disposal after startup failed: {error}"
-        ));
+async fn dispose_after_failed_start(manager: &Rc<ExecutorManager>) {
+    if let Err(error) = manager.dispose().await {
+        create_logger("executors")
+            .warn(&format!("Executor disposal after startup failed: {error}"));
     }
 }
 
-fn finish_execution(
+fn finish_reads(
     server_instance_id: String,
     unhandled_rejections: Rc<UnhandledRejectionPolicy>,
     manager: Rc<ExecutorManager>,
     directory: Rc<AgentDirectory>,
     retain_executor_references: RetainExecutorReferences,
-    bindings: ExecutionBindings,
-) -> ExecutionOperationResult<ExecutionHandles> {
+    bindings: ExecutionReadBindings,
+) -> ExecutionOperationResult<ExecutionReadHandles> {
     let registry = Rc::new(AgentRegistry::new(AgentRegistryOptions {
         runtime: AgentRuntimeRouterOptions {
             registry: Rc::new(RouterChats(bindings.chats.clone())),
@@ -230,84 +369,66 @@ fn finish_execution(
         }),
         logger: Rc::new(create_logger("agents")),
     }));
-    let clock = Rc::new(SystemClock);
     let command_ledger = Rc::new(CommandLedger::new(
         CommandLedgerOptions::default(),
-        clock.clone(),
+        Rc::new(SystemClock),
     )?);
-    let runtime = (bindings.bind_runtime)(
-        registry.clone(),
-        command_ledger.clone(),
-        bindings.adoption.clone(),
-    )?;
     let unsubscribe_transcript =
         registry.bind_transcript_commits(&bindings.ledger, command_ledger.clone());
-    let coordinator = ChatExecutionCoordinator::new(
-        ChatExecutionCoordinatorDeps {
-            turn_runner: runtime.turn_runner,
-            input_transcript: runtime.input_transcript,
-            controls: Rc::new(InMemoryChatExecutionControlRepository::new(
-                server_instance_id,
-            )),
-            get_drain_options: Rc::new({
-                let chats = bindings.chats.clone();
-                move |chat_id| queue_drain_options(&chats, chat_id)
-            }),
-            options: ChatExecutionCoordinatorOptions {
-                host: Rc::new(CoordinatorHost {
-                    chats: bindings.chats.clone(),
-                    manager: manager.clone(),
-                    ledger: bindings.ledger_store,
-                    command_ledger: command_ledger.clone(),
-                    commands: runtime.commands,
-                }),
-                project_admission: runtime.project_admission,
-                attachment_admission: runtime.attachment_admission,
-                working_directory_settlement: Some(runtime.working_directory_settlement),
-                selection_admission_lock: bindings.selection_admission_lock,
-                unhandled_rejections,
-            },
+    let startup = ChatExecutionStartup::new(
+        Rc::new(InMemoryChatExecutionControlRepository::new(
+            server_instance_id,
+        )),
+        {
+            let ledger = bindings.ledger.clone();
+            move |chat_id| ledger.is_run_active(chat_id, None)
         },
-        clock,
         || uuid::Uuid::new_v4().to_string(),
-        performance_now_ms,
     );
-    let unsubscribe_terminal = bindings.ledger.subscribe_run_ended_committed(Rc::new({
-        let coordinator = Rc::downgrade(&coordinator);
-        move |run| {
-            if let Some(coordinator) = coordinator.upgrade() {
-                coordinator.mark_run_terminal_committed(&run.chat_id, &run.run_id);
-            }
-            Ok(())
-        }
-    }));
+    let queries = startup.queries();
     manager.set_guards(executor_config_guards(
         bindings.chats.clone(),
-        coordinator.clone(),
+        queries.clone(),
         bindings.ownership.clone(),
     ));
-    let unsubscribe_availability = wire_executor_availability(ExecutorAvailabilityWiring {
-        executors: manager.clone(),
-        sessions: registry.clone(),
-        chats: bindings.chats,
-        ownership: bindings.ownership,
-        queue: coordinator.clone(),
-        publish_processing: bindings.publish_executor_processing,
-        logger: Rc::new(create_logger("server-events")),
-    });
-    Ok(ExecutionHandles {
+    let logger: Rc<dyn Logger> = Rc::new(create_logger("server-events"));
+    let queue = Rc::new(OnceCell::<Weak<ChatExecutionCoordinator>>::new());
+    let unsubscribe_availability =
+        wire_executor_availability_observers(ExecutorAvailabilityObservers {
+            executors: manager.clone(),
+            sessions: registry.clone(),
+            ownership: bindings.ownership,
+            publish_processing: bindings.publish_executor_processing,
+            on_ready: Rc::new({
+                let (queue, logger) = (queue.clone(), logger.clone());
+                let chats: Rc<dyn ExecutorAvailabilityChats> = bindings.chats.clone();
+                move |id| {
+                    if let Some(coordinator) = queue.get().and_then(Weak::upgrade) {
+                        let coordinator: Rc<dyn ExecutorAvailabilityQueue> = coordinator;
+                        recover_executor_queue(id, &chats, &coordinator, &logger);
+                    }
+                }
+            }),
+            logger,
+        });
+    Ok(ExecutionReadHandles {
         manager,
         directory,
         registry,
-        coordinator,
+        queries,
         command_ledger,
         adoption: bindings.adoption,
         retain_executor_references,
-        subscriptions: vec![
-            unsubscribe_transcript,
-            unsubscribe_terminal,
-            unsubscribe_availability,
-        ],
+        subscriptions: vec![unsubscribe_transcript, unsubscribe_availability],
+        dispatch: Some(PendingDispatch {
+            startup,
+            chats: bindings.chats,
+            ledger: bindings.ledger,
+            ledger_store: bindings.ledger_store,
+            selection_admission_lock: bindings.selection_admission_lock,
+            unhandled_rejections,
+            queue,
+        }),
     })
 }
 

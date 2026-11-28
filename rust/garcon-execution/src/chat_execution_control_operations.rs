@@ -240,12 +240,7 @@ impl ChatExecutionControlOperations {
     }
 
     pub async fn read(&self, chat_id: &str) -> ExecutionOperationResult<Control> {
-        self.exclusive(chat_id, || async {
-            Ok(clone_stored_chat_execution_control(
-                &self.load(chat_id).await,
-            ))
-        })
-        .await
+        read_execution_control(&*self.repository, &self.lock, chat_id).await
     }
 
     pub async fn with_control<T, F, Fut>(
@@ -834,6 +829,25 @@ impl ChatExecutionControlOperations {
             entry.id, control.control_entries.len(),
         ));
     }
+}
+
+pub(crate) async fn read_execution_control(
+    repository: &dyn ChatExecutionControlRepository,
+    lock: &KeyedLock,
+    chat_id: &str,
+) -> ExecutionOperationResult<Control> {
+    Ok(lock
+        .run_exclusive(
+            &format!("chat:{chat_id}"),
+            || async {
+                let current = repository.load(chat_id);
+                // The original awaits the synchronous load under this lock.
+                tokio::task::yield_now().await;
+                clone_stored_chat_execution_control(&current)
+            },
+            None,
+        )
+        .await?)
 }
 
 fn revision(control: &Control, entry_id: &str) -> Option<u64> {
