@@ -1,0 +1,22 @@
+{
+  "module": "common/handoff-sizing.ts",
+  "tests": [
+    "common/__tests__/handoff-sizing.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseAgentSwitchContextWindowTokens",
+      "argument": 0
+    },
+    {
+      "fn": "isHandoffContextWindowTokens",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 94,
+  "sha256": "fa5069df68cc628095ed947204c5fd84ba03aace326205aba2f3957c2987be9c"
+}
