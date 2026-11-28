@@ -1,0 +1,122 @@
+{
+  "name": "auth-register",
+  "description": "Registration while an account exists: the conflict for the configured account, which a forged token neither prevents nor causes; then field validation in check order, on a malformed body, on a body that is not a JSON object, and on a username that is blank, holds a control, or is over the limit in code units. The ten requests are the limiter's allowance for a minute.",
+  "steps": [
+    {
+      "name": "register-account-configured",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "newuser",
+          "password": "long-enough-password"
+        },
+        "auth": "forged"
+      }
+    },
+    {
+      "name": "register-malformed-json",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "body": "{\"unterminated",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-array-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": [],
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-extra-field",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "newuser",
+          "password": "long-enough-password",
+          "remember": true
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-empty-object",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {},
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-username-not-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": 42,
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-username-blank",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": " \t ",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-username-with-line-feed",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "bad\nname",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-username-65-characters",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    },
+    {
+      "name": "register-username-33-emoji",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/auth/register",
+        "json": {
+          "username": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+          "password": "long-enough-password"
+        },
+        "auth": "none"
+      }
+    }
+  ],
+  "traps": false
+}

@@ -1,0 +1,2048 @@
+{
+  "name": "tickets-mutations",
+  "description": "Ticket mutations from an empty store: create with idempotent replay and request conflicts, ownership rules, update, claim, release, close and reopen transitions, comments with author and revision checks, links with cycle detection, reads that page through what was written, and agent commands switched off.",
+  "server": {
+    "files": {
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":0,\"assignments\":{}}",
+      "workspace/workspace-version.json": "{\n  \"version\": 10\n}\n",
+      "workspace/chats.json": "{\n  \"version\": 6,\n  \"sessions\": {\n    \"1000000000000001\": {\n      \"agentId\": \"claude\",\n      \"agentSessionId\": null,\n      \"nativeSession\": null,\n      \"agentOwnershipEpoch\": \"epoch-a\",\n      \"agentSettingsById\": {},\n      \"projectPath\": \"/srv/seeded-project\",\n      \"tags\": [],\n      \"model\": \"\",\n      \"apiProviderId\": null,\n      \"modelEndpointId\": null,\n      \"modelProtocol\": null,\n      \"lastReadAt\": null,\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"carryOverSegments\": [],\n      \"nativeSeedReceipt\": null,\n      \"carryOverMigrationQuarantine\": null,\n      \"pendingPreambleBoundary\": null,\n      \"preambleSelection\": {\n        \"revision\": 0,\n        \"orderedPreambleIds\": []\n      },\n      \"parentChatId\": null,\n      \"lineage\": null\n    },\n    \"1000000000000002\": {\n      \"agentId\": \"codex\",\n      \"agentSessionId\": null,\n      \"nativeSession\": null,\n      \"agentOwnershipEpoch\": \"epoch-b\",\n      \"agentSettingsById\": {},\n      \"projectPath\": \"/srv/seeded-project\",\n      \"tags\": [],\n      \"model\": \"\",\n      \"apiProviderId\": null,\n      \"modelEndpointId\": null,\n      \"modelProtocol\": null,\n      \"lastReadAt\": null,\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"carryOverSegments\": [],\n      \"nativeSeedReceipt\": null,\n      \"carryOverMigrationQuarantine\": null,\n      \"pendingPreambleBoundary\": null,\n      \"preambleSelection\": {\n        \"revision\": 0,\n        \"orderedPreambleIds\": []\n      },\n      \"parentChatId\": null,\n      \"lineage\": null\n    }\n  }\n}"
+    }
+  },
+  "steps": [
+    {
+      "name": "bootstrap",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/bootstrap"
+      }
+    },
+    {
+      "name": "listEmpty",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets"
+      }
+    },
+    {
+      "name": "countsEmpty",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/counts"
+      }
+    },
+    {
+      "name": "detailMissing",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/detail?ticketId=G-1"
+      }
+    },
+    {
+      "name": "commentsMissing",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/comments?ticketId=G-1"
+      }
+    },
+    {
+      "name": "historyMissing",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/history?ticketId=G-1"
+      }
+    },
+    {
+      "name": "facetsEmpty",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/facets?field=project"
+      }
+    },
+    {
+      "name": "createFirst",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000001",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "create",
+            "input": {
+              "title": "  First ticket  ",
+              "project": "parity",
+              "description": "First body",
+              "priority": 1,
+              "labels": [
+                "b",
+                "a"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "createFirstReplayed",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000001",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "create",
+            "input": {
+              "title": "  First ticket  ",
+              "project": "parity",
+              "description": "First body",
+              "priority": 1,
+              "labels": [
+                "b",
+                "a"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "createFirstReplayedWithOtherPayload",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000001",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "create",
+            "input": {
+              "title": "Other title",
+              "project": "parity",
+              "description": "First body",
+              "priority": 1,
+              "labels": [
+                "b",
+                "a"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "createSecond",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000004",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "create",
+            "input": {
+              "title": "Second ticket",
+              "project": "parity"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "createWithMissingParent",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000005",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "create",
+            "input": {
+              "title": "Orphan",
+              "project": "parity",
+              "parentId": "G-99"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "createAssignedToUser",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000006",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "create",
+            "input": {
+              "title": "Third ticket",
+              "project": "other",
+              "assignee": {
+                "kind": "user",
+                "ownerKey": "parity"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "createAssignedToOtherUser",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000007",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "create",
+            "input": {
+              "title": "Not mine",
+              "project": "parity",
+              "assignee": {
+                "kind": "user",
+                "ownerKey": "someone-else"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "createAssignedToExecutor",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000008",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "create",
+            "input": {
+              "title": "Theirs",
+              "project": "parity",
+              "assignee": {
+                "kind": "executor",
+                "executorId": "33333333-3333-4333-8333-333333333333"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "createAssignedToMissingChat",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000009",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "create",
+            "input": {
+              "title": "Lost",
+              "project": "parity",
+              "assignee": {
+                "kind": "chat",
+                "chatId": "1999999999999999"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "createAssignedToChat",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000000a",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "create",
+            "input": {
+              "title": "Fourth ticket",
+              "project": "parity",
+              "assignee": {
+                "kind": "chat",
+                "chatId": "1000000000000001"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "createDeclaredFromChat",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000000b",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "fromChatId": "1000000000000001",
+          "payload": {
+            "action": "create",
+            "input": {
+              "title": "Fifth ticket",
+              "project": "parity"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "createDeclaredFromMissingChat",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000000c",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "fromChatId": "1999999999999999",
+          "payload": {
+            "action": "create",
+            "input": {
+              "title": "Lost",
+              "project": "parity"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "createSixth",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000000d",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "create",
+            "input": {
+              "title": "Sixth ticket",
+              "project": "parity",
+              "priority": 3,
+              "labels": [
+                "x"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "createSeventh",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000000e",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "create",
+            "input": {
+              "title": "Seventh ticket",
+              "project": "parity",
+              "labels": [
+                "x",
+                "y"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "list",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets"
+      }
+    },
+    {
+      "name": "counts",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/counts"
+      }
+    },
+    {
+      "name": "countsFiltered",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/counts?status=in-progress&includeClosed=true&priority=3&label=x&assignee=user:parity&ready=false&query=SIXTH"
+      }
+    },
+    {
+      "name": "listFiltered",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets?project=parity&status=open&includeClosed=false&priority=3&label=x&assignee=unassigned&query=x"
+      }
+    },
+    {
+      "name": "detailFirst",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/detail?ticketId=G-1"
+      }
+    },
+    {
+      "name": "detailThird",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/detail?ticketId=G-3"
+      }
+    },
+    {
+      "name": "detailFourth",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/detail?ticketId=G-4"
+      }
+    },
+    {
+      "name": "commentsFirst",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/comments?ticketId=G-1"
+      }
+    },
+    {
+      "name": "historyFirst",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/history?ticketId=G-1"
+      }
+    },
+    {
+      "name": "facetsProject",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/facets?field=project"
+      }
+    },
+    {
+      "name": "facetsProjectWithPrefix",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/facets?field=project&prefix=o"
+      }
+    },
+    {
+      "name": "facetsLabel",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/facets?field=label"
+      }
+    },
+    {
+      "name": "facetsLabelWithPrefix",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/facets?field=label&prefix="
+      }
+    },
+    {
+      "name": "bootstrapAfterCreate",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/bootstrap"
+      }
+    },
+    {
+      "name": "updateFirst",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000000f",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-1",
+            "expectedRevision": "{{createFirst.body.ticket.revision}}",
+            "patch": {
+              "title": "First renamed",
+              "priority": 3,
+              "labels": [
+                "c"
+              ],
+              "description": "New body",
+              "project": "renamed",
+              "status": "in-progress",
+              "parentId": "G-2"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "updateFirstStale",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000010",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-1",
+            "expectedRevision": 1,
+            "patch": {
+              "title": "Stale"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "updateUnknown",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000011",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-99",
+            "expectedRevision": 1,
+            "patch": {
+              "title": "Unknown"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "updateFirstUnchanged",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000012",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-1",
+            "expectedRevision": "{{updateFirst.body.ticket.revision}}",
+            "patch": {
+              "title": "First renamed",
+              "priority": 3,
+              "labels": [
+                "c"
+              ],
+              "description": "New body",
+              "project": "renamed"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "updateFirstParentMissing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000013",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-1",
+            "expectedRevision": "{{updateFirst.body.ticket.revision}}",
+            "patch": {
+              "parentId": "G-99"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "updateFirstParentSelf",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000014",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-1",
+            "expectedRevision": "{{updateFirst.body.ticket.revision}}",
+            "patch": {
+              "parentId": "G-1"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "updateSecondParentMakesCycle",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000015",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-2",
+            "expectedRevision": "{{createSecond.body.ticket.revision}}",
+            "patch": {
+              "parentId": "G-1"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "updateFirstAssigneeOtherUser",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000016",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-1",
+            "expectedRevision": "{{updateFirst.body.ticket.revision}}",
+            "patch": {
+              "assignee": {
+                "kind": "user",
+                "ownerKey": "someone-else"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "updateFirstAssigneeMissingChat",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000017",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-1",
+            "expectedRevision": "{{updateFirst.body.ticket.revision}}",
+            "patch": {
+              "assignee": {
+                "kind": "chat",
+                "chatId": "1999999999999999"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "updateFirstAssignsUser",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000018",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-1",
+            "expectedRevision": "{{updateFirst.body.ticket.revision}}",
+            "patch": {
+              "assignee": {
+                "kind": "user",
+                "ownerKey": "parity"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "updateFirstClearsAssignee",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000019",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-1",
+            "expectedRevision": "{{updateFirstAssignsUser.body.ticket.revision}}",
+            "patch": {
+              "assignee": null
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "updateFirstClearsParent",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000001a",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-1",
+            "expectedRevision": "{{updateFirstClearsAssignee.body.ticket.revision}}",
+            "patch": {
+              "parentId": null
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "claimSecond",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000001b",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "claim",
+            "ticketId": "G-2",
+            "expectedRevision": "{{createSecond.body.ticket.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "claimSecondAgain",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000001c",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "claim",
+            "ticketId": "G-2",
+            "expectedRevision": "{{claimSecond.body.ticket.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "claimSecondStale",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000001d",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "claim",
+            "ticketId": "G-2",
+            "expectedRevision": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "claimThird",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000001e",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "claim",
+            "ticketId": "G-3",
+            "expectedRevision": "{{createAssignedToUser.body.ticket.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "claimFourthHeldByChat",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000001f",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "claim",
+            "ticketId": "G-4",
+            "expectedRevision": "{{createAssignedToChat.body.ticket.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "claimUnknown",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000020",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "claim",
+            "ticketId": "G-99",
+            "expectedRevision": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "releaseSecond",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000021",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "release",
+            "ticketId": "G-2",
+            "expectedRevision": "{{claimSecond.body.ticket.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "releaseSecondAgain",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000022",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "release",
+            "ticketId": "G-2",
+            "expectedRevision": "{{releaseSecond.body.ticket.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "releaseFourthHeldByChat",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000023",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "release",
+            "ticketId": "G-4",
+            "expectedRevision": "{{createAssignedToChat.body.ticket.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "reopenSecondWhileOpen",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000024",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "reopen",
+            "ticketId": "G-2",
+            "expectedRevision": "{{releaseSecondAgain.body.ticket.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "closeSecond",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000025",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "close",
+            "ticketId": "G-2",
+            "expectedRevision": "{{releaseSecondAgain.body.ticket.revision}}",
+            "resolution": "done",
+            "comment": "Closing"
+          }
+        }
+      }
+    },
+    {
+      "name": "closeSecondOtherResolution",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000026",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "close",
+            "ticketId": "G-2",
+            "expectedRevision": "{{closeSecond.body.ticket.revision}}",
+            "resolution": "canceled"
+          }
+        }
+      }
+    },
+    {
+      "name": "closeSecondAgain",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000027",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "close",
+            "ticketId": "G-2",
+            "expectedRevision": "{{closeSecond.body.ticket.revision}}",
+            "resolution": "done"
+          }
+        }
+      }
+    },
+    {
+      "name": "closeSecondAnotherComment",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000028",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "close",
+            "ticketId": "G-2",
+            "expectedRevision": "{{closeSecondAgain.body.ticket.revision}}",
+            "resolution": "done",
+            "comment": "Still closing"
+          }
+        }
+      }
+    },
+    {
+      "name": "claimSecondClosed",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000029",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "claim",
+            "ticketId": "G-2",
+            "expectedRevision": "{{closeSecondAnotherComment.body.ticket.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "updateSecondClosedStatus",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000002a",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-2",
+            "expectedRevision": "{{closeSecondAnotherComment.body.ticket.revision}}",
+            "patch": {
+              "status": "in-progress"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "updateSecondClosedTitle",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000002b",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-2",
+            "expectedRevision": "{{closeSecondAnotherComment.body.ticket.revision}}",
+            "patch": {
+              "title": "Second closed"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "releaseSecondClosed",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000002c",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "release",
+            "ticketId": "G-2",
+            "expectedRevision": "{{updateSecondClosedTitle.body.ticket.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "reopenSecond",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000002d",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "reopen",
+            "ticketId": "G-2",
+            "expectedRevision": "{{releaseSecondClosed.body.ticket.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "reopenSecondAgain",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000002e",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "reopen",
+            "ticketId": "G-2",
+            "expectedRevision": "{{reopenSecond.body.ticket.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "closeSecondDefaultResolution",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000002f",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "close",
+            "ticketId": "G-2",
+            "expectedRevision": "{{reopenSecondAgain.body.ticket.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "closeSecondOtherResolutionWhileClosed",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000030",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "close",
+            "ticketId": "G-2",
+            "expectedRevision": "{{closeSecondDefaultResolution.body.ticket.revision}}",
+            "resolution": "canceled"
+          }
+        }
+      }
+    },
+    {
+      "name": "reopenSecondFromDone",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000031",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "reopen",
+            "ticketId": "G-2",
+            "expectedRevision": "{{closeSecondDefaultResolution.body.ticket.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "closeSecondCanceled",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000032",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "close",
+            "ticketId": "G-2",
+            "expectedRevision": "{{reopenSecondFromDone.body.ticket.revision}}",
+            "resolution": "canceled"
+          }
+        }
+      }
+    },
+    {
+      "name": "closeSecondCanceledAgain",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000033",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "close",
+            "ticketId": "G-2",
+            "expectedRevision": "{{closeSecondCanceled.body.ticket.revision}}",
+            "resolution": "canceled"
+          }
+        }
+      }
+    },
+    {
+      "name": "reopenSecondCanceled",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000034",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "reopen",
+            "ticketId": "G-2",
+            "expectedRevision": "{{closeSecondCanceledAgain.body.ticket.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "detailSecondClosed",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/detail?ticketId=G-2"
+      }
+    },
+    {
+      "name": "commentsSecond",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/comments?ticketId=G-2"
+      }
+    },
+    {
+      "name": "commentFirst",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000035",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "comment",
+            "ticketId": "G-1",
+            "body": "  First comment  "
+          }
+        }
+      }
+    },
+    {
+      "name": "commentUnknownTicket",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000036",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "comment",
+            "ticketId": "G-99",
+            "body": "Where"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentFirstAgain",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000037",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "comment",
+            "ticketId": "G-1",
+            "body": "First comment"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentEdit",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000038",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "comment-edit",
+            "ticketId": "G-1",
+            "commentId": "{{commentFirst.body.comment.id}}",
+            "expectedRevision": "{{commentFirst.body.comment.revision}}",
+            "body": "Edited"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentEditStale",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000039",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "comment-edit",
+            "ticketId": "G-1",
+            "commentId": "{{commentFirst.body.comment.id}}",
+            "expectedRevision": 1,
+            "body": "Edited again"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentEditUnchanged",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000003a",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "comment-edit",
+            "ticketId": "G-1",
+            "commentId": "{{commentFirst.body.comment.id}}",
+            "expectedRevision": "{{commentEdit.body.comment.revision}}",
+            "body": "Edited"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentEditUnknownComment",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000003b",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "comment-edit",
+            "ticketId": "G-1",
+            "commentId": "00000000-0000-4000-8000-00000000c0de",
+            "expectedRevision": 1,
+            "body": "Edited"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentEditCommentOfOtherTicket",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000003c",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "comment-edit",
+            "ticketId": "G-2",
+            "commentId": "{{commentFirst.body.comment.id}}",
+            "expectedRevision": "{{commentEdit.body.comment.revision}}",
+            "body": "Edited elsewhere"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentFromChat",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000003d",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "fromChatId": "1000000000000001",
+          "payload": {
+            "action": "comment",
+            "ticketId": "G-1",
+            "body": "From a chat"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentEditDeclaredWithoutDeclaring",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000003e",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "comment-edit",
+            "ticketId": "G-1",
+            "commentId": "{{commentFromChat.body.comment.id}}",
+            "expectedRevision": "{{commentFromChat.body.comment.revision}}",
+            "body": "Edited without declaring"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentEditDeclaredDeclaring",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000003f",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "fromChatId": "1000000000000001",
+          "payload": {
+            "action": "comment-edit",
+            "ticketId": "G-1",
+            "commentId": "{{commentFromChat.body.comment.id}}",
+            "expectedRevision": "{{commentEditDeclaredWithoutDeclaring.body.comment.revision}}",
+            "body": "Edited declaring the chat"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentEditDeclaredDeclaringOtherChat",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000040",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "fromChatId": "1000000000000002",
+          "payload": {
+            "action": "comment-edit",
+            "ticketId": "G-1",
+            "commentId": "{{commentFromChat.body.comment.id}}",
+            "expectedRevision": "{{commentEditDeclaredDeclaring.body.comment.revision}}",
+            "body": "Edited declaring another chat"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentSecond",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000041",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "comment",
+            "ticketId": "G-1",
+            "body": "Second comment"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentDeleteFirst",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000042",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "comment-delete",
+            "ticketId": "G-1",
+            "commentId": "{{commentFirst.body.comment.id}}",
+            "expectedRevision": "{{commentEditUnchanged.body.comment.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentDeleteFirstAgain",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000043",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "comment-delete",
+            "ticketId": "G-1",
+            "commentId": "{{commentFirst.body.comment.id}}",
+            "expectedRevision": "{{commentDeleteFirst.body.comment.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentEditDeleted",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000044",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "comment-edit",
+            "ticketId": "G-1",
+            "commentId": "{{commentFirst.body.comment.id}}",
+            "expectedRevision": "{{commentDeleteFirstAgain.body.comment.revision}}",
+            "body": "Back"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentThird",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000045",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "comment",
+            "ticketId": "G-1",
+            "body": "Third comment"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentFourth",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000046",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "comment",
+            "ticketId": "G-1",
+            "body": "Fourth comment"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentsFirstPage",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/comments?ticketId=G-1&limit=2"
+      }
+    },
+    {
+      "name": "commentsFirstPageContinued",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/comments?ticketId=G-1&limit=2&beforeSequence={{commentsFirstPage.body.nextBeforeSequence}}&expectedCollectionRevision={{commentsFirstPage.body.collectionRevision}}"
+      }
+    },
+    {
+      "name": "commentsFirstPageContinuedStale",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/comments?ticketId=G-1&limit=2&beforeSequence={{commentsFirstPage.body.nextBeforeSequence}}&expectedCollectionRevision=0"
+      }
+    },
+    {
+      "name": "commentsFirstAll",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/comments?ticketId=G-1"
+      }
+    },
+    {
+      "name": "detailFirstComments",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/detail?ticketId=G-1&commentLimit=1"
+      }
+    },
+    {
+      "name": "detailFirstCommentsContinued",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/detail?ticketId=G-1&commentLimit=1&beforeCommentSequence={{detailFirstComments.body.comments.nextBeforeSequence}}&expectedCollectionRevision={{detailFirstComments.body.collectionRevision}}"
+      }
+    },
+    {
+      "name": "detailFirstWithoutDescription",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/detail?ticketId=G-1&includeDescription=false"
+      }
+    },
+    {
+      "name": "historyFirstPage",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/history?ticketId=G-1&limit=3"
+      }
+    },
+    {
+      "name": "historyFirstPageContinued",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/history?ticketId=G-1&limit=3&beforeSequence={{historyFirstPage.body.nextBeforeSequence}}"
+      }
+    },
+    {
+      "name": "historyFirstAll",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/history?ticketId=G-1"
+      }
+    },
+    {
+      "name": "linkFirstBlocksSecond",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000047",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "link",
+            "ticketId": "G-1",
+            "expectedRevision": "{{updateFirstClearsParent.body.ticket.revision}}",
+            "targetId": "G-2",
+            "targetRevision": "{{reopenSecondCanceled.body.ticket.revision}}",
+            "kind": "blocks"
+          }
+        }
+      }
+    },
+    {
+      "name": "linkFirstBlocksSecondAgain",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000048",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "link",
+            "ticketId": "G-1",
+            "expectedRevision": "{{linkFirstBlocksSecond.body.ticket.revision}}",
+            "targetId": "G-2",
+            "targetRevision": "{{linkFirstBlocksSecond.body.relatedTicket.revision}}",
+            "kind": "blocks"
+          }
+        }
+      }
+    },
+    {
+      "name": "linkTargetStale",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000049",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "link",
+            "ticketId": "G-1",
+            "expectedRevision": "{{linkFirstBlocksSecond.body.ticket.revision}}",
+            "targetId": "G-2",
+            "targetRevision": 1,
+            "kind": "related"
+          }
+        }
+      }
+    },
+    {
+      "name": "linkSourceStale",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000004a",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "link",
+            "ticketId": "G-1",
+            "expectedRevision": 1,
+            "targetId": "G-2",
+            "targetRevision": "{{linkFirstBlocksSecond.body.relatedTicket.revision}}",
+            "kind": "related"
+          }
+        }
+      }
+    },
+    {
+      "name": "linkToItself",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000004b",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "link",
+            "ticketId": "G-1",
+            "expectedRevision": "{{linkFirstBlocksSecond.body.ticket.revision}}",
+            "targetId": "G-1",
+            "targetRevision": "{{linkFirstBlocksSecond.body.ticket.revision}}",
+            "kind": "related"
+          }
+        }
+      }
+    },
+    {
+      "name": "linkUnknownTarget",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000004c",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "link",
+            "ticketId": "G-1",
+            "expectedRevision": "{{linkFirstBlocksSecond.body.ticket.revision}}",
+            "targetId": "G-99",
+            "targetRevision": 1,
+            "kind": "related"
+          }
+        }
+      }
+    },
+    {
+      "name": "linkSecondBlocksFirstCycle",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000004d",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "link",
+            "ticketId": "G-2",
+            "expectedRevision": "{{linkFirstBlocksSecond.body.relatedTicket.revision}}",
+            "targetId": "G-1",
+            "targetRevision": "{{linkFirstBlocksSecond.body.ticket.revision}}",
+            "kind": "blocks"
+          }
+        }
+      }
+    },
+    {
+      "name": "linkSecondBlocksFirstRelated",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000004e",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "link",
+            "ticketId": "G-2",
+            "expectedRevision": "{{linkFirstBlocksSecond.body.relatedTicket.revision}}",
+            "targetId": "G-1",
+            "targetRevision": "{{linkFirstBlocksSecond.body.ticket.revision}}",
+            "kind": "related"
+          }
+        }
+      }
+    },
+    {
+      "name": "linkFirstRelatedThird",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000004f",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "link",
+            "ticketId": "G-1",
+            "expectedRevision": "{{linkSecondBlocksFirstRelated.body.relatedTicket.revision}}",
+            "targetId": "G-3",
+            "targetRevision": "{{claimThird.body.ticket.revision}}",
+            "kind": "related"
+          }
+        }
+      }
+    },
+    {
+      "name": "linkThirdRelatedFirstAgain",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000050",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "link",
+            "ticketId": "G-3",
+            "expectedRevision": "{{linkFirstRelatedThird.body.relatedTicket.revision}}",
+            "targetId": "G-1",
+            "targetRevision": "{{linkFirstRelatedThird.body.ticket.revision}}",
+            "kind": "related"
+          }
+        }
+      }
+    },
+    {
+      "name": "unlinkFirstBlocksSecond",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000051",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "unlink",
+            "ticketId": "G-1",
+            "expectedRevision": "{{linkThirdRelatedFirstAgain.body.relatedTicket.revision}}",
+            "targetId": "G-2",
+            "targetRevision": "{{linkSecondBlocksFirstRelated.body.ticket.revision}}",
+            "kind": "blocks"
+          }
+        }
+      }
+    },
+    {
+      "name": "unlinkFirstBlocksSecondAgain",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000052",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "unlink",
+            "ticketId": "G-1",
+            "expectedRevision": "{{unlinkFirstBlocksSecond.body.ticket.revision}}",
+            "targetId": "G-2",
+            "targetRevision": "{{unlinkFirstBlocksSecond.body.relatedTicket.revision}}",
+            "kind": "blocks"
+          }
+        }
+      }
+    },
+    {
+      "name": "unlinkNeverLinked",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000053",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "unlink",
+            "ticketId": "G-1",
+            "expectedRevision": "{{unlinkFirstBlocksSecondAgain.body.ticket.revision}}",
+            "targetId": "G-6",
+            "targetRevision": "{{createSixth.body.ticket.revision}}",
+            "kind": "related"
+          }
+        }
+      }
+    },
+    {
+      "name": "detailFirstLinked",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/detail?ticketId=G-1"
+      }
+    },
+    {
+      "name": "detailSecondLinked",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/detail?ticketId=G-2"
+      }
+    },
+    {
+      "name": "listStaleRevision",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets?expectedCollectionRevision=0"
+      }
+    },
+    {
+      "name": "listPage",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets?limit=3"
+      }
+    },
+    {
+      "name": "listPageContinued",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets?limit=3&beforeNumber={{listPage.body.nextBeforeNumber}}&expectedCollectionRevision={{listPage.body.collectionRevision}}"
+      }
+    },
+    {
+      "name": "listPageContinuedStale",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets?limit=3&beforeNumber={{listPage.body.nextBeforeNumber}}&expectedCollectionRevision=0"
+      }
+    },
+    {
+      "name": "countsStaleRevision",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/counts?expectedCollectionRevision=0"
+      }
+    },
+    {
+      "name": "facetsLabelAfter",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/facets?field=label"
+      }
+    },
+    {
+      "name": "disableTicketCommands",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/settings",
+        "json": {
+          "features": {
+            "agentCommands": {
+              "tickets": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "createDeclaredFromChatCommandsDisabled",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000054",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "fromChatId": "1000000000000001",
+          "payload": {
+            "action": "create",
+            "input": {
+              "title": "Never created",
+              "project": "parity"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "commentFromChatCommandsDisabled",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000055",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "fromChatId": "1000000000000001",
+          "payload": {
+            "action": "comment",
+            "ticketId": "G-1",
+            "body": "Never added"
+          }
+        }
+      }
+    },
+    {
+      "name": "createWhileCommandsDisabled",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000056",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "create",
+            "input": {
+              "title": "Eighth ticket",
+              "project": "parity"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "updateFirstWhileCommandsDisabled",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000057",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-1",
+            "expectedRevision": "{{unlinkNeverLinked.body.ticket.revision}}",
+            "patch": {
+              "title": "Still renamed"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "enableTicketCommands",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/settings",
+        "json": {
+          "features": {
+            "agentCommands": {
+              "tickets": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "commentFromChatCommandsEnabled",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000058",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "fromChatId": "1000000000000002",
+          "payload": {
+            "action": "comment",
+            "ticketId": "G-1",
+            "body": "Added after enabling"
+          }
+        }
+      }
+    },
+    {
+      "name": "commentEditStaleAfterEnable",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-000000000059",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "comment-edit",
+            "ticketId": "G-1",
+            "commentId": "{{commentFromChatCommandsEnabled.body.comment.id}}",
+            "expectedRevision": 0,
+            "body": "Not mine"
+          }
+        }
+      }
+    },
+    {
+      "name": "claimDeclaredChatTicket",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000005a",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "payload": {
+            "action": "claim",
+            "ticketId": "G-5",
+            "expectedRevision": "{{createDeclaredFromChat.body.ticket.revision}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "updateDeclaredChatTicket",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000005b",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "fromChatId": "1000000000000001",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-5",
+            "expectedRevision": "{{claimDeclaredChatTicket.body.ticket.revision}}",
+            "patch": {
+              "title": "Fifth ticket updated"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "updateDeclaredChatTicketWithOtherRevision",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/tickets/mutate",
+        "json": {
+          "requestId": "00000000-0000-4000-8000-00000000005c",
+          "expectedStoreId": "{{bootstrap.body.storeId}}",
+          "fromChatId": "1000000000000001",
+          "payload": {
+            "action": "update",
+            "ticketId": "G-5",
+            "expectedRevision": 1,
+            "patch": {
+              "title": "Stale"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "historyFifth",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/history?ticketId=G-5"
+      }
+    },
+    {
+      "name": "bootstrapAtEnd",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/tickets/bootstrap"
+      }
+    }
+  ],
+  "traps": true
+}

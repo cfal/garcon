@@ -1,0 +1,368 @@
+{
+  "name": "saved-searches",
+  "description": "Saved search routes on an empty workspace: reads, create validation, the visibility rule, update and remove for unknown identifiers with their check order, and every reorder rejection, then reads that show what was written.",
+  "steps": [
+    {
+      "name": "saved-searches-empty",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/saved-searches"
+      }
+    },
+    {
+      "name": "search-missing-query",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "title": "Mine",
+          "showAsSidebarPill": true
+        }
+      }
+    },
+    {
+      "name": "search-blank-query",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "query": "   ",
+          "showAsSidebarPill": true
+        }
+      }
+    },
+    {
+      "name": "search-query-not-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "query": 42,
+          "showAsSidebarPill": true
+        }
+      }
+    },
+    {
+      "name": "search-no-visibility",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "query": "status:open"
+        }
+      }
+    },
+    {
+      "name": "search-visibility-not-boolean",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "query": "status:open",
+          "showAsSidebarPill": "yes",
+          "showInSidebarMenu": 1,
+          "showInSearchDialog": null
+        }
+      }
+    },
+    {
+      "name": "search-array-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/saved-searches",
+        "json": [
+          "status:open"
+        ]
+      }
+    },
+    {
+      "name": "search-string-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/saved-searches",
+        "json": "status:open"
+      }
+    },
+    {
+      "name": "search-null-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/saved-searches",
+        "json": null
+      }
+    },
+    {
+      "name": "search-created",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "title": "  Mine  ",
+          "query": " status:open tag:x ",
+          "showAsSidebarPill": true,
+          "extra": "ignored"
+        }
+      }
+    },
+    {
+      "name": "search-created-without-title",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "query": "q2",
+          "showInSearchDialog": true
+        }
+      }
+    },
+    {
+      "name": "saved-searches-after-create",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/saved-searches"
+      }
+    },
+    {
+      "name": "update-missing-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "title": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "update-blank-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": "   ",
+          "title": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "update-id-zero",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": 0,
+          "title": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "update-id-number",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": 42,
+          "title": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "update-array-body",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": [
+          "x"
+        ]
+      }
+    },
+    {
+      "name": "update-empty-query",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": "missing-search",
+          "query": "   "
+        }
+      }
+    },
+    {
+      "name": "update-unknown-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": "missing-search",
+          "title": "Renamed"
+        }
+      }
+    },
+    {
+      "name": "update-unknown-id-no-fields",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": "missing-search"
+        }
+      }
+    },
+    {
+      "name": "update-unknown-id-removing-visibility",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches",
+        "json": {
+          "id": "missing-search",
+          "showAsSidebarPill": false,
+          "showInSidebarMenu": false,
+          "showInSearchDialog": false
+        }
+      }
+    },
+    {
+      "name": "remove-without-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/app/saved-searches"
+      }
+    },
+    {
+      "name": "remove-empty-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/app/saved-searches?id="
+      }
+    },
+    {
+      "name": "remove-blank-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/app/saved-searches?id=%20%20"
+      }
+    },
+    {
+      "name": "remove-unknown-id",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/app/saved-searches?id=missing-search"
+      }
+    },
+    {
+      "name": "reorder-old-order-empty",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {
+          "newOrder": [
+            "a"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-old-order-not-array",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {
+          "oldOrder": "a",
+          "newOrder": [
+            "a"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-new-order-not-array",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {
+          "oldOrder": [
+            "a"
+          ],
+          "newOrder": "a"
+        }
+      }
+    },
+    {
+      "name": "reorder-length-mismatch",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {
+          "oldOrder": [
+            "a"
+          ],
+          "newOrder": [
+            "a",
+            "b"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-different-ids",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {
+          "oldOrder": [
+            "a"
+          ],
+          "newOrder": [
+            "b"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-empty-body",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {}
+      }
+    },
+    {
+      "name": "reorder-not-contiguous",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {
+          "oldOrder": [
+            "a"
+          ],
+          "newOrder": [
+            "a"
+          ]
+        }
+      }
+    },
+    {
+      "name": "reorder-wrong-method",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/saved-searches/reorder",
+        "json": {
+          "oldOrder": [
+            "a"
+          ],
+          "newOrder": [
+            "a"
+          ]
+        }
+      }
+    },
+    {
+      "name": "saved-searches-wrong-method",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/app/saved-searches",
+        "json": {}
+      }
+    }
+  ],
+  "traps": true
+}

@@ -1,0 +1,125 @@
+{
+  "name": "telegram",
+  "description": "Telegram routes with nothing configured: every offline result, and the settings snapshot each successful change answers with.",
+  "steps": [
+    {
+      "name": "settings-before",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/settings"
+      }
+    },
+    {
+      "name": "test-unconfigured",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/telegram/test",
+        "json": {}
+      }
+    },
+    {
+      "name": "token-empty-body",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/telegram/token",
+        "json": {}
+      }
+    },
+    {
+      "name": "token-blank",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/telegram/token",
+        "json": {
+          "botToken": "   "
+        }
+      }
+    },
+    {
+      "name": "token-not-string",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/app/telegram/token",
+        "json": {
+          "botToken": 42
+        }
+      }
+    },
+    {
+      "name": "link-unconfigured",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/telegram/recipient/link",
+        "json": {}
+      }
+    },
+    {
+      "name": "resolve-without-link",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/telegram/recipient/resolve",
+        "json": {}
+      }
+    },
+    {
+      "name": "clear-recipient",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/app/telegram/recipient"
+      }
+    },
+    {
+      "name": "clear-token",
+      "http": {
+        "method": "DELETE",
+        "path": "/api/v1/app/telegram/token"
+      }
+    },
+    {
+      "name": "settings-after",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/settings"
+      }
+    },
+    {
+      "name": "link-after-clear",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/telegram/recipient/link",
+        "json": {}
+      }
+    },
+    {
+      "name": "resolve-after-clear",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/telegram/recipient/resolve",
+        "json": {}
+      }
+    },
+    {
+      "name": "test-after-clear",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/app/telegram/test",
+        "json": {}
+      }
+    },
+    {
+      "name": "recipient-wrong-method",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/telegram/recipient"
+      }
+    },
+    {
+      "name": "link-wrong-method",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/app/telegram/recipient/link"
+      }
+    }
+  ],
+  "traps": true
+}

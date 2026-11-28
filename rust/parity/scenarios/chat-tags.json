@@ -1,0 +1,1549 @@
+{
+  "name": "chat-tags",
+  "description": "Chat tag routes over seeded chats, boards and archive state: read and recovery, set, replace and delta with tag normalization, and column transitions with every validation, conflict and not-found path in check order.",
+  "server": {
+    "files": {
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":0,\"assignments\":{}}",
+      "workspace/workspace-version.json": "{\n  \"version\": 10\n}\n",
+      "workspace/chats.json": "{\n  \"version\": 6,\n  \"sessions\": {\n    \"1000000000000001\": {\n      \"agentId\": \"claude\",\n      \"agentSessionId\": null,\n      \"nativeSession\": null,\n      \"agentOwnershipEpoch\": \"epoch-a\",\n      \"agentSettingsById\": {},\n      \"projectPath\": \"/srv/seeded-project\",\n      \"tags\": [\n        \"todo\"\n      ],\n      \"model\": \"\",\n      \"apiProviderId\": null,\n      \"modelEndpointId\": null,\n      \"modelProtocol\": null,\n      \"lastReadAt\": null,\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"carryOverSegments\": [],\n      \"nativeSeedReceipt\": null,\n      \"carryOverMigrationQuarantine\": null,\n      \"pendingPreambleBoundary\": null,\n      \"preambleSelection\": {\n        \"revision\": 0,\n        \"orderedPreambleIds\": []\n      },\n      \"parentChatId\": null,\n      \"lineage\": null\n    },\n    \"1000000000000002\": {\n      \"agentId\": \"codex\",\n      \"agentSessionId\": null,\n      \"nativeSession\": null,\n      \"agentOwnershipEpoch\": \"epoch-b\",\n      \"agentSettingsById\": {},\n      \"projectPath\": \"/srv/seeded-project\",\n      \"tags\": [],\n      \"model\": \"\",\n      \"apiProviderId\": null,\n      \"modelEndpointId\": null,\n      \"modelProtocol\": null,\n      \"lastReadAt\": null,\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"carryOverSegments\": [],\n      \"nativeSeedReceipt\": null,\n      \"carryOverMigrationQuarantine\": null,\n      \"pendingPreambleBoundary\": null,\n      \"preambleSelection\": {\n        \"revision\": 0,\n        \"orderedPreambleIds\": []\n      },\n      \"parentChatId\": null,\n      \"lineage\": null\n    }\n  }\n}",
+      "workspace/chat-boards.json": "{\n  \"version\": 1,\n  \"revision\": 3,\n  \"boards\": [\n    {\n      \"id\": \"11111111-1111-4111-8111-111111111111\",\n      \"name\": \"Board A\",\n      \"columns\": [\n        {\n          \"id\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\n          \"name\": \"To do\",\n          \"match\": \"all\",\n          \"tags\": [\n            \"todo\"\n          ]\n        },\n        {\n          \"id\": \"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\n          \"name\": \"Doing\",\n          \"match\": \"any\",\n          \"tags\": [\n            \"doing\",\n            \"review\"\n          ]\n        },\n        {\n          \"id\": \"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\n          \"name\": \"Done\",\n          \"match\": \"all\",\n          \"tags\": [\n            \"done\"\n          ]\n        },\n        {\n          \"id\": \"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee\",\n          \"name\": \"To do too\",\n          \"match\": \"all\",\n          \"tags\": [\n            \"todo\"\n          ]\n        },\n        {\n          \"id\": \"f000f000-f00f-4f0f-8f0f-f000f000f000\",\n          \"name\": \"Blocked\",\n          \"match\": \"any\",\n          \"tags\": [\n            \"blocked\",\n            \"review\"\n          ]\n        }\n      ]\n    },\n    {\n      \"id\": \"22222222-2222-4222-8222-222222222222\",\n      \"name\": \"Board B\",\n      \"columns\": [\n        {\n          \"id\": \"dddddddd-dddd-4ddd-8ddd-dddddddddddd\",\n          \"name\": \"Elsewhere\",\n          \"match\": \"all\",\n          \"tags\": [\n            \"elsewhere\"\n          ]\n        }\n      ]\n    }\n  ]\n}\n",
+      "workspace/project-settings.json": "{\n  \"features\": {\n    \"transcriptSearch\": {\n      \"enabled\": false\n    },\n    \"agentCommands\": {\n      \"enabled\": true,\n      \"chatIdDiscovery\": true,\n      \"sendMessage\": true,\n      \"startAgent\": true,\n      \"resumeAgent\": true,\n      \"schedule\": true,\n      \"tickets\": true\n    }\n  },\n  \"ui\": {},\n  \"paths\": {\n    \"recentProjectPaths\": []\n  },\n  \"chatNames\": {},\n  \"remoteSettingsVersion\": 0,\n  \"pinnedChatIds\": [],\n  \"normalChatIds\": [],\n  \"archivedChatIds\": [\n    \"1000000000000002\"\n  ],\n  \"recentAgentSettings\": [],\n  \"executionDefaults\": {\n    \"global\": {\n      \"permissionMode\": \"default\",\n      \"thinkingMode\": \"none\",\n      \"agentSettingsById\": {}\n    },\n    \"byAgent\": {}\n  },\n  \"chatFolders\": [],\n  \"savedChatSearches\": []\n}\n"
+    }
+  },
+  "steps": [
+    {
+      "name": "tags",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats/tags?chatId=1000000000000001"
+      }
+    },
+    {
+      "name": "tags-archived-chat",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats/tags?chatId=1000000000000002"
+      }
+    },
+    {
+      "name": "tags-unknown-chat",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats/tags?chatId=1999999999999999"
+      }
+    },
+    {
+      "name": "tags-missing-chat-id",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats/tags"
+      }
+    },
+    {
+      "name": "tags-blank-chat-id",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats/tags?chatId=%20%20"
+      }
+    },
+    {
+      "name": "tags-extra-parameter",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats/tags?chatId=1000000000000001&other=1"
+      }
+    },
+    {
+      "name": "tags-duplicate-chat-id",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats/tags?chatId=1000000000000001&chatId=1000000000000002"
+      }
+    },
+    {
+      "name": "set-empty-body",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chats/tags",
+        "json": {}
+      }
+    },
+    {
+      "name": "set-extra-field",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000001",
+          "tags": [],
+          "extra": 1
+        }
+      }
+    },
+    {
+      "name": "set-tags-not-array",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000001",
+          "tags": "todo"
+        }
+      }
+    },
+    {
+      "name": "set-tag-not-string",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000001",
+          "tags": [
+            "todo",
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "set-blank-chat-id",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "  ",
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "set-unknown-chat",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1999999999999999",
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "set-normalizes-tags",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "  1000000000000001  ",
+          "tags": [
+            "  To Do  ",
+            "TODO",
+            "x y",
+            "",
+            "  ",
+            "Ünïcode",
+            "a-b",
+            "a_b",
+            "a b"
+          ]
+        }
+      }
+    },
+    {
+      "name": "tags-after-set",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats/tags?chatId=1000000000000001"
+      }
+    },
+    {
+      "name": "set-same-tags-again",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000001",
+          "tags": [
+            "to-do",
+            "todo",
+            "x-y",
+            "ncode",
+            "a-b",
+            "ab"
+          ]
+        }
+      }
+    },
+    {
+      "name": "set-clears-tags",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000001",
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "tags-after-clear",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats/tags?chatId=1000000000000001"
+      }
+    },
+    {
+      "name": "set-archived-chat",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000002",
+          "tags": [
+            "archived"
+          ]
+        }
+      }
+    },
+    {
+      "name": "set-archived-chat-again",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000002",
+          "tags": [
+            "archived"
+          ]
+        }
+      }
+    },
+    {
+      "name": "set-restores-source-tag",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000001",
+          "tags": [
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "replace-empty-body",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags",
+        "json": {}
+      }
+    },
+    {
+      "name": "replace-extra-field",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000001",
+          "expectedTags": [],
+          "tags": [],
+          "extra": 1
+        }
+      }
+    },
+    {
+      "name": "replace-expected-tags-not-array",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000001",
+          "expectedTags": "todo",
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "replace-tags-not-array",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000001",
+          "expectedTags": [],
+          "tags": {}
+        }
+      }
+    },
+    {
+      "name": "replace-unknown-chat",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1999999999999999",
+          "expectedTags": [],
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "replace-expected-tags-mismatch",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000001",
+          "expectedTags": [],
+          "tags": [
+            "doing"
+          ]
+        }
+      }
+    },
+    {
+      "name": "replace-expected-tags-normalized-to-match",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            " TODO ",
+            "todo"
+          ],
+          "tags": [
+            " doing ",
+            "TODO"
+          ]
+        }
+      }
+    },
+    {
+      "name": "replace-without-change",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "doing",
+            "todo"
+          ],
+          "tags": [
+            "todo",
+            "doing"
+          ]
+        }
+      }
+    },
+    {
+      "name": "replace-removes-all-tags",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000002",
+          "expectedTags": [
+            "archived"
+          ],
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "delta-empty-body",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags/delta",
+        "json": {}
+      }
+    },
+    {
+      "name": "delta-extra-field",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags/delta",
+        "json": {
+          "chatId": "1000000000000001",
+          "addTags": []
+        }
+      }
+    },
+    {
+      "name": "delta-no-change",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags/delta",
+        "json": {
+          "chatId": "1000000000000001"
+        }
+      }
+    },
+    {
+      "name": "delta-empty-arrays",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags/delta",
+        "json": {
+          "chatId": "1000000000000001",
+          "addTags": [],
+          "removeTags": []
+        }
+      }
+    },
+    {
+      "name": "delta-tag-not-string",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags/delta",
+        "json": {
+          "chatId": "1000000000000001",
+          "addTags": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "delta-arrays-not-arrays",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags/delta",
+        "json": {
+          "chatId": "1000000000000001",
+          "addTags": "x",
+          "removeTags": []
+        }
+      }
+    },
+    {
+      "name": "delta-remove-tags-not-array",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags/delta",
+        "json": {
+          "chatId": "1000000000000001",
+          "removeTags": {}
+        }
+      }
+    },
+    {
+      "name": "delta-unknown-chat",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags/delta",
+        "json": {
+          "chatId": "1999999999999999",
+          "addTags": [
+            "x"
+          ]
+        }
+      }
+    },
+    {
+      "name": "delta-adds",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags/delta",
+        "json": {
+          "chatId": "1000000000000001",
+          "addTags": [
+            " Review ",
+            "REVIEW",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "delta-removes",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags/delta",
+        "json": {
+          "chatId": "1000000000000001",
+          "removeTags": [
+            " Doing "
+          ]
+        }
+      }
+    },
+    {
+      "name": "delta-adds-and-removes-same-tag",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags/delta",
+        "json": {
+          "chatId": "1000000000000001",
+          "addTags": [
+            "todo"
+          ],
+          "removeTags": [
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "delta-removes-absent-tag",
+      "http": {
+        "method": "PATCH",
+        "path": "/api/v1/chats/tags/delta",
+        "json": {
+          "chatId": "1000000000000001",
+          "removeTags": [
+            "done"
+          ]
+        }
+      }
+    },
+    {
+      "name": "tags-after-deltas",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats/tags?chatId=1000000000000001"
+      }
+    },
+    {
+      "name": "transition-empty-body",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {}
+      }
+    },
+    {
+      "name": "transition-extra-field",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ],
+          "extra": 1
+        }
+      }
+    },
+    {
+      "name": "transition-missing-chat-id",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-blank-chat-id",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": " ",
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-board-id-not-a-uuid",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "board-a",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-source-column-not-a-uuid",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "column-a",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-catalog-revision-negative",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": -1,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-catalog-revision-fractional",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 2.5,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-catalog-revision-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": "3",
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-catalog-revision-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "chatId": "1000000000000001",
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-target-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-target-unknown-kind",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "column"
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-target-none-with-extra-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "none",
+            "columnId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-target-column-without-id",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "column"
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-target-column-id-not-a-uuid",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "column",
+            "columnId": "doing"
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-target-column-extra-key",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "column",
+            "columnId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "extra": 1
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-target-selected-tags-not-array",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "column",
+            "columnId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "selectedTargetTags": "doing"
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-target-selected-tag-not-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "column",
+            "columnId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "selectedTargetTags": [
+              1
+            ]
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-expected-tags-missing",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-expected-tags-not-array",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": "todo"
+        }
+      }
+    },
+    {
+      "name": "transition-expected-tag-not-string",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": [
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-unknown-chat",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1999999999999999",
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": []
+        }
+      }
+    },
+    {
+      "name": "transition-catalog-conflict-reports-unknown-chat",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 2,
+          "chatId": "1999999999999999",
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": []
+        }
+      }
+    },
+    {
+      "name": "transition-stale-catalog-revision-before-archived-chat",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 99,
+          "chatId": "1000000000000002",
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": []
+        }
+      }
+    },
+    {
+      "name": "transition-archived-chat-before-source-column-and-expected-tags",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "00000000-0000-4000-8000-00000000dead",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000002",
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": [
+            "not-the-current-tag"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-archived-chat-without-source-tag",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000002",
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": []
+        }
+      }
+    },
+    {
+      "name": "transition-archived-chat",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000002",
+          "expectedTags": [
+            "review",
+            "todo"
+          ],
+          "target": {
+            "kind": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-catalog-conflict",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 2,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "review",
+            "todo"
+          ],
+          "target": {
+            "kind": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-expected-tags-conflict",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "todo"
+          ],
+          "target": {
+            "kind": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-expected-tags-conflict-before-columns",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "00000000-0000-4000-8000-00000000dead",
+          "sourceColumnId": "00000000-0000-4000-8000-00000000beef",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "not-the-current-tag"
+          ],
+          "target": {
+            "kind": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-same-source-and-target",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "review",
+            "todo"
+          ],
+          "target": {
+            "kind": "column",
+            "columnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-unknown-board",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "00000000-0000-4000-8000-00000000dead",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "review",
+            "todo"
+          ],
+          "target": {
+            "kind": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-board-of-another-column",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "22222222-2222-4222-8222-222222222222",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "review",
+            "todo"
+          ],
+          "target": {
+            "kind": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-column-of-another-board",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "review",
+            "todo"
+          ],
+          "target": {
+            "kind": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-unknown-source-column",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "00000000-0000-4000-8000-00000000dead",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "review",
+            "todo"
+          ],
+          "target": {
+            "kind": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-unknown-target-column",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "review",
+            "todo"
+          ],
+          "target": {
+            "kind": "column",
+            "columnId": "00000000-0000-4000-8000-00000000dead"
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-chat-not-in-source-column",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "review",
+            "todo"
+          ],
+          "target": {
+            "kind": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-any-target-requires-a-selection",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "review",
+            "todo"
+          ],
+          "target": {
+            "kind": "column",
+            "columnId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-any-target-selection-empty",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "review",
+            "todo"
+          ],
+          "target": {
+            "kind": "column",
+            "columnId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "selectedTargetTags": []
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-any-target-selection-not-in-column",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "review",
+            "todo"
+          ],
+          "target": {
+            "kind": "column",
+            "columnId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "selectedTargetTags": [
+              "done"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-is-a-noop",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "review",
+            "todo"
+          ],
+          "target": {
+            "kind": "column",
+            "columnId": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-to-none",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "review",
+            "todo"
+          ],
+          "target": {
+            "kind": "none"
+          }
+        }
+      }
+    },
+    {
+      "name": "tags-after-transition-to-none",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats/tags?chatId=1000000000000001"
+      }
+    },
+    {
+      "name": "set-restores-source-tag-again",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000001",
+          "tags": [
+            "todo",
+            "review"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-to-all-match-column",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "review",
+            "todo"
+          ],
+          "target": {
+            "kind": "column",
+            "columnId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+          }
+        }
+      }
+    },
+    {
+      "name": "tags-after-transition",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats/tags?chatId=1000000000000001"
+      }
+    },
+    {
+      "name": "transition-with-old-expected-tags",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "none"
+          },
+          "expectedTags": [
+            "review",
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-to-any-column-with-one-tag-selected",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "expectedTags": [
+            "done",
+            "review"
+          ],
+          "target": {
+            "kind": "column",
+            "columnId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "selectedTargetTags": [
+              " review "
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "transition-any-source-column-matches-one-tag",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "column",
+            "columnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+          },
+          "expectedTags": [
+            "review"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-to-any-column-with-all-tags-selected",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "column",
+            "columnId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            "selectedTargetTags": [
+              "doing",
+              "review"
+            ]
+          },
+          "expectedTags": [
+            "todo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-any-target-selection-normalized",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "column",
+            "columnId": "f000f000-f00f-4f0f-8f0f-f000f000f000",
+            "selectedTargetTags": [
+              " Blocked "
+            ]
+          },
+          "expectedTags": [
+            "doing",
+            "review"
+          ]
+        }
+      }
+    },
+    {
+      "name": "transition-from-any-column-leaves-untouched-tag",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {
+          "boardId": "11111111-1111-4111-8111-111111111111",
+          "sourceColumnId": "f000f000-f00f-4f0f-8f0f-f000f000f000",
+          "expectedCatalogRevision": 3,
+          "chatId": "1000000000000001",
+          "target": {
+            "kind": "column",
+            "columnId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+          },
+          "expectedTags": [
+            "blocked"
+          ]
+        }
+      }
+    },
+    {
+      "name": "tags-at-end",
+      "http": {
+        "method": "GET",
+        "path": "/api/v1/chats/tags?chatId=1000000000000001"
+      }
+    },
+    {
+      "name": "tags-wrong-method",
+      "http": {
+        "method": "POST",
+        "path": "/api/v1/chats/tags",
+        "json": {
+          "chatId": "1000000000000001",
+          "tags": []
+        }
+      }
+    },
+    {
+      "name": "delta-wrong-method",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chats/tags/delta",
+        "json": {
+          "chatId": "1000000000000001",
+          "addTags": []
+        }
+      }
+    },
+    {
+      "name": "transition-wrong-method",
+      "http": {
+        "method": "PUT",
+        "path": "/api/v1/chats/tag-transition",
+        "json": {}
+      }
+    }
+  ],
+  "traps": true
+}

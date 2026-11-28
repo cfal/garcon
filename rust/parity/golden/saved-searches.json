@@ -1,0 +1,4416 @@
+{
+  "scenario": "saved-searches",
+  "cases": [
+    {
+      "name": "saved-searches-empty",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "savedSearches": []
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "search-missing-query",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-blank-query",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-query-not-string",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-no-visibility",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "at least one visibility option is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-visibility-not-boolean",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "at least one visibility option is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-array-body",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-string-body",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-null-body",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-created",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "savedSearch": {
+              "createdAt": "{{timestamp}}",
+              "id": "{{uuid}}",
+              "query": "status:open tag:x",
+              "showAsSidebarPill": true,
+              "showInSearchDialog": false,
+              "showInSidebarMenu": false,
+              "title": "Mine",
+              "updatedAt": "{{timestamp}}"
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "search-created-without-title",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "savedSearch": {
+              "createdAt": "{{timestamp}}",
+              "id": "{{uuid}}",
+              "query": "q2",
+              "showAsSidebarPill": false,
+              "showInSearchDialog": true,
+              "showInSidebarMenu": false,
+              "title": null,
+              "updatedAt": "{{timestamp}}"
+            },
+            "success": true
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-after-create",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "savedSearches": [
+              {
+                "createdAt": "{{timestamp}}",
+                "id": "{{uuid}}",
+                "query": "status:open tag:x",
+                "showAsSidebarPill": true,
+                "showInSearchDialog": false,
+                "showInSidebarMenu": false,
+                "title": "Mine",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "id": "{{uuid}}",
+                "query": "q2",
+                "showAsSidebarPill": false,
+                "showInSearchDialog": true,
+                "showInSidebarMenu": false,
+                "title": null,
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "update-missing-id",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-blank-id",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-id-zero",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-id-number",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Saved search not found",
+            "errorCode": "SAVED_SEARCH_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "update-array-body",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-empty-query",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query must not be empty",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-unknown-id",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Saved search not found",
+            "errorCode": "SAVED_SEARCH_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "update-unknown-id-no-fields",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Saved search not found",
+            "errorCode": "SAVED_SEARCH_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "update-unknown-id-removing-visibility",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Saved search not found",
+            "errorCode": "SAVED_SEARCH_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-without-id",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id query parameter is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-empty-id",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id query parameter is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/app/saved-searches?id="
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-blank-id",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Saved search not found",
+            "errorCode": "SAVED_SEARCH_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/app/saved-searches?id=%20%20"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-unknown-id",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Saved search not found",
+            "errorCode": "SAVED_SEARCH_NOT_FOUND",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "DELETE",
+          "path": "/api/v1/app/saved-searches?id=missing-search"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-old-order-empty",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "oldOrder must not be empty",
+            "errorCode": "ORDER_INVALID_INPUT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-old-order-not-array",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "oldOrder must not be empty",
+            "errorCode": "ORDER_INVALID_INPUT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-new-order-not-array",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "oldOrder and newOrder must have the same length",
+            "errorCode": "ORDER_INVALID_INPUT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-length-mismatch",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "oldOrder and newOrder must have the same length",
+            "errorCode": "ORDER_INVALID_INPUT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-different-ids",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "oldOrder and newOrder must contain the same IDs",
+            "errorCode": "ORDER_INVALID_INPUT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-empty-body",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "oldOrder must not be empty",
+            "errorCode": "ORDER_INVALID_INPUT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-not-contiguous",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "oldOrder is not a contiguous subsequence of the current list",
+            "errorCode": "ORDER_INVALID_INPUT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-wrong-method",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-wrong-method",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-empty~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-empty~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-empty~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "492",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-empty~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/saved-searches/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-empty~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "savedSearches": [
+              {
+                "createdAt": "{{timestamp}}",
+                "id": "{{uuid}}",
+                "query": "status:open tag:x",
+                "showAsSidebarPill": true,
+                "showInSearchDialog": false,
+                "showInSidebarMenu": false,
+                "title": "Mine",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "id": "{{uuid}}",
+                "query": "q2",
+                "showAsSidebarPill": false,
+                "showInSearchDialog": true,
+                "showInSidebarMenu": false,
+                "title": null,
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/saved-searches/../saved-searches"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-empty~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/saved-searches/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-empty~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/saved-searches/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-empty~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "savedSearches": [
+              {
+                "createdAt": "{{timestamp}}",
+                "id": "{{uuid}}",
+                "query": "status:open tag:x",
+                "showAsSidebarPill": true,
+                "showInSearchDialog": false,
+                "showInSidebarMenu": false,
+                "title": "Mine",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "id": "{{uuid}}",
+                "query": "q2",
+                "showAsSidebarPill": false,
+                "showInSearchDialog": true,
+                "showInSidebarMenu": false,
+                "title": null,
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/app/saved-searches"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "search-missing-query~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-missing-query~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-missing-query~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-missing-query~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-blank-query~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-blank-query~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-blank-query~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-blank-query~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-query-not-string~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-query-not-string~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-query-not-string~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-query-not-string~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-no-visibility~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-no-visibility~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-no-visibility~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-no-visibility~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-visibility-not-boolean~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-visibility-not-boolean~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-visibility-not-boolean~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-visibility-not-boolean~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-array-body~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-array-body~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-array-body~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-array-body~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-string-body~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-string-body~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-string-body~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-string-body~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-null-body~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-null-body~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-null-body~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-null-body~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-created~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-created~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-created~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-created~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-created-without-title~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-created-without-title~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "search-created-without-title~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "search-created-without-title~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "query is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-after-create~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "GET",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-after-create~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "GET",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-after-create~head",
+      "expected": {
+        "body": {
+          "kind": "empty"
+        },
+        "headers": {
+          "content-length": "492",
+          "content-type": "application/json;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "HEAD",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-after-create~trailing-slash",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/saved-searches/"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-after-create~dot-segment",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "savedSearches": [
+              {
+                "createdAt": "{{timestamp}}",
+                "id": "{{uuid}}",
+                "query": "status:open tag:x",
+                "showAsSidebarPill": true,
+                "showInSearchDialog": false,
+                "showInSidebarMenu": false,
+                "title": "Mine",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "id": "{{uuid}}",
+                "query": "q2",
+                "showAsSidebarPill": false,
+                "showInSearchDialog": true,
+                "showInSidebarMenu": false,
+                "title": null,
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/saved-searches/../saved-searches"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-after-create~encoded-traversal",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/saved-searches/%2e%2e%2fauth.json"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-after-create~non-ascii",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "/api/v1/app/saved-searches/%C3%BC-%E9%9B%AA-%F0%9F%98%80"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-after-create~double-slash",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "savedSearches": [
+              {
+                "createdAt": "{{timestamp}}",
+                "id": "{{uuid}}",
+                "query": "status:open tag:x",
+                "showAsSidebarPill": true,
+                "showInSearchDialog": false,
+                "showInSidebarMenu": false,
+                "title": "Mine",
+                "updatedAt": "{{timestamp}}"
+              },
+              {
+                "createdAt": "{{timestamp}}",
+                "id": "{{uuid}}",
+                "query": "q2",
+                "showAsSidebarPill": false,
+                "showInSearchDialog": true,
+                "showInSidebarMenu": false,
+                "title": null,
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "GET",
+          "path": "//api/v1/app/saved-searches"
+        },
+        "status": 200
+      },
+      "noise": []
+    },
+    {
+      "name": "update-missing-id~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-missing-id~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-missing-id~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-missing-id~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-blank-id~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-blank-id~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-blank-id~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-blank-id~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-id-zero~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-id-zero~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-id-zero~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-id-zero~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-id-number~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-id-number~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-id-number~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-id-number~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-array-body~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-array-body~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-array-body~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-array-body~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-empty-query~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-empty-query~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-empty-query~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-empty-query~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-unknown-id~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-unknown-id~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-unknown-id~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-unknown-id~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-unknown-id-no-fields~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-unknown-id-no-fields~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-unknown-id-no-fields~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-unknown-id-no-fields~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-unknown-id-removing-visibility~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-unknown-id-removing-visibility~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "update-unknown-id-removing-visibility~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "update-unknown-id-removing-visibility~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "id is required",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-without-id~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-without-id~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-empty-id~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/app/saved-searches?id="
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-empty-id~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/app/saved-searches?id="
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-blank-id~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/app/saved-searches?id=%20%20"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-blank-id~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/app/saved-searches?id=%20%20"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-unknown-id~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "DELETE",
+          "path": "/api/v1/app/saved-searches?id=missing-search"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "remove-unknown-id~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "DELETE",
+          "path": "/api/v1/app/saved-searches?id=missing-search"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-old-order-empty~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-old-order-empty~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-old-order-empty~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-old-order-empty~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "oldOrder must not be empty",
+            "errorCode": "ORDER_INVALID_INPUT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-old-order-not-array~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-old-order-not-array~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-old-order-not-array~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-old-order-not-array~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "oldOrder must not be empty",
+            "errorCode": "ORDER_INVALID_INPUT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-new-order-not-array~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-new-order-not-array~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-new-order-not-array~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-new-order-not-array~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "oldOrder must not be empty",
+            "errorCode": "ORDER_INVALID_INPUT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-length-mismatch~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-length-mismatch~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-length-mismatch~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-length-mismatch~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "oldOrder must not be empty",
+            "errorCode": "ORDER_INVALID_INPUT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-different-ids~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-different-ids~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-different-ids~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-different-ids~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "oldOrder must not be empty",
+            "errorCode": "ORDER_INVALID_INPUT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-empty-body~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-empty-body~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-empty-body~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-empty-body~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "oldOrder must not be empty",
+            "errorCode": "ORDER_INVALID_INPUT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-not-contiguous~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-not-contiguous~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-not-contiguous~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-not-contiguous~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "oldOrder must not be empty",
+            "errorCode": "ORDER_INVALID_INPUT",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PUT",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-wrong-method~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-wrong-method~forged-token",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-wrong-method~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "reorder-wrong-method~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/saved-searches/reorder"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-wrong-method~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "none",
+          "method": "PATCH",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-wrong-method~forged-token",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "PATCH",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-wrong-method~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 404
+      },
+      "noise": []
+    },
+    {
+      "name": "saved-searches-wrong-method~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "text",
+          "value": "Not found"
+        },
+        "headers": {
+          "content-length": "9",
+          "content-type": "text/plain;charset=utf-8"
+        },
+        "request": {
+          "auth": "token",
+          "method": "PATCH",
+          "path": "/api/v1/app/saved-searches"
+        },
+        "status": 404
+      },
+      "noise": []
+    }
+  ]
+}

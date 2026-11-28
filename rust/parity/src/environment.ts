@@ -58,6 +58,10 @@ export interface ServerOptions {
   // setup-required states. No session token is taken, and a request that asks
   // for one is sent without it.
   account?: 'provisioned' | 'none';
+  // `disabled` starts the server with authentication disabled, for a user
+  // behind their own authentication. Every request is accepted without a
+  // token, and the routes that register, sign in, or change credentials refuse.
+  auth?: 'enabled' | 'disabled';
 }
 
 // The original is the TypeScript controller, started exactly as `bun run
@@ -133,6 +137,7 @@ export async function startServer(repoRoot: string, build: ServerBuild, options:
     '--workspace-dir', dirs.workspaceDir,
     '--project-base-dir', dirs.projectDir,
     ...(options.basePath ? ['--base-path', options.basePath] : []),
+    ...(options.auth === 'disabled' ? ['--disable-auth'] : []),
   ];
   const spawnedAt = performance.now();
   const child = Bun.spawn({
@@ -181,7 +186,9 @@ export async function startServer(repoRoot: string, build: ServerBuild, options:
       origin: url.origin,
       baseUrl,
       port: url.port,
-      token: unprovisioned ? '' : await fixtureAuthToken(baseUrl, credentials),
+      // A server without an account has no session to log into, and with
+      // authentication disabled the login route refuses: neither needs a token.
+      token: unprovisioned || options.auth === 'disabled' ? '' : await fixtureAuthToken(baseUrl, credentials),
       credentials,
       dirs,
       fallbackLogPath,

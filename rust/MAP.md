@@ -7,7 +7,7 @@ after which the fallback is removed (the lift). The SPA in `web/` stays Svelte.
 Decisions are in [`DECISIONS.md`](DECISIONS.md). A session claims one unit here
 before starting it and marks it done with its gate results.
 
-Plan accepted 2026-11-27 (ADR-012 to ADR-024). A new session reads this file,
+Plan accepted 2026-11-27 (ADR-012 to ADR-026). A new session reads this file,
 then `DECISIONS.md`, `RULES.md`, and `GLOSSARY.md`.
 
 ## Where the port stands
@@ -202,9 +202,10 @@ Parallel after the core milestone.
 
 ## Workstreams
 
-Each lane is one session at a time and owns its crates. Lanes hand units to the
-manager for review and integration; only the manager edits the workspace
-manifest, `garcon-server`, and this file.
+Each lane is one session at a time, owns its crates, and works in its own
+worktree and branch (ADR-025). Lanes report a commit to the manager, who
+verifies it, merges it into `rust-server`, and pushes; only the manager edits
+the workspace manifest, `garcon-server`, and this file.
 
 | Lane | Order of work |
 | --- | --- |
@@ -256,10 +257,13 @@ report the remaining mismatches to the manager instead of editing further.
 - Controller logic runs on one core thread, as it runs on one event loop today.
   SQLite, rendering, token fitting, search, compression, and other work
   proportional to a transcript run off it.
-- Build with `CARGO_BUILD_JOBS=1` and a target directory of your own. Never
-  kill a server you did not start; start test servers on port 0.
+- Compile no Rust on the development machine; build and test on the build
+  machine (ADR-026, `RULES.md` "Build"). Never kill a server you did not
+  start; start test servers on port 0.
+- Work in your own worktree and branch (ADR-025) and commit there when a part
+  is complete and green. Never push, rebase, or touch another worktree; the
+  manager merges your reported commit into `rust-server` and pushes.
 - Do not edit another lane's crate. Report a needed change to the manager.
-- Do not run git commands that modify the tree.
 - Turn every correction into a rule in `RULES.md` so the next unit keeps it.
 
 ## Dependencies
@@ -293,7 +297,12 @@ report the remaining mismatches to the manager instead of editing further.
 | auth-logout | 4 | Session revocation over HTTP and WebSocket |
 | websocket-session | 32 | Subprotocol negotiation, ping, reconnect state, request errors, refused upgrades |
 
-Each `stores` and `service-routes` route group adds a scenario. Chat lifecycle,
+The `edge-scenarios` unit has added 38 scenarios for the route groups of the
+`edge` and `stores` units (runtime, workspace, snippets, preambles, saved
+searches, folders, chat boards, chat canvases, chat tags, tickets, API
+providers, executors, scheduled prompts, Telegram, usage, and auth), for 44
+scenarios and 9,992 cases in all; [`parity/replay-report.md`](parity/replay-report.md)
+lists each with its case count. Each `service-routes` route group adds a scenario. Chat lifecycle,
 queueing, permissions, executor links, PTYs, and restart behavior are verified
 by the server suites, which already drive them deterministically with the
 scripted providers; the parity replay covers the HTTP and WebSocket edge those
@@ -340,10 +349,12 @@ runs.
 | 018 | One contract crate; the CLI is ported last (interface placement superseded by 024) |
 | 019 | Targets |
 | 020 | Three levels of recorded behavior |
-| 021 | The manager integrates and commits |
+| 021 | The manager integrates and commits (shared worktree superseded by 025) |
 | 022 | The controller and the executor are separate crate graphs |
 | 023 | Three binaries |
 | 024 | The shared crates mirror the original's packages |
+| 025 | Each session works in its own worktree |
+| 026 | Bun 1.4.3 is the reference runtime, and Rust builds leave the development machine |
 
 ## Open questions
 

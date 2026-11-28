@@ -507,3 +507,55 @@ Consequences: Supersedes the part of ADR-018 that placed the agent interface
 in `garcon-contract`; the CLI depends on `garcon-contract` and `garcon-js`,
 and may use `garcon-base`. No `server/common` module is split from its
 directory.
+
+## ADR-025: Each session works in its own worktree
+
+Status: accepted (2026-11-27)
+
+Context: Sessions sharing one worktree (ADR-021) saw each other's
+half-written files: a commit captured a test that another session had just
+added and that failed, a crate two sessions wrote into could be left
+uncompilable for both, and concurrent git commands collided on the index.
+Holding a session still until its work was committed cost it time.
+
+Decision: Each session has a worktree `.worktrees/rust-server-<label>` on a
+branch `rust-server-<label>` created from `rust-server`, and commits its own
+work there when a part is complete and green. The worktree of `rust-server`
+is the integration tree: only the manager edits it, merges a reported commit
+into it after running the gate on the merge, and pushes `rust-server` to
+origin after each merge. A session takes integrated work in with
+`git merge rust-server` and never pushes, rebases, or touches another
+worktree.
+
+Consequences: Supersedes the shared worktree of ADR-021; its limit of six
+sessions, their build settings, and the rule that only the manager edits the
+workspace manifest, `garcon-server`, `MAP.md`, and this file stand. Two
+sessions that add modules to one crate both edit its `lib.rs`, and the manager
+resolves that file in the merge. `rust-server` is rebased onto `main` only
+with every session paused.
+
+## ADR-026: Bun 1.4.3 is the reference runtime, and Rust builds leave the development machine
+
+Status: accepted (2026-11-28)
+
+Context: CI and the release build pin Bun 1.4.3, while the development machine
+ran 1.4.5. The original behaves differently on the two: a refused WebSocket
+upgrade reports another close code to its client, a project path ending in a
+backslash is found on 1.4.5 and not on 1.4.3, and `bun:sqlite` differs in
+twelve probed behaviors, among them the SQLite version and the range of
+integers bound as INTEGER. Recordings made on 1.4.5 failed two cases in CI.
+Separately, six sessions compiling Rust beside their Bun work overloaded the
+development machine until the Garcon server on it crashed.
+
+Decision: The behavior to mirror is the original on the Bun that CI and the
+release build pin. Recordings, replays, and oracle tests run with that
+version. No Rust is compiled on the development machine: sessions and the
+manager run every building command on a separate build machine, which has the
+pinned Bun and Rust toolchain, through one wrapper that copies a worktree's
+sources there. Formatting, which compiles nothing, stays local.
+
+Consequences: A recording that differs between Bun versions is rerecorded on
+the pinned one, and the difference is noted where a port could meet it. When
+the pin moves, the recordings are replayed on the new version before it is
+adopted. Files a remote command writes do not come back, except the lock file,
+so recordings are produced locally and only compiled and tested remotely.

@@ -193,14 +193,23 @@ the user corrects how a port behaves, the correction is added under
 
 ## Build
 
-- `CARGO_BUILD_JOBS=1` and `CARGO_TARGET_DIR=$HOME/tmp/garcon-rs-target/<lane>`
-  on every cargo command. `rust/target` belongs to the manager.
-- `cargo fmt`, then `cargo clippy --all-targets -- -D warnings`, then
-  `cargo test`, each with `-p <your crate>`.
+- No Rust is compiled on the development machine (ADR-026). Every command
+  that builds, `cargo check`, `clippy`, `test`, `build`, `run`, `doc`, and
+  `rustc` itself, runs on the build machine through
+  `garcon-rs-remote <lane> -- <command>`, which copies your worktree's sources
+  there, runs the command in `rust/` with a target directory per lane, and
+  copies `rust/Cargo.lock` back when the command changed it. Nothing else the
+  command writes comes back. `cargo fmt -p <crate>` compiles nothing and runs
+  locally.
+- `cargo fmt -p <crate>`, then `cargo clippy -p <crate> --all-targets --
+  -D warnings`, then `cargo test -p <crate>`.
+- The reference runtime of the original is the Bun that CI and the release
+  build pin, 1.4.3 (ADR-026). Record, replay, and run oracles with that Bun,
+  not with a newer one on the machine: the original itself behaves differently
+  on a newer Bun in places (a project path ending in a backslash; twelve
+  `bun:sqlite` behaviors in `research/sqlite.md`).
 - Use the versions in `[workspace.dependencies]`. A dependency that is not
   there goes in your crate's `Cargo.toml` and in your report.
-- A compile error in a crate you do not own is another session mid-edit: wait
-  a minute and retry, and report it to the manager if it persists.
 
 ## Corrections
 
