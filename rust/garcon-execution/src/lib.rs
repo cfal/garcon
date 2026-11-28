@@ -3,6 +3,7 @@
 pub mod chat_execution_control_operations;
 pub mod chat_execution_control_repository;
 pub mod chat_execution_control_transitions;
+pub mod command_ledger;
 pub mod control_projection;
 pub mod control_state;
 pub mod execution_attempt;
