@@ -15,19 +15,20 @@ use garcon_interface::execution_runtime::{
 use garcon_interface::resources::{ExecutorCallOptions, ExecutorResult};
 use garcon_js::{path::native, trim};
 
-use crate::cancellation::check_cancelled;
 use crate::git::run::{read_only_git_options, run_git};
 use crate::git::types::GitCommandOptions;
+use crate::{ChildEnvironment, cancellation::check_cancelled};
 
 use super::file_mentions::resolve_file_mentions_in_command;
 use super::project_directory_service::inspect_project_directory;
-use super::ticket_project_default::resolve_ticket_project_default;
+use super::ticket_project_default::resolve_ticket_project_default_with_environment;
 
 type AssertAvailable = dyn Fn(Option<&ExecutorCallOptions>) -> ExecutorResult<()>;
 
 pub struct ProjectService {
     pub project_base_path: String,
     assert_available: Rc<AssertAvailable>,
+    child_environment: Option<ChildEnvironment>,
 }
 
 impl ProjectService {
@@ -43,7 +44,13 @@ impl ProjectService {
         Ok(Self {
             project_base_path: to_executor_path(&native::resolve(&cwd, &[project_base_path]), None),
             assert_available,
+            child_environment: None,
         })
+    }
+
+    pub fn with_child_environment(mut self, environment: ChildEnvironment) -> Self {
+        self.child_environment = Some(environment);
+        self
     }
 
     async fn is_git_repository(
@@ -64,6 +71,7 @@ impl ProjectService {
                 signal: signal.clone(),
                 max_stdout_bytes: Some(1024),
                 max_stderr_bytes: Some(4096),
+                base_environment: self.child_environment.clone(),
                 ..Default::default()
             }),
         )
@@ -90,9 +98,14 @@ impl ExecutionProjectService for ProjectService {
         let base = to_native_path(&self.project_base_path, None);
         let directory = to_native_path(&request.project_path, None);
         let signal = options.and_then(|options| options.signal.as_ref());
-        let result = resolve_ticket_project_default(&directory, signal, async |path: &str| {
-            inspect_project_directory(path, |input| assert_real_within_base(&base, input)).await
-        })
+        let result = resolve_ticket_project_default_with_environment(
+            &directory,
+            signal,
+            self.child_environment.clone(),
+            async |path: &str| {
+                inspect_project_directory(path, |input| assert_real_within_base(&base, input)).await
+            },
+        )
         .await?;
         (self.assert_available)(options)?;
         Ok(result)

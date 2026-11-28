@@ -29,7 +29,7 @@ use garcon_js::{
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use crate::projects::project_directory_service::access_directory;
+use crate::{ChildEnvironment, projects::project_directory_service::access_directory};
 
 use super::pty::{self, PtyCommand, PtyControl, PtyEvent, SpawnedPty};
 use super::terminal_replay_buffer::TerminalReplayBuffer;
@@ -50,6 +50,7 @@ pub struct TerminalManagerOptions {
     pub terminal_runtime_id: Option<String>,
     pub project_base_path: String,
     pub user_shell: Option<String>,
+    pub child_environment: Option<ChildEnvironment>,
     pub clock: Rc<dyn Clock>,
     pub new_id: Rc<dyn Fn() -> Uuid>,
     pub create_result_ttl: Duration,
@@ -67,6 +68,7 @@ impl TerminalManagerOptions {
             terminal_runtime_id: None,
             project_base_path,
             user_shell: None,
+            child_environment: None,
             clock: Rc::new(SystemClock),
             new_id: Rc::new(Uuid::new_v4),
             create_result_ttl: CREATE_RESULT_TTL,
@@ -426,7 +428,10 @@ impl TerminalManager {
                 file: self.0.user_shell.clone(),
                 args: Vec::new(),
                 cwd: cwd.clone(),
-                env: pty_environment(std::env::vars_os()),
+                env: self.0.options.child_environment.as_ref().map_or_else(
+                    || pty_environment(std::env::vars_os()),
+                    |env| pty_environment(env.iter().cloned()),
+                ),
                 name: "xterm-256color".into(),
                 cols: 80,
                 rows: 24,

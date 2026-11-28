@@ -1,0 +1,13 @@
+{
+  "module": "common/garcon-stop-agent.ts",
+  "tests": [
+    "common/__tests__/garcon-stop-agent.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/garcon-stop-agent.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 81,
+  "sha256": "d7e82ee2a044c40c4610c1834f22b99f1d3f7c066a53f37070fbef7d88f6d4bf"
+}

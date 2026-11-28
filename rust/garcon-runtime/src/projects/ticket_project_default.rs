@@ -15,9 +15,9 @@ use serde_json::Value;
 use tokio::time::{Instant, sleep_until};
 use tokio_util::sync::CancellationToken;
 
-use crate::cancellation::check_cancelled;
 use crate::git::run::{read_only_git_options, run_git};
 use crate::git::types::{GitCommandOptions, GitCommandResult, GitProcessError};
+use crate::{ChildEnvironment, cancellation::check_cancelled};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const PROBE_LIMIT: usize = 1024 * 1024;
@@ -214,11 +214,23 @@ pub async fn resolve_ticket_project_default(
     signal: Option<&CancellationToken>,
     inspect: impl AsyncFn(&str) -> ExecutorResult<ProjectResolution>,
 ) -> ExecutorResult<TicketProjectDefault> {
+    resolve_ticket_project_default_with_environment(directory, signal, None, inspect).await
+}
+
+pub(super) async fn resolve_ticket_project_default_with_environment(
+    directory: &str,
+    signal: Option<&CancellationToken>,
+    environment: Option<ChildEnvironment>,
+    inspect: impl AsyncFn(&str) -> ExecutorResult<ProjectResolution>,
+) -> ExecutorResult<TicketProjectDefault> {
     resolve_with_git(
         directory,
         signal,
         inspect,
-        async |cwd: &str, args, options| run_git(cwd, args, options).await,
+        async |cwd: &str, args, mut options: GitCommandOptions| {
+            options.base_environment = environment.clone();
+            run_git(cwd, args, options).await
+        },
     )
     .await
 }
