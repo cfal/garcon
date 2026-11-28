@@ -7,6 +7,7 @@ mod failure_fences;
 mod input_cases;
 mod presentation_views;
 mod producer_lease;
+mod producer_publication;
 mod replay_views;
 mod service;
 mod store_behavior;
