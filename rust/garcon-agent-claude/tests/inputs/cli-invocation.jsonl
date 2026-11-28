@@ -1,0 +1,4 @@
+{"fn":"buildClaudeCLIArgs","args":[{"streamJson":true,"model":"sonnet[300k]","sessionId":"synthetic-session","prompt":"Synthetic prompt","permissionMode":"bypassPermissions","thinkingMode":"high"}]}
+{"fn":"buildClaudeCLIArgs","args":[{"streamJson":true,"model":"sonnet[1m]","sessionId":"synthetic-new","resumeSessionId":"synthetic-existing","permissionMode":"manualBypass","thinkingMode":"none"}]}
+{"fn":"buildClaudeCLIArgs","args":[{"model":"sonnet","permissionMode":"plan","thinkingMode":"low","prompt":"Synthetic query"}]}
+{"fn":"buildClaudeCLIArgs","args":[{"model":"sonnet[0k]","prompt":"Invalid window"}]}
