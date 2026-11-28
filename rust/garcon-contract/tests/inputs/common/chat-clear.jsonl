@@ -1,0 +1,23 @@
+{"fn":"parseClearChatRequest","args":[{"chatId":"1780000000000001","transcriptViewId":"view-1","lastOrdinal":9,"target":{"kind":"all"}}]}
+{"fn":"parseClearChatRequest","args":[{"chatId":"1780000000000001","transcriptViewId":"view-1","lastOrdinal":0,"target":{"kind":"all"}}]}
+{"fn":"parseClearChatRequest","args":[{"chatId":"1780000000000001","transcriptViewId":"view-1","lastOrdinal":9,"target":{"kind":"before-message","ordinal":9}}]}
+{"fn":"parseClearChatRequest","args":[{"chatId":"1780000000000001","transcriptViewId":"view-1","lastOrdinal":9,"target":null}]}
+{"fn":"parseClearChatRequest","args":[{"chatId":"1780000000000001","transcriptViewId":"view-1","lastOrdinal":9,"target":{}}]}
+{"fn":"parseClearChatRequest","args":[{"chatId":"1780000000000001","transcriptViewId":"view-1","lastOrdinal":9,"target":{"kind":"all","ordinal":1}}]}
+{"fn":"parseClearChatRequest","args":[{"chatId":"1780000000000001","transcriptViewId":"view-1","lastOrdinal":9,"target":{"kind":"before-message","ordinal":0}}]}
+{"fn":"parseClearChatRequest","args":[{"chatId":"1780000000000001","transcriptViewId":"view-1","lastOrdinal":9,"target":{"kind":"before-message","ordinal":-1}}]}
+{"fn":"parseClearChatRequest","args":[{"chatId":"1780000000000001","transcriptViewId":"view-1","lastOrdinal":9,"target":{"kind":"before-message","ordinal":1.5}}]}
+{"fn":"parseClearChatRequest","args":[{"chatId":"1780000000000001","transcriptViewId":"view-1","lastOrdinal":9,"target":{"kind":"before-message","ordinal":"4"}}]}
+{"fn":"parseClearChatRequest","args":[{"chatId":"1780000000000001","transcriptViewId":"view-1","lastOrdinal":9,"target":{"kind":"before-message","ordinal":10}}]}
+{"fn":"parseClearChatRequest","args":[{"chatId":"1780000000000001","transcriptViewId":"view-1","lastOrdinal":-1,"target":{"kind":"all"}}]}
+{"fn":"parseClearChatRequest","args":[{"chatId":"1780000000000001","transcriptViewId":"view-1","lastOrdinal":0.5,"target":{"kind":"all"}}]}
+{"fn":"parseClearChatRequest","args":[{"chatId":"1780000000000001","transcriptViewId":"view-1","lastOrdinal":null,"target":{"kind":"all"}}]}
+{"fn":"parseClearChatRequest","args":[{"chatId":"1780000000000001","transcriptViewId":"view-1","lastOrdinal":"1","target":{"kind":"all"}}]}
+{"fn":"parseClearChatRequest","args":[{"chatId":"bad","transcriptViewId":"view-1","lastOrdinal":9,"target":{"kind":"all"}}]}
+{"fn":"parseClearChatRequest","args":[{"chatId":"1780000000000001","transcriptViewId":"","lastOrdinal":9,"target":{"kind":"all"}}]}
+{"fn":"parseClearChatRequest","args":[null]}
+{"fn":"parseClearChatResponse","args":[{"success":true,"chatId":"1780000000000001","transcriptViewId":"view-2"}]}
+{"fn":"parseClearChatResponse","args":[{"success":false,"chatId":"1780000000000001","transcriptViewId":"view-2"}]}
+{"fn":"parseClearChatResponse","args":[{"success":true,"chatId":"bad","transcriptViewId":"view-2"}]}
+{"fn":"parseClearChatResponse","args":[{"success":true,"chatId":"1780000000000001","transcriptViewId":" "}]}
+{"fn":"parseClearChatResponse","args":[{"success":true,"chatId":"1780000000000001","transcriptViewId":null}]}

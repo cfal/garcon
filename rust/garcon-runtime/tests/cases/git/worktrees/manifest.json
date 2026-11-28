@@ -1,0 +1,22 @@
+{
+  "module": "server/runtime/git/worktrees.ts",
+  "tests": [
+    "rust/parity/fixtures/git/pure.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.args[0]",
+      "type": "an invalid Date",
+      "where": "args",
+      "at": "rust/parity/fixtures/git/pure.cases.ts:117:10",
+      "fn": "serializeWorktreeMtime",
+      "count": 1
+    }
+  ],
+  "cases": 1,
+  "sha256": "8a82e3cddc8905e4d2bc1757add079761513f8e216e21db9b4a5a4bdfbb0f915"
+}
