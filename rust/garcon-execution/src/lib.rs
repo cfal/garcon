@@ -50,3 +50,4 @@ pub mod turn_identity;
 pub mod turn_operation;
 pub mod turn_terminal_settlement;
 pub mod types;
+pub mod working_directory_settlement;
