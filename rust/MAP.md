@@ -285,6 +285,10 @@ report the remaining mismatches to the manager instead of editing further.
 | `@opencode-ai/sdk` | HTTP and SSE client | Event framing and reconnect |
 | `jsonc-parser` | A JSONC crate | Comment and trailing-comma tolerance |
 | `mime-types` | Existing table in `static_assets.rs` | Already matched |
+| `localeCompare`, `Intl.Collator` | ICU4X `icu_collator` behind `garcon_js::collation`, pinned to the Unicode version of Bun 1.4.3 | The default locale is `en-US` whatever `LANG` says; Bun orders Han by radical and stroke, ICU4X's compiled data by code point (open question) |
+| `String.prototype.normalize` | ICU4X `icu_normalizer`, same pin | Unicode version |
+| `Date.parse`, local dates, `Intl` time zones | `garcon_js::date_parse` on `tz-rs` and `tzdb` | Bundled IANA data is newer than Bun 1.4.3's ICU (America/Vancouver from 2026-11-01); the three-letter aliases are case-sensitive |
+| `new RegExp` on user input | `regress`, unoptimized, for validation | Not JavaScriptCore's parser: 16 listed syntax differences (open question); matching differences in `research/regexp.md` |
 | Bun `Worker` | Threads | Message ordering, shutdown |
 
 ## Recording coverage
@@ -371,6 +375,22 @@ runs.
   `Connection: close` and no body, so no client sees a different message.
   Listed provisionally by the manager on 2026-11-28; matching it exactly
   means a head-size check in front of hyper.
+- Whether regular-expression syntax validation must agree exactly with
+  JavaScriptCore. `validateHiddenBashCommandPattern` only gives early
+  feedback (the browser compiles the pattern and drops an invalid one). The
+  port validates with `regress`, bounded in time and memory, and differs on
+  16 recorded patterns: 11 it accepts and the original rejects (quantified
+  `\b`, class ranges with `\u{...}` without the `u` flag, overflowing
+  counts), 5 it rejects and the original accepts (an astral group name,
+  nesting of 256 or deeper). Listed provisionally on 2026-11-28. Exact
+  agreement means porting JavaScriptCore's parser in syntax-checking mode:
+  estimated 2,000 to 4,000 lines and one to two weeks.
+- Whether Han characters must sort by radical and stroke as in the original.
+  Bun's ICU does; ICU4X's compiled collation data sorts them by code point,
+  which changes the order of names that contain characters from outside the
+  main CJK block (about half of such pairs) and almost none inside it
+  (0.18%). Listed provisionally on 2026-11-28. Exact agreement means
+  generating and committing custom ICU4X collation data.
 
 ## Out of scope
 

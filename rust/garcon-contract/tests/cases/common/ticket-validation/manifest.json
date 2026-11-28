@@ -1,0 +1,11 @@
+{
+  "module": "common/ticket-validation.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/ticket-validation.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 108,
+  "sha256": "91d983b8b5007f89c164c5ace140c951c3fef6e23a6998e8f5750eb4fb1db44b"
+}

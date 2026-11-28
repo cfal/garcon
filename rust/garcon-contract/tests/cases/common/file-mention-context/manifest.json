@@ -1,0 +1,11 @@
+{
+  "module": "common/file-mention-context.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/file-mention-context.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 6,
+  "sha256": "c46c732b89c0c08b11ea197fd31c9fe0d6e6620b388485b833fae2ca480b3400"
+}
