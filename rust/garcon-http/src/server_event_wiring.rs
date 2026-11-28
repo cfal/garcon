@@ -1,5 +1,6 @@
 //! Transcript publication and ordered browser events from `server-event-wiring.ts`.
 
+mod lifecycle;
 mod task_queue;
 
 use std::rc::Rc;
@@ -18,7 +19,7 @@ use garcon_contract::{
     chat_activity::ChatRunOutcome,
     chat_id::{ChatId, parse_chat_id},
     chat_transient_feed::ChatTransientFeedMutation,
-    chat_types::ChatMessage,
+    chat_types::{ChatMessage, ChatProcessingPhase},
     ws_events::{
         ChatActivityUpdatedMessage, ChatMessagesMessage, ChatPreamblesInvalidatedMessage,
         ChatTranscriptReplacedMessage, ChatTransientFeedMutationMessage, ServerWsMessage,
@@ -56,12 +57,17 @@ pub struct ServerEventWiringDeps {
 pub struct ServerEventWiring {
     deps: ServerEventWiringDeps,
     queue: Rc<ChatTaskQueue>,
+    lifecycle: lifecycle::LifecycleState,
 }
 
 impl ServerEventWiring {
     pub fn new(deps: ServerEventWiringDeps) -> Rc<Self> {
         let queue = ChatTaskQueue::new(deps.activities.clone());
-        Rc::new(Self { deps, queue })
+        Rc::new(Self {
+            deps,
+            queue,
+            lifecycle: lifecycle::LifecycleState::default(),
+        })
     }
 
     pub fn subscribe(self: &Rc<Self>, ledger: &TranscriptLedgerService) -> Box<dyn Fn()> {
@@ -393,11 +399,19 @@ impl ServerEventWiring {
     }
 
     fn publish_activity(&self, chat_id: &ChatId) -> ExecutorResult<()> {
+        self.publish_activity_at(chat_id, self.deps.processing.phase(chat_id))
+    }
+
+    fn publish_activity_at(
+        &self,
+        chat_id: &ChatId,
+        phase: Option<ChatProcessingPhase>,
+    ) -> ExecutorResult<()> {
         if !self.deps.registry.has_chat(chat_id) {
             return Ok(());
         }
         let status = project_chat_activity_status(
-            self.deps.processing.phase(chat_id),
+            phase,
             self.deps.feeds.has_pending_user_action(chat_id),
             self.deps.metadata.get_run_outcome(chat_id),
         );
