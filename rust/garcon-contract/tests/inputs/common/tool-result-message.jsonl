@@ -1,0 +1,16 @@
+{"fn":"isTextPart","args":[{"type":"text","text":"","extra":true}]}
+{"fn":"isTextPart","args":[{"type":"text","text":42}]}
+{"fn":"isTextPart","args":[{"type":"content","content":{"type":"text","text":"nested"}}]}
+{"fn":"isTextPart","args":[null]}
+{"fn":"toolResultTextPart","args":[{"type":"text","text":"","extra":true}]}
+{"fn":"toolResultTextPart","args":[{"type":"content","content":{"type":"text","text":"nested","extra":{"count":42}}}]}
+{"fn":"toolResultTextPart","args":[{"type":"content","content":{"type":"content","content":{"type":"text","text":"twice nested"}}}]}
+{"fn":"toolResultTextPart","args":[{"type":"content","content":null}]}
+{"fn":"toolResultTextPart","args":[{"type":"text","text":false}]}
+{"fn":"toolResultTextPart","args":[null]}
+{"fn":"ToolResultMessage.fromData","args":[{"timestamp":"t","toolId":"id","content":{"items":[{"type":"text","text":"one"},{"type":"image"},{"type":"content","content":{"type":"text","text":"two"}}],"n":1.0,"big":9007199254740993,"exp":1e21,"fraction":1e-7},"isError":"false","primaryTextItems":[0,2]}]}
+{"fn":"ToolResultMessage.fromData","args":[{"timestamp":42,"toolId":false,"content":null,"isError":false}]}
+{"fn":"ToolResultMessage.fromData","args":[{"content":{"items":[{"type":"text","text":"x"}]},"primaryTextItems":[0,0]}]}
+{"fn":"ToolResultMessage.fromData","args":[{"content":{"items":[{"type":"image"}]},"primaryTextItems":[0]}]}
+{"fn":"ToolResultMessage.fromData","args":[{"content":{"items":[{"type":"text","text":""}]},"primaryTextItems":["0"]}]}
+{"fn":"ToolResultMessage.fromData","args":[{"content":true,"isError":[]}]}

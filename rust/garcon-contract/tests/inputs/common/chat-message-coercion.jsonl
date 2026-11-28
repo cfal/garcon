@@ -1,0 +1,43 @@
+{"fn":"asCodexSubagentInputItems","args":[[{"type":"string","text":"hi","path":"/fixture","name":12}]]}
+{"fn":"asCodexSubagentInputItems","args":[[]]}
+{"fn":"asCodexSubagentInputItems","args":[["non-object",false,{}]]}
+{"fn":"str","args":[false]}
+{"fn":"str","args":[""]}
+{"fn":"asOptionalString","args":[""]}
+{"fn":"asOptionalString","args":[22]}
+{"fn":"asOptionalStringArray","args":[["",false,null," ",2]]}
+{"fn":"asOptionalStringArray","args":[[]]}
+{"fn":"asOptionalNumber","args":["\ufeff-0"]}
+{"fn":"asOptionalNumber","args":[""]}
+{"fn":"asOptionalNumber","args":["1e+21"]}
+{"fn":"asOptionalNumber","args":["0x1f"]}
+{"fn":"asOptionalNumber","args":["0o77"]}
+{"fn":"asOptionalNumber","args":["0b111"]}
+{"fn":"asOptionalNumber","args":["-0x1"]}
+{"fn":"asOptionalNumber","args":["1e309"]}
+{"fn":"asOptionalNumber","args":["NaN"]}
+{"fn":"asOptionalNumber","args":["12px"]}
+{"fn":"asOptionalNumber","args":["0x0"]}
+{"fn":"asOptionalNumber","args":["0x00000"]}
+{"fn":"asOptionalNumber","args":[true]}
+{"fn":"asOptionalNumber","args":[0]}
+{"fn":"asOptionalNumber","args":[3.25]}
+{"fn":"asRecord","args":[{"known":"value"}]}
+{"fn":"asRecord","args":[[1,2,3]]}
+{"fn":"asRecord","args":[null]}
+{"fn":"parseChatMessageMetadata","args":[{"contentMode":"literal","contentFormat":"markdown","clientRequestId":"a","clientMessageId":"b","upstreamRequestId":"c","turnId":"d","questionReply":{"questionId":"q","question":"Why?","answer":"Because."}}]}
+{"fn":"parseChatMessageMetadata","args":[{"questionReply":null}]}
+{"fn":"parseChatMessageMetadata","args":[{"questionReply":{"questionId":"q","question":"Why?","answer":"Because.","source":null}}]}
+{"fn":"parseChatMessageMetadata","args":[{}]}
+{"fn":"asStringArray","args":[["\ufeff"," "," kept ","",false]]}
+{"fn":"asStringArray","args":[[]]}
+{"fn":"asChatImages","args":[[{"data":"","name":"file","mimeType":""},{"data":"x","name":"image","mimeType":"image/png"},{"data":1,"name":"bad"}]]}
+{"fn":"asChatImages","args":[[]]}
+{"fn":"asAllowedPrompts","args":[[{"tool":"Bash","prompt":"a"},42,{"tool":"","prompt":""}]]}
+{"fn":"asAllowedPrompts","args":[[{}]]}
+{"fn":"asOptionalBoolean","args":[false]}
+{"fn":"asOptionalBoolean","args":[0]}
+{"fn":"asAskUserQuestions","args":[[{"id":"question","prompt":"What?","options":[{"id":"option","label":"A","description":"","preview":" "},{"id":0,"label":"bad"}],"header":"","allowMultiple":false,"allowFreeText":true,"isSecret":false}]]}
+{"fn":"asAskUserQuestions","args":[[]]}
+{"fn":"asOptionalChanges","args":[[{"path":"file"},{"kind":"edit"},{},"bad"]]}
+{"fn":"asOptionalChanges","args":[[]]}
