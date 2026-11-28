@@ -18,7 +18,10 @@ use garcon_contract::{
     user_message_presentation::UserMessagePresentation,
     ws_requests::AgentCommandImage,
 };
-use garcon_interface::{execution::AgentExecutionAdmission, services::AgentSteerTarget};
+use garcon_interface::{
+    execution::AgentExecutionAdmission,
+    services::{AgentSteerResult, AgentSteerTarget},
+};
 use garcon_js::Number;
 use tokio_util::sync::CancellationToken;
 
@@ -34,7 +37,7 @@ use crate::{
     execution_ownership::{AdmissionAbortReason, ExecutionAdmission},
 };
 use crate::{
-    session_types::RunAgentTurnOptions,
+    session_types::{AgentSteerOptions, RunAgentTurnOptions},
     turn_identity::{TurnCommandType, TurnIdentity},
 };
 
@@ -255,7 +258,7 @@ impl UserInputAdmissionOptions {
             excluded_resend_ordinals: options.excluded_resend_ordinals.clone(),
             question_reply: options.question_reply.clone(),
             command_type: options.command_type.map(Into::into),
-            created_at: None,
+            created_at: options.created_at.clone(),
             user_message_presentation,
         }
     }
@@ -340,6 +343,33 @@ pub type DirectDispatch =
 pub type BeforeFailureRelease =
     Box<dyn FnOnce(AdmissionAbortReason) -> LocalExecutionFuture<'static>>;
 pub type AfterPendingRegistered<'a> = Box<dyn FnOnce(String) -> LocalExecutionFuture<'a> + 'a>;
+pub type PrepareSteerDelivery<'a> = Box<dyn FnOnce() -> LocalExecutionFuture<'a> + 'a>;
+
+#[async_trait(?Send)]
+pub trait AgentTurnRunnerPort {
+    async fn run_agent_turn(
+        &self,
+        chat_id: &str,
+        command: &str,
+        options: RunAgentTurnOptions,
+    ) -> ExecutionOperationResult<()>;
+    async fn capture_steer_target(
+        &self,
+        chat_id: &str,
+        deadline: Option<f64>,
+    ) -> ExecutionOperationResult<Option<AgentSteerTarget>>;
+    async fn steer_input(
+        &self,
+        chat_id: &str,
+        input: &str,
+        options: &AgentSteerOptions,
+        target: Option<&AgentSteerTarget>,
+        prepare_delivery: PrepareSteerDelivery<'_>,
+        deadline: Option<f64>,
+    ) -> ExecutionOperationResult<AgentSteerResult>;
+    async fn abort_session(&self, chat_id: &str) -> ExecutionOperationResult<bool>;
+    fn is_chat_running(&self, chat_id: &str) -> bool;
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DirectInputPreparationOperation {
@@ -447,6 +477,11 @@ impl CapturedSteerTarget {
             client_request_id: self.client_request_id.clone(),
         }
     }
+}
+
+pub enum CapturedControlOffer {
+    Delivered,
+    AfterTurn { attempt: Rc<QueueExecutionAttempt> },
 }
 
 pub struct AcceptedSteerInput<EntryId = Option<String>> {
