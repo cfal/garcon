@@ -37,6 +37,10 @@ mod compare;
 mod manifest;
 pub mod markers;
 mod replay;
+mod result_order;
 
 pub use arguments::{bigint, javascript_number, round_tripped, text, unknown};
-pub use replay::{CaseError, Stats, replay, replay_with_expected_wildcards};
+pub use replay::{
+    CaseError, ReplayOptions, Stats, replay, replay_with_expected_wildcards, replay_with_options,
+};
+pub use result_order::ResultOrderException;

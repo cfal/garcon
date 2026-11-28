@@ -327,6 +327,17 @@ result `Value` with `garcon_js::json::from_slice`. Do not sort or reconstruct
 the map's keys to match the recording. This checks the order produced by the
 port's actual serializer, including custom `Serialize` implementations.
 
+For a caller-owned object the original passes through unchanged, use
+`replay_with_options(cases_dir, options, dispatch)` with
+`ReplayOptions { result_order_exceptions: &[ResultOrderException { function,
+path, reason }], ..Default::default() }`. The exception covers only the named
+function and subtree: `$.result` is the whole result, `$.result.connection`
+is one property, and `$.result[*]` is each array element. It does not excuse
+different values or array order. Replay prints each exception's reason and
+the number of matching subtrees, and fails if an exception matched none.
+The exact wildcard count can also be set in these options with
+`expected_wildcards`.
+
 A dispatcher reads an argument with the readers of `garcon_cases`, which give
 the port the JSON the recorded value round-trips to:
 

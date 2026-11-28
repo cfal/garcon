@@ -245,32 +245,59 @@ pub fn first_difference_exact(expected: &Value, actual: &Value) -> Option<Differ
 }
 
 /// Compares the serialized object order after structural comparison passed.
-pub(crate) fn first_key_order_difference(expected: &Value, actual: &Value) -> Option<Difference> {
-    key_order_difference(expected, actual, "$")
+pub(crate) fn first_key_order_difference(
+    expected: &Value,
+    actual: &Value,
+    mut except: impl FnMut(&str) -> bool,
+) -> Option<Difference> {
+    let mut first = None;
+    compare_key_order(expected, actual, "$", false, &mut except, &mut first);
+    first
 }
 
-fn key_order_difference(expected: &Value, actual: &Value, path: &str) -> Option<Difference> {
+fn compare_key_order(
+    expected: &Value,
+    actual: &Value,
+    path: &str,
+    excepted_ancestor: bool,
+    except: &mut impl FnMut(&str) -> bool,
+    first: &mut Option<Difference>,
+) {
     match (expected, actual) {
         (Value::Object(entries), Value::Object(others)) => {
+            let ignored = except(path) || excepted_ancestor;
             // A recorded undefined property can be absent at the JSON boundary.
             let keys = || entries.keys().filter(|key| others.contains_key(*key));
-            if keys().ne(others.keys()) {
+            if !ignored && first.is_none() && keys().ne(others.keys()) {
                 let expected = Value::Array(keys().cloned().map(Value::String).collect());
                 let actual = Value::Array(others.keys().cloned().map(Value::String).collect());
-                return Some(Difference::new(path, "key-order", &expected, &actual));
+                *first = Some(Difference::new(path, "key-order", &expected, &actual));
             }
-            keys().find_map(|key| {
-                key_order_difference(&entries[key], &others[key], &child_path(path, key))
-            })
+            for key in keys() {
+                compare_key_order(
+                    &entries[key],
+                    &others[key],
+                    &child_path(path, key),
+                    ignored,
+                    except,
+                    first,
+                );
+            }
         }
-        (Value::Array(items), Value::Array(others)) => items
-            .iter()
-            .zip(others)
-            .enumerate()
-            .find_map(|(index, (item, other))| {
-                key_order_difference(item, other, &array_path(path, index))
-            }),
-        _ => None,
+        (Value::Array(items), Value::Array(others)) => {
+            let ignored = except(path) || excepted_ancestor;
+            for (index, (item, other)) in items.iter().zip(others).enumerate() {
+                compare_key_order(
+                    item,
+                    other,
+                    &array_path(path, index),
+                    ignored,
+                    except,
+                    first,
+                );
+            }
+        }
+        _ => {}
     }
 }
 
@@ -411,7 +438,7 @@ mod tests {
         let expected = json!({"rows":[{"1":1,"2":2,"z":0,"a":1}]});
         let actual = json!({"rows":[{"2":2,"1":1,"a":1,"z":0}]});
         assert!(first_difference(&expected, &actual).is_none());
-        let order = first_key_order_difference(&expected, &actual).unwrap();
+        let order = first_key_order_difference(&expected, &actual, |_| false).unwrap();
         assert_eq!(order.kind, "key-order");
         assert_eq!(order.path, "$.rows[0]");
         assert_eq!(order.expected, r#"["1","2","z","a"]"#);
@@ -424,7 +451,7 @@ mod tests {
             json!({"z": "[..]", "discarded": markers::undefined(), "a": [markers::undefined()]});
         let actual = json!({"z": {"any": 1, "order": 2}, "a": [null]});
         assert!(first_difference(&expected, &actual).is_none());
-        assert!(first_key_order_difference(&expected, &actual).is_none());
+        assert!(first_key_order_difference(&expected, &actual, |_| false).is_none());
     }
 
     #[test]

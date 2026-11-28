@@ -63,6 +63,176 @@ fn ticket_recording_result<T: Serialize>(
 }
 
 #[test]
+fn garcon_commands_recordings() {
+    use garcon_contract::chat_types::parse_chat_message;
+    use garcon_contract::garcon_commands::*;
+    assert_recording("garcon-commands", |function, args| match function {
+        "extractGarconCommands" => {
+            let input = unknown(function, args.first())?;
+            let message = parse_chat_message(&input)
+                .map_err(|error| CaseError::undeliverable(error.to_string()))?
+                .ok_or_else(|| CaseError::undeliverable("expected a chat message"))?;
+            let Some(output) = extract_garcon_commands(&message) else {
+                return Ok(Value::Null);
+            };
+            Ok(json!({
+                "message": output.message.map(|message| instance_record("AssistantMessage", message)),
+                "commands": serialized_record(output.commands),
+                "issues": serialized_record(output.issues),
+            }))
+        }
+        "garconMessageContent" => {
+            let value = unknown(function, args.first())?;
+            let sender = if value.is_null() {
+                None
+            } else {
+                Some(
+                    garcon_contract::chat_id::parse_chat_id(&value)
+                        .map_err(|error| CaseError::undeliverable(error.to_string()))?,
+                )
+            };
+            Ok(json!(garcon_message_content(
+                sender.as_ref(),
+                required_text(function, args.get(1))?
+            )))
+        }
+        "parseGarconMessage" => Ok(serialized_record(parse_garcon_message(required_text(
+            function,
+            args.first(),
+        )?))),
+        _ => Err(CaseError::unhandled(function)),
+    });
+}
+
+#[test]
+fn garcon_commands_keeps_unicode_prose_and_extracts_trailing_commands_in_document_order() {
+    use garcon_contract::chat_types::{AssistantMessage, ChatMessage};
+    use garcon_contract::garcon_commands::*;
+    let message = ChatMessage::Assistant(AssistantMessage {
+        timestamp: "now".into(),
+        content: "\u{1f600} answer \r\n<garcon-send-message to=\"1787974832309199, 1787974832309199\" hide-sender=\"false\">\r\nmessage\r\n</garcon-send-message>\r\n<garcon-get-chat-id />\n\u{a0}".into(),
+        questions: None,
+    });
+    let output = extract_garcon_commands(&message).unwrap();
+    assert_eq!(output.message.as_ref().unwrap().content, "\u{1f600} answer");
+    assert!(output.issues.is_empty());
+    let [
+        GarconEdgeCommand::SendMessage {
+            recipients,
+            hide_sender,
+            body,
+        },
+        GarconEdgeCommand::GetChatId,
+    ] = output.commands.as_slice()
+    else {
+        panic!("expected an ordered send and chat ID query");
+    };
+    assert_eq!(recipients.len(), 1);
+    assert!(!hide_sender);
+    assert_eq!(body, "message");
+
+    let expected = pinned_bun_stdout(
+        r#"import { extractGarconCommands } from "./common/garcon-commands.ts";
+           console.log(JSON.stringify(extractGarconCommands(JSON.parse(process.argv[1]))));"#,
+        &[&serde_json::to_string(&message).unwrap()],
+    );
+    assert_eq!(serde_json::to_string(&output).unwrap(), expected.trim_end());
+}
+
+#[test]
+fn garcon_commands_keeps_an_unclosed_envelope_opaque() {
+    use garcon_contract::chat_types::{AssistantMessage, ChatMessage};
+    use garcon_contract::garcon_commands::*;
+    let content = "Answer\n<garcon-send-message to=\"1787974832309199\" hide-sender=\"false\">\n<garcon-get-chat-id />";
+    let result = extract_garcon_commands(&ChatMessage::Assistant(AssistantMessage {
+        timestamp: "now".into(),
+        content: content.into(),
+        questions: None,
+    }))
+    .unwrap();
+    assert_eq!(result.message.unwrap().content, content);
+    assert!(result.commands.is_empty());
+    assert_eq!(result.issues.len(), 1);
+    assert_eq!(result.issues[0].command.as_str(), "send-message");
+    assert_eq!(result.issues[0].edge, GarconCommandIssueEdge::Trailing);
+}
+
+#[test]
+fn garcon_commands_preserves_a_large_comparison_heavy_remainder() {
+    use garcon_contract::chat_types::{AssistantMessage, ChatMessage};
+    use garcon_contract::garcon_commands::{GarconEdgeCommand, extract_garcon_commands};
+    let command = "<garcon-start-agent ref=\"task\">Synthetic.</garcon-start-agent>";
+    let prose = "Compare a<b. It doesn't work. ".repeat(64_000);
+    let result = extract_garcon_commands(&ChatMessage::Assistant(AssistantMessage {
+        timestamp: "now".into(),
+        content: format!("{command}\n{prose}\n{command}"),
+        questions: None,
+    }))
+    .unwrap();
+    assert!(matches!(
+        result.commands.as_slice(),
+        [
+            GarconEdgeCommand::StartAgent(_),
+            GarconEdgeCommand::StartAgent(_)
+        ]
+    ));
+    assert!(result.issues.is_empty());
+    assert_eq!(result.message.unwrap().content, prose.trim_end());
+}
+
+#[test]
+fn garcon_received_message_limits_utf8_bytes_and_preserves_replacement_characters() {
+    use garcon_contract::garcon_commands::*;
+    let padding = "\u{1f600}".repeat(GARCON_MESSAGE_BODY_MAX_BYTES / 4 - 1);
+    let full = format!("{padding}\u{fffd}x");
+    assert_eq!(
+        parse_garcon_message(&garcon_message_content(None, &full))
+            .unwrap()
+            .body,
+        full
+    );
+    assert!(parse_garcon_message(&garcon_message_content(None, &(full + "x"))).is_none());
+}
+
+#[test]
+fn self_handoff_contract_recordings() {
+    use garcon_contract::self_handoff_contracts::parse_self_handoff_run_command_request;
+    assert_recording("self-handoff-contracts", |function, args| match function {
+        "parseSelfHandoffRunCommandRequest" => {
+            let value = unknown(function, args.first())?;
+            parse_self_handoff_run_command_request(&value)
+                .map(serialized_record)
+                .map_err(|error| CaseError::new("CommandRequestValidationError", error.message))
+        }
+        _ => Err(CaseError::unhandled(function)),
+    });
+}
+
+#[test]
+fn self_handoff_keeps_the_fork_validation_and_only_the_continuation_fields() {
+    use garcon_contract::self_handoff_contracts::parse_self_handoff_run_command_request;
+    let mut input = json!({
+        "clientRequestId": " req ", "clientMessageId": " msg ",
+        "sourceChatId": "1000000000000001", "chatId": "1000000000000002",
+        "images": [{"data":"YWJj","name":"note.png","mimeType":"image/png"}],
+        "model": "demo", "allowHandoffFork": true,
+    });
+    let expected = pinned_bun_stdout(
+        r#"import { parseSelfHandoffRunCommandRequest } from "./common/self-handoff-contracts.ts";
+           console.log(JSON.stringify(parseSelfHandoffRunCommandRequest(JSON.parse(process.argv[1]))));"#,
+        &[&garcon_js::json::stringify(&input)],
+    );
+    let result = parse_self_handoff_run_command_request(&input).unwrap();
+    assert_eq!(serde_json::to_string(&result).unwrap(), expected.trim_end());
+    input["model"] = json!(42);
+    assert_eq!(
+        parse_self_handoff_run_command_request(&input).unwrap_err(),
+        garcon_contract::chat_command_contracts::parse_fork_run_command_request(&input)
+            .unwrap_err(),
+    );
+}
+
+#[test]
 fn ws_session_event_recordings() {
     use garcon_contract::ws_events::*;
     #[derive(serde::Deserialize)]
