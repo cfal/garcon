@@ -1,0 +1,79 @@
+{"id":"createArtificialNativePath#0","fn":"createArtificialNativePath","args":["pi","session-1"],"result":"!pi:session-1","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:1"}
+{"id":"createArtificialNativePath#1","fn":"createArtificialNativePath","args":["","session-1"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:2"}
+{"id":"createArtificialNativePath#2","fn":"createArtificialNativePath","args":[null,"session-1"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:3"}
+{"id":"createArtificialNativePath#3","fn":"createArtificialNativePath","args":[{"$":"undefined"},"session-1"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:4"}
+{"id":"createArtificialNativePath#4","fn":"createArtificialNativePath","args":["pi",""],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:5"}
+{"id":"createArtificialNativePath#5","fn":"createArtificialNativePath","args":["pi",null],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:6"}
+{"id":"createArtificialNativePath#6","fn":"createArtificialNativePath","args":[null,null],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:7"}
+{"id":"createArtificialNativePath#7","fn":"createArtificialNativePath","args":["a:b","c:d"],"result":"!a:b:c:d","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:8"}
+{"id":"createArtificialNativePath#8","fn":"createArtificialNativePath","args":["日本語","😀"],"result":"!日本語:😀","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:9"}
+{"id":"createArtificialNativePath#9","fn":"createArtificialNativePath","args":["K","session-1"],"result":"!K:session-1","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:49"}
+{"id":"createArtificialNativePath#10","fn":"createArtificialNativePath","args":["ı ","﻿"],"result":"!ı :﻿","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:50"}
+{"id":"createArtificialNativePath#11","fn":"createArtificialNativePath","args":["日本語","😀́"],"result":"!日本語:😀́","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:51"}
+{"id":"createArtificialNativePath#12","fn":"createArtificialNativePath","args":["__proto__","constructor"],"result":"!__proto__:constructor","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:52"}
+{"id":"createArtificialNativePath#13","fn":"createArtificialNativePath","args":["toString","hasOwnProperty"],"result":"!toString:hasOwnProperty","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:53"}
+{"id":"createArtificialNativePath#14","fn":"createArtificialNativePath","args":["a b","c\nd"],"result":"!a b:c\nd","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:54"}
+{"id":"createArtificialNativePath#15","fn":"createArtificialNativePath","args":["K","s"],"result":"!K:s","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:55"}
+{"id":"createArtificialNativePath#16","fn":"createArtificialNativePath","args":[" "," "],"result":"! : ","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:56"}
+{"id":"isArtificialNativePath#0","fn":"isArtificialNativePath","args":["!pi:session-1"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:10"}
+{"id":"isArtificialNativePath#1","fn":"isArtificialNativePath","args":["!"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:11"}
+{"id":"isArtificialNativePath#2","fn":"isArtificialNativePath","args":[""],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:12"}
+{"id":"isArtificialNativePath#3","fn":"isArtificialNativePath","args":[null],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:13"}
+{"id":"isArtificialNativePath#4","fn":"isArtificialNativePath","args":[{"$":"undefined"}],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:14"}
+{"id":"isArtificialNativePath#5","fn":"isArtificialNativePath","args":[5],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:15"}
+{"id":"isArtificialNativePath#6","fn":"isArtificialNativePath","args":[{}],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:16"}
+{"id":"isArtificialNativePath#7","fn":"isArtificialNativePath","args":[["!x"]],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:17"}
+{"id":"isArtificialNativePath#8","fn":"isArtificialNativePath","args":[true],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:18"}
+{"id":"isArtificialNativePath#9","fn":"isArtificialNativePath","args":["!K"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:57"}
+{"id":"isArtificialNativePath#10","fn":"isArtificialNativePath","args":["! "],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:58"}
+{"id":"isArtificialNativePath#11","fn":"isArtificialNativePath","args":["!😀"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:59"}
+{"id":"isArtificialNativePath#12","fn":"isArtificialNativePath","args":[" __proto__"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:60"}
+{"id":"isArtificialNativePath#13","fn":"isArtificialNativePath","args":["!__proto__"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:61"}
+{"id":"isArtificialNativePath#14","fn":"isArtificialNativePath","args":["!ıx"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:62"}
+{"id":"isArtificialNativePath#15","fn":"isArtificialNativePath","args":[" constructor"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:63"}
+{"id":"parseArtificialNativePath#0","fn":"parseArtificialNativePath","args":["!pi:session-1"],"result":{"agentId":"pi","agentSessionId":"session-1"},"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:19"}
+{"id":"parseArtificialNativePath#1","fn":"parseArtificialNativePath","args":["!pi:session:with:colons"],"result":{"agentId":"pi","agentSessionId":"session:with:colons"},"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:20"}
+{"id":"parseArtificialNativePath#2","fn":"parseArtificialNativePath","args":["!:session-1"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:21"}
+{"id":"parseArtificialNativePath#3","fn":"parseArtificialNativePath","args":["!pi:"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:22"}
+{"id":"parseArtificialNativePath#4","fn":"parseArtificialNativePath","args":["!pi"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:23"}
+{"id":"parseArtificialNativePath#5","fn":"parseArtificialNativePath","args":["!"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:24"}
+{"id":"parseArtificialNativePath#6","fn":"parseArtificialNativePath","args":["!::"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:25"}
+{"id":"parseArtificialNativePath#7","fn":"parseArtificialNativePath","args":["!a:b:c"],"result":{"agentId":"a","agentSessionId":"b:c"},"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:26"}
+{"id":"parseArtificialNativePath#8","fn":"parseArtificialNativePath","args":["!pi:session-1:extra"],"result":{"agentId":"pi","agentSessionId":"session-1:extra"},"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:27"}
+{"id":"parseArtificialNativePath#9","fn":"parseArtificialNativePath","args":["pi:session-1"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:28"}
+{"id":"parseArtificialNativePath#10","fn":"parseArtificialNativePath","args":[""],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:29"}
+{"id":"parseArtificialNativePath#11","fn":"parseArtificialNativePath","args":[null],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:30"}
+{"id":"parseArtificialNativePath#12","fn":"parseArtificialNativePath","args":[5],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:31"}
+{"id":"parseArtificialNativePath#13","fn":"parseArtificialNativePath","args":[{"$":"undefined"}],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:32"}
+{"id":"parseArtificialNativePath#14","fn":"parseArtificialNativePath","args":["!日本:😀"],"result":{"agentId":"日本","agentSessionId":"😀"},"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:33"}
+{"id":"parseArtificialNativePath#15","fn":"parseArtificialNativePath","args":["!😀:x"],"result":{"agentId":"😀","agentSessionId":"x"},"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:34"}
+{"id":"parseArtificialNativePath#16","fn":"parseArtificialNativePath","args":["!x:😀"],"result":{"agentId":"x","agentSessionId":"😀"},"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:35"}
+{"id":"parseArtificialNativePath#17","fn":"parseArtificialNativePath","args":["!::x"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:36"}
+{"id":"parseArtificialNativePath#18","fn":"parseArtificialNativePath","args":["!x::"],"result":{"agentId":"x","agentSessionId":":"},"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:37"}
+{"id":"parseArtificialNativePath#19","fn":"parseArtificialNativePath","args":["!aKb:c d"],"result":{"agentId":"aKb","agentSessionId":"c d"},"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:64"}
+{"id":"parseArtificialNativePath#20","fn":"parseArtificialNativePath","args":["!ı:ı"],"result":{"agentId":"ı","agentSessionId":"ı"},"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:65"}
+{"id":"parseArtificialNativePath#21","fn":"parseArtificialNativePath","args":["!😀:😀"],"result":{"agentId":"😀","agentSessionId":"😀"},"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:66"}
+{"id":"parseArtificialNativePath#22","fn":"parseArtificialNativePath","args":["!日本:語😀"],"result":{"agentId":"日本","agentSessionId":"語😀"},"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:67"}
+{"id":"parseArtificialNativePath#23","fn":"parseArtificialNativePath","args":["!::K"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:68"}
+{"id":"parseArtificialNativePath#24","fn":"parseArtificialNativePath","args":["!constructor:toString"],"result":{"agentId":"constructor","agentSessionId":"toString"},"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:69"}
+{"id":"parseArtificialNativePath#25","fn":"parseArtificialNativePath","args":["!__proto__:"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:70"}
+{"id":"parseArtificialNativePath#26","fn":"parseArtificialNativePath","args":["!﻿:﻿"],"result":{"agentId":"﻿","agentSessionId":"﻿"},"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:71"}
+{"id":"parseArtificialNativePath#27","fn":"parseArtificialNativePath","args":["!a b:c d"],"result":{"agentId":"a b","agentSessionId":"c d"},"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:72"}
+{"id":"getArtificialAgentSessionId#0","fn":"getArtificialAgentSessionId","args":["!pi:session-1","pi"],"result":"session-1","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:38"}
+{"id":"getArtificialAgentSessionId#1","fn":"getArtificialAgentSessionId","args":["!pi:session-1","codex"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:39"}
+{"id":"getArtificialAgentSessionId#2","fn":"getArtificialAgentSessionId","args":["!pi:session-1",["pi","codex"]],"result":"session-1","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:40"}
+{"id":"getArtificialAgentSessionId#3","fn":"getArtificialAgentSessionId","args":["!codex:session-1",["pi","codex"]],"result":"session-1","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:41"}
+{"id":"getArtificialAgentSessionId#4","fn":"getArtificialAgentSessionId","args":["!codex:session-1",[]],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:42"}
+{"id":"getArtificialAgentSessionId#5","fn":"getArtificialAgentSessionId","args":[null,"pi"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:43"}
+{"id":"getArtificialAgentSessionId#6","fn":"getArtificialAgentSessionId","args":["pi:session-1","pi"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:44"}
+{"id":"getArtificialAgentSessionId#7","fn":"getArtificialAgentSessionId","args":["!pi:session-1",""],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:45"}
+{"id":"getArtificialAgentSessionId#8","fn":"getArtificialAgentSessionId","args":["!pi:session-1",[""]],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:46"}
+{"id":"getArtificialAgentSessionId#9","fn":"getArtificialAgentSessionId","args":["!pi:session-1",["pi","pi"]],"result":"session-1","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:47"}
+{"id":"getArtificialAgentSessionId#10","fn":"getArtificialAgentSessionId","args":["!日本:😀",["😀","日本"]],"result":"😀","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:48"}
+{"id":"getArtificialAgentSessionId#11","fn":"getArtificialAgentSessionId","args":["!K:s","K"],"result":"s","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:73"}
+{"id":"getArtificialAgentSessionId#12","fn":"getArtificialAgentSessionId","args":["!K:s","K"],"result":"s","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:74"}
+{"id":"getArtificialAgentSessionId#13","fn":"getArtificialAgentSessionId","args":["!ı:s","ı"],"result":"s","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:75"}
+{"id":"getArtificialAgentSessionId#14","fn":"getArtificialAgentSessionId","args":["!__proto__:x","__proto__"],"result":"x","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:76"}
+{"id":"getArtificialAgentSessionId#15","fn":"getArtificialAgentSessionId","args":["!constructor:x",["constructor","toString"]],"result":"x","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:77"}
+{"id":"getArtificialAgentSessionId#16","fn":"getArtificialAgentSessionId","args":["!😀:x",["😀"]],"result":"x","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:78"}
+{"id":"getArtificialAgentSessionId#17","fn":"getArtificialAgentSessionId","args":["! :x",[" "]],"result":"x","origin":"rust/garcon-agents-common/tests/inputs/artificial-native-path.jsonl:79"}

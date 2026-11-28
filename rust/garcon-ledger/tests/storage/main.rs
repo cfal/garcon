@@ -7,6 +7,7 @@ mod connection;
 mod error_diagnostics;
 mod failure_fences;
 mod input_cases;
+mod native_activity;
 mod presentation_views;
 mod producer_lease;
 mod producer_publication;

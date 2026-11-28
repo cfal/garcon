@@ -1,6 +1,7 @@
 pub mod acp;
 pub mod auth;
 pub mod catalog;
+pub mod chats;
 pub mod cli_update;
 pub mod direct;
 pub mod execution;

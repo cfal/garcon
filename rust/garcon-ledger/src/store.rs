@@ -32,14 +32,15 @@ use crate::{
         AppendChatRowRequest, AppendChatRowResult, AppendInputRequest,
         AppendSelectionChangeNoticeResult, InputComposition, LedgerCheckpoint, LedgerNoticeDetail,
         LedgerPreambleSelectionChangedNoticeDetail, LedgerRow, LedgerRowData, LedgerRowDraft,
-        LedgerUserInputDetail, PREAMBLES_UPDATED_MESSAGE, TranscriptPage, TranscriptView,
-        TranscriptViewId, TranscriptViewStatus, transcript_view_id,
+        LedgerUserInputDetail, PREAMBLES_UPDATED_MESSAGE, TranscriptNativeActivityState,
+        TranscriptPage, TranscriptView, TranscriptViewId, TranscriptViewStatus, transcript_view_id,
     },
     errors::{LedgerCodecError, LedgerError},
     failure_fences::{LedgerFailureFences, SharedLedgerFailure},
     file_stat::stat_size_if_exists,
     input_composition::{compose_input_prompt, read_resend_candidates},
     input_submission::{matching_input_submission, read_submission},
+    native_activity_query::read_provider_activity_watermark,
     preamble_application::{has_preamble_boundary_proof, prepare_preamble_input},
     raw_page::read_raw_page,
     session_query::find_current_session,
@@ -409,6 +410,26 @@ impl TranscriptLedgerStore {
         self.read(chat_id, |entry| {
             let view = require_current(entry)?;
             find_current_session(&entry.db, view)
+        })
+    }
+
+    pub fn native_activity_state(
+        &self,
+        chat_id: &str,
+    ) -> LedgerResult<TranscriptNativeActivityState> {
+        self.read(chat_id, |entry| {
+            let view = require_current(entry)?;
+            let session = find_current_session(&entry.db, view)?;
+            let provider_watermark = read_provider_activity_watermark(
+                &entry.db,
+                &view.view_id,
+                view.content_start_ordinal,
+            )?;
+            Ok(TranscriptNativeActivityState {
+                view_id: view.view_id.clone(),
+                session,
+                provider_watermark,
+            })
         })
     }
 
