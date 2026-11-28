@@ -56,6 +56,7 @@ impl TranscriptLedgerStore {
             input.content_start_ordinal,
             &created_at,
         )?;
+        let retention = self.staging.release_on_drop(chat_id, &view_id);
         let result = async {
             self.staging
                 .insert_rows(self, chat_id, &view_id, input.rows, generation)
@@ -100,6 +101,7 @@ impl TranscriptLedgerStore {
                 .discard(self, chat_id, &view_id, generation)
                 .await;
         }
+        retention.disarm();
         match result? {
             Some(view) => Ok(view),
             None => self.read(chat_id, |entry| Ok(require_current(entry)?.clone())),
@@ -122,6 +124,7 @@ impl TranscriptLedgerStore {
             input.content_start_ordinal,
             &created_at,
         )?;
+        let retention = self.staging.release_on_drop(chat_id, &input.view_id);
         if let Err(error) = self
             .staging
             .insert_rows(self, chat_id, &input.view_id, input.rows, generation)
@@ -130,8 +133,10 @@ impl TranscriptLedgerStore {
             self.staging
                 .discard(self, chat_id, &input.view_id, generation)
                 .await;
+            retention.disarm();
             return Err(error);
         }
+        retention.disarm();
         Ok(TranscriptView {
             view_id: input.view_id,
             status: TranscriptViewStatus::Staging,
@@ -142,9 +147,11 @@ impl TranscriptLedgerStore {
 
     pub async fn discard_staging_view(&self, chat_id: &str, view_id: &TranscriptViewId) {
         let generation = self.staging.generation(chat_id);
+        let retention = self.staging.release_on_drop(chat_id, view_id);
         self.staging
             .discard(self, chat_id, view_id, generation)
             .await;
+        retention.disarm();
     }
 
     /// Publishes the staged view in one transaction and retires the old rows on the controller's `LocalSet`.
