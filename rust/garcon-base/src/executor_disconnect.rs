@@ -4,7 +4,7 @@ use std::error::Error;
 use std::fmt;
 use std::ops::Deref;
 
-use garcon_interface::errors::{AgentCallError, AgentDeliveryOutcome};
+use garcon_interface::errors::{AgentCallError, AgentDeliveryOutcome, AgentIntegrationError};
 
 /// Fails a run whose remote transcript binding could not resume after the
 /// executor connection was lost.
@@ -82,6 +82,15 @@ pub fn as_agent_call_error<'a>(error: &'a (dyn Error + 'static)) -> Option<&'a A
             .downcast_ref::<ExecutorSessionLostError>()
             .map(|error| &error.call)
     })
+}
+
+/// Views an erased base or interface error as an AgentIntegrationError.
+pub fn as_agent_integration_error<'a>(
+    error: &'a (dyn Error + 'static),
+) -> Option<&'a AgentIntegrationError> {
+    error
+        .downcast_ref::<AgentIntegrationError>()
+        .or_else(|| as_agent_call_error(error).map(|call| &**call))
 }
 
 #[cfg(test)]

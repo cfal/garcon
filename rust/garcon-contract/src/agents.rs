@@ -32,6 +32,8 @@ pub struct AgentModelOption {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_images: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_modes: Option<Vec<ThinkingMode>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_local: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_provider_id: Option<String>,

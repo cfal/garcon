@@ -21,13 +21,15 @@ use garcon_agent_codex::app_server::{
     operation_routes::codex_operation,
     protocol::JsonRpcId,
     request_builders::{
-        CodexThreadConfiguration, CodexThreadSettings, thread_settings_target_from_snapshot,
+        CodexThreadConfiguration, CodexThreadSettings, CodexThreadSettingsSandboxPolicy,
+        ThreadActivationSettings, thread_settings_target_from_snapshot,
     },
     runtime::{
         client_events::{BufferedClientEvent, CodexClientEvents},
         interrupt::CodexInterrupt,
+        managed::{CodexAppServerRuntime, CodexAppServerRuntimeOptions},
         permission_events::{CodexApprovalEvents, CodexApprovalRoute},
-        source_registry::{CodexSessionSource, CodexSourceRegistry},
+        source_registry::{CodexSessionSource, CodexSourceActivation, CodexSourceRegistry},
         thread_settings::CodexSourceThreadSettings,
         turn_events::dispatch_turn_notification,
         utility::CodexAppServerUtility,
@@ -35,8 +37,9 @@ use garcon_agent_codex::app_server::{
     runtime_support::NoopLogger,
     steering::classify_codex_steer_rejection,
 };
+use garcon_agent_codex::runtime_types::{CodexExecutionRequest, CodexStartRequest};
 use garcon_agent_codex::slash_command_discovery::CodexSkillDiscovery;
-use garcon_agents_common::execution::runtime_events::AgentRuntimeEvent;
+use garcon_agents_common::execution::runtime_events::{AgentRuntimeEvent, ProviderRunOutcome};
 use garcon_contract::chat_types::ChatMessage;
 use garcon_contract::{
     chat_command_contracts::PermissionDecisionPayload,
@@ -239,6 +242,29 @@ async fn native_turn_events_publish_rows_before_completion_and_keep_their_captur
                 "thread".into(),
                 client.clone(),
                 old.clone(),
+                CodexSourceActivation {
+                    native_path: None,
+                    codex_home: None,
+                    model_endpoint_id: None,
+                    runtime_identity: "synthetic".into(),
+                    started_at: "2026-02-21T10:00:00.000Z".into(),
+                    confirmed_settings: thread_settings_target_from_snapshot(
+                        &CodexThreadSettings {
+                            model: "model".into(),
+                            service_tier: None,
+                            effort: None,
+                            approval_policy: json!("never"),
+                            approvals_reviewer: "user".into(),
+                            sandbox_policy: CodexThreadSettingsSandboxPolicy {
+                                kind: "readOnly".into(),
+                                fields: serde_json::Map::new(),
+                            },
+                        },
+                        PermissionMode::Default,
+                    ),
+                    provider_owns_effort: true,
+                    settings_timeout: Duration::from_secs(1),
+                },
             ));
             registry.borrow_mut().activate(source.clone());
             garcon_agent_codex::app_server::runtime_session_state::CodexTurnRoutes::adopt_turn(
@@ -951,6 +977,76 @@ async fn speaks_to_the_original_integration_fake_app_server() {
             client.shutdown().await.unwrap();
         })
         .await;
+}
+
+#[tokio::test]
+async fn managed_runtime_starts_a_session_and_publishes_rows_before_its_terminal_event() {
+    LocalSet::new().run_until(async {
+        let fixture = Rc::new(Fixture::new(INTEGRATION_FIXTURE));
+        let rooted = fixture._directory.path().to_str().unwrap().to_owned();
+        let factory = {
+            let fixture = fixture.clone();
+            let rooted = rooted.clone();
+            Rc::new(move |env, _: Option<&garcon_agent_codex::runtime_types::CodexProviderConfig>| {
+                let mut options = fixture.options("");
+                options.env.insert("CODEX_HOME".into(), rooted.clone());
+                options.env.insert("INTEGRATION_CODEX_STREAMING_TURN".into(), "1".into());
+                if let Some(env) = env {
+                    options.env.extend(env);
+                }
+                CodexAppServerClient::new(options)
+            })
+        };
+        let mut options = CodexAppServerRuntimeOptions::new(factory, Rc::new(|| "synthetic-permission".into()));
+        options.clock = Rc::new(ManualClock::new(0));
+        let runtime = CodexAppServerRuntime::new(options);
+        let (published, mut receive) = tokio::sync::mpsc::unbounded_channel();
+        let (activated, mut activation) = tokio::sync::mpsc::unbounded_channel();
+        let operation = codex_operation("chat", "run", Rc::new(move |event| {
+            let _ = published.send(event);
+        }));
+        let request = CodexStartRequest {
+            execution: CodexExecutionRequest {
+                activation: ThreadActivationSettings {
+                    model: "synthetic-model".into(), project_path: rooted,
+                    permission_mode: PermissionMode::Default, speed: None, codex_config: None,
+                },
+                thinking_mode: None, model_endpoint_id: None,
+                client_message_id: Some("client-message".into()),
+                admission: None, command: "synthetic input".into(), images: Vec::new(),
+                env_overrides: None, operation,
+            },
+            on_session_activated: Some(Rc::new(move |session| { let _ = activated.send(session); })),
+        };
+        let result = tokio::time::timeout(Duration::from_secs(4), runtime.start_session(request))
+            .await.expect("start deadline").expect("managed session");
+        assert_eq!(activation.try_recv().unwrap(), result);
+        assert!(tokio::fs::metadata(result.native_path.as_deref().unwrap()).await.unwrap().is_file());
+        tokio::time::timeout(Duration::from_secs(4), async {
+            let mut steerable = 0;
+            let mut assistant_count = 0;
+            loop {
+                let event = receive.recv().await.expect("managed runtime sender closed before terminal");
+                match event {
+                    AgentRuntimeEvent::Steerable => steerable += 1,
+                    AgentRuntimeEvent::Rows { rows } => {
+                        assistant_count += rows.iter().filter(|row| matches!(row.message, ChatMessage::Assistant(_))).count();
+                    }
+                    AgentRuntimeEvent::RunEnded { run_id, outcome, .. } => {
+                        assert_eq!(run_id, "run");
+                        assert!(matches!(outcome, ProviderRunOutcome::Finished { .. }));
+                        assert_eq!(steerable, 1);
+                        assert_eq!(assistant_count, 2);
+                        break;
+                    }
+                    _ => panic!("unexpected managed runtime event"),
+                }
+            }
+        }).await.expect("terminal deadline");
+        assert!(!runtime.is_running(&result.agent_session_id));
+        runtime.release_session("chat", Some(&result.agent_session_id)).await;
+        runtime.shutdown().await;
+    }).await;
 }
 
 #[tokio::test]

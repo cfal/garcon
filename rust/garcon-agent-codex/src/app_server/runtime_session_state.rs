@@ -64,6 +64,10 @@ impl CodexTurnRoutes {
             .clone()
     }
 
+    pub(super) fn source_operation(&self) -> Rc<CodexOperation> {
+        self.source_operation.clone()
+    }
+
     pub fn operation_for_turn(&self, turn_id: &str) -> Option<&Rc<CodexOperation>> {
         self.operations.get(turn_id)
     }

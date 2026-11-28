@@ -3,12 +3,16 @@
 pub mod compaction_routing;
 pub mod endpoint_coordinator;
 pub mod event_converter;
+pub mod execution;
+pub mod forking;
 pub mod global_event_listener;
+pub mod history_loader;
 pub mod idle_lifecycle;
 pub mod instance_lifecycle;
 pub mod jsonc;
 pub mod model_catalog;
 pub mod model_discovery;
+pub mod native_activity;
 #[allow(clippy::module_inception)] // The original module is agents/opencode/opencode.ts.
 pub mod opencode;
 pub mod opencode_auth;

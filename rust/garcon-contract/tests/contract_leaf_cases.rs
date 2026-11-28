@@ -43,6 +43,20 @@ fn invalid_chat_id(error: chat_id::InvalidChatIdError) -> CaseError {
 }
 
 #[test]
+fn agent_model_option_cases_match() {
+    use garcon_contract::agents::AgentModelOption;
+
+    run("agent-model-option", |function, args| {
+        if function != "writeOpenCodeModelOptions" {
+            return Err(CaseError::unhandled(function));
+        }
+        let input = unknown(function, args.first())?;
+        let options: Vec<AgentModelOption> = typed(function, &input)?;
+        Ok(json_value(options))
+    });
+}
+
+#[test]
 fn canvas_cases_match() {
     use chat_canvas::*;
     run("chat-canvas", |function, args| {
