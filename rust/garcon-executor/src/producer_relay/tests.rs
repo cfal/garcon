@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use super::*;
 
-type Listener = Rc<dyn Fn(AgentProducerNotification)>;
+type Listener = Rc<dyn Fn(AgentProducerNotification) -> ExecutorResult<()>>;
 type UndeliveredListeners = Rc<RefCell<Vec<Rc<dyn Fn()>>>>;
 
 struct Producers {
@@ -155,7 +155,8 @@ impl Owner {
             listener(AgentProducerNotification {
                 binding: reference.clone(),
                 event: event.clone(),
-            });
+            })
+            .unwrap();
         }
     }
 

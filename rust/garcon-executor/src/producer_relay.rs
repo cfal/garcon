@@ -190,6 +190,7 @@ impl ProducerRelay {
                         notification,
                     );
                 }
+                Ok(())
             }));
         self.state
             .borrow_mut()
