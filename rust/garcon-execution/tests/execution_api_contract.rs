@@ -76,6 +76,16 @@ fn keeps_owns_execution_reachable_from_both_facets() {
 }
 
 #[test]
+fn keeps_processing_predicates_on_the_query_facet() {
+    let queries = predicates_in("ChatExecutionQueries");
+    let commands = predicates_in("ChatExecutionCommands");
+    for predicate in ["is_chat_turn_reserved", "is_chat_stop_in_flight"] {
+        assert!(queries.contains(&predicate));
+        assert!(!commands.contains(&predicate));
+    }
+}
+
+#[test]
 fn defines_the_ownership_union_in_exactly_one_place() {
     let coordinator = include_str!("../src/chat_execution_coordinator.rs")
         .split_whitespace()
