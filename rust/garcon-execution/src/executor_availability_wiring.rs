@@ -106,6 +106,39 @@ pub fn wire_executor_availability(options: ExecutorAvailabilityWiring) -> Box<dy
         publish_processing,
         logger,
     } = options;
+    wire_executor_availability_observers(ExecutorAvailabilityObservers {
+        executors,
+        sessions,
+        ownership,
+        publish_processing,
+        on_ready: Rc::new({
+            let logger = logger.clone();
+            move |executor_id| recover_executor_queue(executor_id, &chats, &queue, &logger)
+        }),
+        logger,
+    })
+}
+
+pub struct ExecutorAvailabilityObservers {
+    pub executors: Rc<ExecutorManager>,
+    pub sessions: Rc<dyn ExecutorAvailabilitySessions>,
+    pub ownership: Rc<dyn ExecutorAvailabilityOwnership>,
+    pub publish_processing: Rc<dyn Fn(&str)>,
+    pub on_ready: Rc<dyn Fn(&str)>,
+    pub logger: Rc<dyn Logger>,
+}
+
+pub fn wire_executor_availability_observers(
+    options: ExecutorAvailabilityObservers,
+) -> Box<dyn Fn()> {
+    let ExecutorAvailabilityObservers {
+        executors,
+        sessions,
+        ownership,
+        publish_processing,
+        on_ready,
+        logger,
+    } = options;
     let retry_provider_cleanup = Rc::new({
         let logger = logger.clone();
         move |executor_id: &str| {
@@ -135,36 +168,7 @@ pub fn wire_executor_availability(options: ExecutorAvailabilityWiring) -> Box<dy
                 logger.info(&format!("Executor ready: {executor_id}"));
                 sessions.execution_session_resumed(executor_id);
                 retry_provider_cleanup(executor_id);
-                for chat_id in chats.list_chat_ids() {
-                    if effective_executor_id(chats.chat_executor_id(&chat_id).as_deref())
-                        != executor_id
-                    {
-                        continue;
-                    }
-                    let (executor_id, chats, queue, logger) = (
-                        executor_id.to_owned(),
-                        chats.clone(),
-                        queue.clone(),
-                        logger.clone(),
-                    );
-                    tokio::task::spawn_local(async move {
-                        let result: ExecutionOperationResult<()> = async {
-                            let control = queue.read_chat_execution_control(&chat_id).await?;
-                            if chats.chat_executor_id(&chat_id).as_deref()
-                                == Some(executor_id.as_str())
-                                && has_pending_turn_input(&control)
-                            {
-                                queue.retry_queued_steers(&chat_id)?;
-                                queue.trigger_drain(&chat_id).await?;
-                            }
-                            Ok(())
-                        }
-                        .await;
-                        if let Err(error) = result {
-                            logger.warn(&format!("Executor queue drain failed: {error}"));
-                        }
-                    });
-                }
+                on_ready(executor_id);
             }
         })
     });
@@ -174,4 +178,39 @@ pub fn wire_executor_availability(options: ExecutorAvailabilityWiring) -> Box<dy
         }
     }
     off
+}
+
+pub fn recover_executor_queue(
+    executor_id: &str,
+    chats: &Rc<dyn ExecutorAvailabilityChats>,
+    queue: &Rc<dyn ExecutorAvailabilityQueue>,
+    logger: &Rc<dyn Logger>,
+) {
+    for chat_id in chats.list_chat_ids() {
+        if effective_executor_id(chats.chat_executor_id(&chat_id).as_deref()) != executor_id {
+            continue;
+        }
+        let (executor_id, chats, queue, logger) = (
+            executor_id.to_owned(),
+            chats.clone(),
+            queue.clone(),
+            logger.clone(),
+        );
+        tokio::task::spawn_local(async move {
+            let result: ExecutionOperationResult<()> = async {
+                let control = queue.read_chat_execution_control(&chat_id).await?;
+                if chats.chat_executor_id(&chat_id).as_deref() == Some(executor_id.as_str())
+                    && has_pending_turn_input(&control)
+                {
+                    queue.retry_queued_steers(&chat_id)?;
+                    queue.trigger_drain(&chat_id).await?;
+                }
+                Ok(())
+            }
+            .await;
+            if let Err(error) = result {
+                logger.warn(&format!("Executor queue drain failed: {error}"));
+            }
+        });
+    }
 }

@@ -1,0 +1,25 @@
+{
+  "module": "rust/garcon-agent-pi/tests/oracles/message-converter.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-pi/tests/inputs/message-converter.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "convertPiMessage",
+      "argument": 0
+    },
+    {
+      "fn": "convertPiMessage",
+      "argument": 1
+    },
+    {
+      "fn": "piFinalResponse",
+      "argument": 0
+    }
+  ],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 21,
+  "sha256": "69a02e2731b67ad05b05953c0b1d7b0b1f735f9c7410a0d79c1534888ebbacc6"
+}

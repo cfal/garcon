@@ -10,12 +10,25 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+async-trait.workspace = true
+futures.workspace = true
+garcon-base.workspace = true
 garcon-agents-common.workspace = true
 garcon-contract.workspace = true
+garcon-interface.workspace = true
 garcon-js.workspace = true
 indexmap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+url.workspace = true
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
+garcon-agents-common = { workspace = true, features = ["test-support"] }
 garcon-cases.workspace = true
+tempfile.workspace = true

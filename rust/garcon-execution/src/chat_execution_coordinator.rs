@@ -42,7 +42,7 @@ use crate::{
     accepted_input_transcript::{AcceptedInputTranscript, AcceptedInputTranscriptPort},
     chat_execution_control_operations::{
         ChatExecutionControlOperations, ChatExecutionControlOperationsHost,
-        QueueEntryMutationResult, QueueMoveResult,
+        QueueEntryMutationResult, QueueMoveResult, read_execution_control,
     },
     chat_execution_control_repository::ChatExecutionControlRepository,
     chat_execution_control_transitions::{
@@ -123,6 +123,13 @@ pub struct ChatExecutionCoordinatorDeps {
     pub input_transcript: Rc<dyn AcceptedInputTranscriptPort>,
     pub get_drain_options: Rc<QueueDrainOptionsResolver>,
     pub controls: Rc<dyn ChatExecutionControlRepository>,
+    pub options: ChatExecutionCoordinatorOptions,
+}
+
+pub struct ChatExecutionDispatchDeps {
+    pub turn_runner: Rc<dyn AgentTurnRunnerPort>,
+    pub input_transcript: Rc<dyn AcceptedInputTranscriptPort>,
+    pub get_drain_options: Rc<QueueDrainOptionsResolver>,
     pub options: ChatExecutionCoordinatorOptions,
 }
 
@@ -228,14 +235,90 @@ enum DirectOutcome {
     Failed,
 }
 
+type RunningRead = dyn Fn(&str) -> bool;
+
+struct ExecutionReadState {
+    locks: Rc<KeyedLock>,
+    ownership: Rc<ExecutionOwnership>,
+    repository: Rc<dyn ChatExecutionControlRepository>,
+    stop_tasks: RefCell<IndexMap<String, Rc<TrackedTask<ChatStopOutcome>>>>,
+    is_chat_running: Rc<RunningRead>,
+    new_id: Rc<dyn Fn() -> String>,
+}
+
+#[async_trait(?Send)]
+impl ChatExecutionQueries for ExecutionReadState {
+    async fn read_chat_execution_control(
+        &self,
+        chat: &str,
+    ) -> ExecutionOperationResult<StoredChatExecutionControlState> {
+        read_execution_control(&*self.repository, &self.locks, chat).await
+    }
+
+    fn owns_execution(&self, chat_id: &str) -> bool {
+        self.ownership.has_owner(chat_id) || (self.is_chat_running)(chat_id)
+    }
+
+    fn is_chat_turn_reserved(&self, chat: &str) -> bool {
+        self.ownership.is_turn_reserved(chat)
+    }
+
+    fn get_turn_reserved_chat_ids(&self) -> Vec<String> {
+        self.ownership.turn_reserved_chat_ids()
+    }
+
+    fn is_chat_stop_in_flight(&self, chat: &str) -> bool {
+        self.stop_tasks.borrow().contains_key(chat)
+    }
+}
+
+/// Exposes the real query facet before the dispatch ports exist. No command
+/// facet, admission hooks, or queue drivers exist until `bind` consumes it.
+pub struct ChatExecutionStartup(Rc<ExecutionReadState>);
+
+impl ChatExecutionStartup {
+    pub fn new(
+        repository: Rc<dyn ChatExecutionControlRepository>,
+        is_chat_running: impl Fn(&str) -> bool + 'static,
+        new_id: impl Fn() -> String + 'static,
+    ) -> Self {
+        let new_id: Rc<dyn Fn() -> String> = Rc::new(new_id);
+        let ownership = Rc::new(ExecutionOwnership::new({
+            let new_id = new_id.clone();
+            move || new_id()
+        }));
+        Self(Rc::new(ExecutionReadState {
+            locks: Rc::new(KeyedLock::new()),
+            ownership,
+            repository,
+            stop_tasks: RefCell::default(),
+            is_chat_running: Rc::new(is_chat_running),
+            new_id,
+        }))
+    }
+
+    pub fn queries(&self) -> Rc<dyn ChatExecutionQueries> {
+        self.0.clone()
+    }
+
+    pub fn bind(
+        self,
+        deps: ChatExecutionDispatchDeps,
+        clock: Rc<dyn Clock>,
+        performance_now: impl Fn() -> f64 + 'static,
+    ) -> Rc<ChatExecutionCoordinator> {
+        ChatExecutionCoordinator::from_read_state(self.0, deps, clock, performance_now)
+    }
+}
+
 pub struct ChatExecutionCoordinator {
     self_ref: Weak<Self>,
+    query_state: Rc<ExecutionReadState>,
     locks: Rc<KeyedLock>,
     shutting_down: Cell<bool>,
     ownership: Rc<ExecutionOwnership>,
     dispatch_tasks: RefCell<IndexMap<u64, Rc<TrackedTask<()>>>>,
     next_task: Cell<u64>,
-    stop_tasks: RefCell<IndexMap<String, Rc<TrackedTask<ChatStopOutcome>>>>,
     turn_runner: Rc<dyn AgentTurnRunnerPort>,
     get_drain_options: Rc<QueueDrainOptionsResolver>,
     options: ChatExecutionCoordinatorOptions,
@@ -268,18 +351,48 @@ impl ChatExecutionCoordinator {
         new_id: impl Fn() -> String + 'static,
         performance_now: impl Fn() -> f64 + 'static,
     ) -> Rc<Self> {
-        let new_id: Rc<dyn Fn() -> String> = Rc::new(new_id);
+        let ChatExecutionCoordinatorDeps {
+            turn_runner,
+            input_transcript,
+            get_drain_options,
+            controls,
+            options,
+        } = deps;
+        let startup = ChatExecutionStartup::new(
+            controls,
+            {
+                let turn_runner = turn_runner.clone();
+                move |chat| turn_runner.is_chat_running(chat)
+            },
+            new_id,
+        );
+        startup.bind(
+            ChatExecutionDispatchDeps {
+                turn_runner,
+                input_transcript,
+                get_drain_options,
+                options,
+            },
+            clock,
+            performance_now,
+        )
+    }
+
+    fn from_read_state(
+        query_state: Rc<ExecutionReadState>,
+        deps: ChatExecutionDispatchDeps,
+        clock: Rc<dyn Clock>,
+        performance_now: impl Fn() -> f64 + 'static,
+    ) -> Rc<Self> {
+        let new_id = query_state.new_id.clone();
         Rc::new_cyclic(|self_ref| {
             let ports = Rc::new(CoordinatorPorts(self_ref.clone()));
-            let locks = Rc::new(KeyedLock::new());
-            let ownership = Rc::new(ExecutionOwnership::new({
-                let new_id = new_id.clone();
-                move || new_id()
-            }));
+            let locks = query_state.locks.clone();
+            let ownership = query_state.ownership.clone();
             let input_transcript =
                 AcceptedInputTranscript::new(deps.input_transcript, clock.clone());
             let controls = Rc::new(ChatExecutionControlOperations::new(
-                deps.controls,
+                query_state.repository.clone(),
                 locks.clone(),
                 ports.clone(),
                 deps.options.project_admission.clone(),
@@ -346,12 +459,12 @@ impl ChatExecutionCoordinator {
             );
             Self {
                 self_ref: self_ref.clone(),
+                query_state,
                 locks,
                 shutting_down: Cell::new(false),
                 ownership,
                 dispatch_tasks: RefCell::default(),
                 next_task: Cell::new(0),
-                stop_tasks: RefCell::default(),
                 turn_runner: deps.turn_runner,
                 get_drain_options: deps.get_drain_options,
                 options: deps.options,
@@ -905,7 +1018,7 @@ impl ChatExecutionCoordinator {
     }
 
     pub fn owns_execution(&self, chat_id: &str) -> bool {
-        self.ownership.has_owner(chat_id) || self.turn_runner.is_chat_running(chat_id)
+        self.query_state.owns_execution(chat_id)
     }
 
     pub async fn run_reserved_turn(
@@ -1274,12 +1387,13 @@ impl ChatExecutionCoordinator {
         chat_id: &str,
         intent: ChatStopIntent,
     ) -> Rc<TrackedTask<ChatStopOutcome>> {
-        if let Some(task) = self.stop_tasks.borrow().get(chat_id) {
+        if let Some(task) = self.query_state.stop_tasks.borrow().get(chat_id) {
             return task.clone();
         }
         let interrupted = self.ownership.attempt(chat_id).map(|a| a.identity());
         let task = Rc::new(TrackedTask::new());
-        self.stop_tasks
+        self.query_state
+            .stop_tasks
             .borrow_mut()
             .insert(chat_id.into(), task.clone());
         let owner = self.owned();
@@ -1315,7 +1429,11 @@ impl ChatExecutionCoordinator {
                 intent,
                 interrupted.as_ref(),
             ));
-            owner.stop_tasks.borrow_mut().shift_remove(&chat);
+            owner
+                .query_state
+                .stop_tasks
+                .borrow_mut()
+                .shift_remove(&chat);
             let result = owner
                 .invalidate_processing(&chat)
                 .and(result)
@@ -2129,14 +2247,14 @@ impl ChatExecutionQueries for ChatExecutionCoordinator {
     }
 
     fn is_chat_turn_reserved(&self, chat: &str) -> bool {
-        self.ownership.is_turn_reserved(chat)
+        self.query_state.is_chat_turn_reserved(chat)
     }
 
     fn get_turn_reserved_chat_ids(&self) -> Vec<String> {
-        self.ownership.turn_reserved_chat_ids()
+        self.query_state.get_turn_reserved_chat_ids()
     }
 
     fn is_chat_stop_in_flight(&self, chat: &str) -> bool {
-        self.stop_tasks.borrow().contains_key(chat)
+        self.query_state.is_chat_stop_in_flight(chat)
     }
 }

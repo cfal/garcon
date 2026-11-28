@@ -1,4 +1,4 @@
-use std::{fs, path::Path, rc::Rc};
+use std::{cell::Cell, fs, path::Path, rc::Rc};
 
 use garcon_agents_common::usage::{
     transcript_usage_history::create_transcript_usage_history,
@@ -81,12 +81,90 @@ fn history(root: &Path) -> Rc<dyn AgentUsageHistory> {
     let path = root.to_str().unwrap().to_owned();
     create_transcript_usage_history(TranscriptUsageScannerOptions {
         operation: "usage-history-test".into(),
-        roots: Rc::new(move || vec![path.clone()]),
+        roots: Rc::new(move || Ok(vec![path.clone()])),
         format: TestFormat,
         clock: Some(Rc::new(ManualClock::new(
             date_parse("2026-10-27T00:00:00Z").unwrap(),
         ))),
     })
+}
+
+#[tokio::test]
+async fn failed_roots_rejects_only_that_read_and_preserves_the_cached_transcript() {
+    struct ObservedFormat(Rc<Cell<usize>>);
+    impl TranscriptUsageFormat for ObservedFormat {
+        type State = ();
+        fn line_markers(&self) -> &[&str] {
+            TestFormat.line_markers()
+        }
+        fn create_state(&self) {}
+        fn clone_state(&self, _: &()) {}
+        fn parse_line(&self, line: &str, state: &mut ()) -> ExecutorResult<Option<UsageLine>> {
+            self.0.set(self.0.get() + 1);
+            TestFormat.parse_line(line, state)
+        }
+    }
+
+    LocalSet::new().run_until(async {
+        let root = tempdir().unwrap();
+        write_rows(&root.path().join("one.jsonl"), &[
+            json!({"at":"2026-10-05T06:30:00Z","model":"claude-opus-5-5","session":"synthetic","input":42}),
+        ]);
+        let parsed = Rc::new(Cell::new(0));
+        let reads = Rc::new(Cell::new(0));
+        let history = create_transcript_usage_history(TranscriptUsageScannerOptions {
+            operation: "usage-history-test".into(),
+            format: ObservedFormat(parsed.clone()),
+            clock: Some(Rc::new(ManualClock::new(date_parse("2026-10-27T00:00:00Z").unwrap()))),
+            roots: {
+                let reads = reads.clone();
+                let root = root.path().to_str().unwrap().to_owned();
+                Rc::new(move || {
+                    reads.set(reads.get() + 1);
+                    if reads.get() == 2 {
+                        return Err(AgentIntegrationError::new(
+                            AgentIntegrationErrorCode::UNAVAILABLE,
+                            "synthetic config home unavailable",
+                            true, None,
+                        ).into());
+                    }
+                    Ok(vec![root.clone()])
+                })
+            },
+        });
+        assert_eq!(reads.get(), 0, "roots resolve lazily");
+        let first = history.read(request("UTC")).await.unwrap();
+        let (failed, recovered) = tokio::join!(history.read(request("UTC")), history.read(request("UTC")));
+        let failure = failed.unwrap_err();
+        let error = failure.downcast_ref::<AgentIntegrationError>().unwrap();
+        assert_eq!(error.code, AgentIntegrationErrorCode::UNAVAILABLE);
+        let recovered = recovered.unwrap();
+        assert_eq!(first, recovered);
+        assert_eq!(parsed.get(), 1, "root failure must preserve the existing cache");
+
+        let oracle = tokio::process::Command::new("bun")
+            .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/oracles/usage-history.ts"))
+            .arg(root.path())
+            .arg("roots-error")
+            .output().await.unwrap();
+        assert!(oracle.status.success(), "{}", String::from_utf8_lossy(&oracle.stderr));
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Comparison {
+            first: garcon_contract::usage::AgentUsageReport,
+            error: Value,
+            recovered: garcon_contract::usage::AgentUsageReport,
+            roots_reads: usize,
+            parsed_lines: usize,
+        }
+        assert_eq!(serde_json::to_vec(&Comparison {
+            first,
+            error: json!({"code":error.code.as_str(),"message":error.message,"retryable":error.retryable}),
+            recovered,
+            roots_reads: reads.get(),
+            parsed_lines: parsed.get(),
+        }).unwrap(), oracle.stdout);
+    }).await
 }
 
 fn write_rows(path: &Path, rows: &[Value]) {

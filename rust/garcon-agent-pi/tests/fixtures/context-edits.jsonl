@@ -1,0 +1,7 @@
+{"type":"session","version":3,"id":"synthetic-session","cwd":"/workspace"}
+{"type":"message","id":"user","parentId":null,"message":{"role":"user","content":"original","timestamp":1767225601000}}
+{"type":"message","id":"answer","parentId":"user","message":{"role":"assistant","content":[{"type":"text","text":"omitted"}],"timestamp":1767225602000}}
+{"type":"context_edit","id":"replacement","parentId":"answer","targetId":"user","replacement":{"content":"edited"}}
+{"type":"context_edit","id":"omission","parentId":"replacement","targetId":"answer","replacement":null}
+{"type":"context_edit","id":"sibling","parentId":"answer","targetId":"user","replacement":{"content":"wrong branch"}}
+{"type":"usage","id":"usage","parentId":"omission","kind":"cache_warm"}

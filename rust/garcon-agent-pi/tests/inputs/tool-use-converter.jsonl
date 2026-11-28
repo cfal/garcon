@@ -1,0 +1,9 @@
+{"fn":"convertPiToolUse","args":["timestamp","call","Tool\u00a0_SEArCh",{"query":"\u212a\u0131\u4e2d\ud83d\ude00e\u0301","limit":"0x10"}]}
+{"fn":"convertPiToolUse","args":["timestamp","call","read",{"path":null,"offset":"0o10","limit":"0b11"}]}
+{"fn":"convertPiToolUse","args":["timestamp","call","read",{"path":false,"offset":"+0x10","limit":"1e400"}]}
+{"fn":"convertPiToolUse","args":["timestamp","call","edit",{"path":"file","edits":"[{\"oldText\":\"old\",\"newText\":\"new\"}]"}]}
+{"fn":"convertPiToolUse","args":["timestamp","call","edit",{"oldText":"direct","edits":[{"oldText":"ignored","newText":"ignored"}]}]}
+{"fn":"convertPiToolUse","args":["timestamp","call","mcp__a___b",{"2":2,"1":1,"__proto__":"own","constructor":"own"}]}
+{"fn":"convertPiToolUse","args":["timestamp","call","mcp__\ud83d\ude00__\u212a",[]]}
+{"fn":"convertPiToolUse","args":["timestamp","call","hasOwnProperty","{\"constructor\":true,\"toString\":false}"]}
+{"fn":"convertPiToolUse","args":["timestamp","call","",{"$":"undefined"}]}

@@ -302,6 +302,16 @@ the user corrects how a port behaves, the correction is added under
   naming each one. Plain `replay` fails on any wildcard, so a nondeterministic
   recording cannot pass unnoticed. Prefer removing the randomness from the
   input.
+- A provider integration is registered by its own session: the roster line
+  in `garcon-executor/src/default_agent_integrations.rs` in the original's
+  order and the dependency line, nothing else. The session then runs worker
+  parity itself: the SACS modules for its driver and its scripted-model
+  suites, with the Rust worker under the unmodified original controller in
+  both dial directions, and the same suites with the original worker on the
+  same machine as the baseline. The report gives Rust against original per
+  suite file and the cause of every differing case. The original
+  controller's Local lane starts no worker and is not counted. No
+  credential-backed live suite is run.
 - Only a test that a lane runs is named `*.test.ts` or `*.spec.ts`. A fixture
   suite, a recorder input, or an oracle script under `rust/` gets another
   suffix: `scripts/__tests__/test-inventory.test.js` fails the server lane

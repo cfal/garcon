@@ -95,9 +95,7 @@ fn defines_the_ownership_union_in_exactly_one_place() {
         .filter(|(start, prefix)| {
             coordinator[start + prefix.len()..]
                 .split_once(')')
-                .is_some_and(|(_, suffix)| {
-                    suffix.starts_with("||self.turn_runner.is_chat_running(")
-                })
+                .is_some_and(|(_, suffix)| suffix.starts_with("||(self.is_chat_running)("))
         })
         .count();
     assert_eq!(unions, 1);
