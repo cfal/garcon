@@ -89,6 +89,10 @@ struct StoreState {
 }
 
 impl TranscriptLedgerStore {
+    pub(crate) fn new_view_id(&self) -> LedgerResult<TranscriptViewId> {
+        (self.create_view_id)()
+    }
+
     pub fn new(root_directory: &str, options: TranscriptLedgerStoreOptions) -> LedgerResult<Self> {
         let root_directory = crate::directories::ensure_ledger_root_directory(root_directory)?;
         let cache_size = options
