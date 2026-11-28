@@ -43,4 +43,6 @@ const cutoff = store.resolveCutoff(refs, 1);
 const path = join(workspaceDir, 'carryover-transcripts', 'segments', id, 'segment.json');
 const index = await store.readIndex(id);
 assert.equal(await readFile(path, 'utf8'), `${JSON.stringify(index, null, 2)}\n`);
-process.stdout.write(JSON.stringify({ refs, messages, full, page, cutoff, index }));
+const quarantine = { artifactId: 'synthetic-quarantine', errorCode: 'INVALID_CARRYOVER_ENTRY' };
+const quarantinedRevision = store.revision(refs, quarantine);
+process.stdout.write(JSON.stringify({ refs, messages, full, page, cutoff, index, quarantine, quarantinedRevision }));

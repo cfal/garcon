@@ -1,5 +1,6 @@
 use std::{fs, path::Path, process::Command, rc::Rc, time::Duration};
 
+use garcon_base::{errors::error_metadata, keyed_lock::LockAborted};
 use garcon_chats::{
     carryover::{
         garbage_collector::{CarryOverGarbageCollector, CarryOverGarbageCollectorDeps},
@@ -20,6 +21,7 @@ use garcon_contract::{
     transcript_notice_details::TranscriptNoticeDetail,
 };
 use garcon_js::json;
+use garcon_ledger::adoption::{CarryoverQuarantine, TranscriptFrozenHistory};
 use indexmap::IndexSet;
 use serde_json::{Value, json};
 use tempfile::tempdir;
@@ -29,6 +31,55 @@ use tokio_util::sync::CancellationToken;
 const FIRST: &str = "11111111-1111-4111-8111-111111111111";
 const SECOND: &str = "22222222-2222-4222-8222-222222222222";
 const TIME: &str = "2026-01-01T00:00:00.000Z";
+
+#[tokio::test]
+async fn adoption_reads_the_captured_archive_and_preserves_errors_across_erasure() {
+    let dir = tempdir().unwrap();
+    let original = bun("write", dir.path());
+    let store = CarryOverTranscriptStore::new(dir.path(), Default::default());
+    let adapter: &dyn TranscriptFrozenHistory<Vec<CarryOverSegmentRef>> = &store;
+    let refs = parse_carry_over_segment_refs(&original["refs"]).unwrap();
+    let revision = adapter.revision(&refs, None);
+    assert_eq!(revision, original["page"]["revision"]);
+    let quarantine = CarryoverQuarantine {
+        artifact_id: original["quarantine"]["artifactId"]
+            .as_str()
+            .unwrap()
+            .into(),
+        error_code: original["quarantine"]["errorCode"].as_str().unwrap().into(),
+    };
+    assert_eq!(
+        adapter.revision(&refs, Some(&quarantine)),
+        original["quarantinedRevision"]
+    );
+    let captured_cutoff = parse_carry_over_segment_refs(&original["cutoff"]).unwrap();
+    let loaded = adapter
+        .load_all(&captured_cutoff, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(loaded, [user("Synthetic question")]);
+
+    let signal = CancellationToken::new();
+    signal.cancel();
+    let error = adapter
+        .load_all(&captured_cutoff, signal)
+        .await
+        .unwrap_err();
+    assert!(error.is::<LockAborted>());
+
+    let missing = vec![reference("33333333-3333-4333-8333-333333333333", 1)];
+    let error = adapter
+        .load_all(&missing, CancellationToken::new())
+        .await
+        .unwrap_err();
+    let metadata = error_metadata(error.as_ref());
+    assert_eq!(
+        metadata.code,
+        Some(ErrorCode::CARRYOVER_HISTORY_UNAVAILABLE.as_str())
+    );
+    assert_eq!(metadata.name, "CarryOverHistoryUnavailableError");
+    assert_eq!(error.to_string(), "Archived chat history is unavailable.");
+}
 
 fn bun(mode: &str, workspace: &Path) -> Value {
     let output = Command::new("bun")

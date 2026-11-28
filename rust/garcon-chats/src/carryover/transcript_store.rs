@@ -30,6 +30,7 @@ use super::{
     segments::{CarryOverSegmentBindingError, archived_logical_count, carry_over_revision},
 };
 
+mod adoption;
 mod reads;
 mod writes;
 
