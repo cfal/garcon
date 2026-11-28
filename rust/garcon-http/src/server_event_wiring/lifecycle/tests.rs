@@ -219,6 +219,7 @@ impl TurnReservationSource for Processing {
 
 struct Fixture {
     events: Rc<RefCell<Vec<ServerWsMessage>>>,
+    control_events: Rc<RefCell<Vec<String>>>,
     ledger: TranscriptLedgerService,
     store: Rc<TranscriptLedgerStore>,
     wiring: Rc<ServerEventWiring>,
@@ -254,6 +255,7 @@ impl Fixture {
         );
         let processing = Rc::new(Processing::default());
         let events = Rc::new(RefCell::new(Vec::new()));
+        let control_events = Rc::new(RefCell::new(Vec::new()));
         let metadata = MetadataIndex::open(
             registry.clone(),
             Rc::new(PreviewSource(store.clone())),
@@ -280,10 +282,20 @@ impl Fixture {
                     Ok(())
                 })
             },
+            publish_execution_control: {
+                let control_events = control_events.clone();
+                Rc::new(move |event| {
+                    control_events
+                        .borrow_mut()
+                        .push(serde_json::to_string(&event)?);
+                    Ok(())
+                })
+            },
         });
         let unsubscribe = wiring.subscribe(&ledger);
         Self {
             events,
+            control_events,
             ledger,
             store,
             wiring,
@@ -529,4 +541,50 @@ async fn committed_message_fanout_precedes_terminal_processing_and_finished_even
             ServerWsMessage::AgentRunFinished(finished),
         ] if phase.phase.is_none() && finished.turn_id.as_deref() == Some(TURN) && finished.client_request_id.as_deref() == Some(REQUEST)));
     }).await;
+}
+
+#[tokio::test]
+async fn control_update_with_a_queued_entry_matches_bun_bytes_and_the_shared_parser() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let workspace = tempfile::tempdir().unwrap();
+            let fixture = Fixture::open(workspace.path()).await;
+            let coordinator = coordinator(fixture.clock.clone());
+            let agents = Rc::new(AgentEventBus::new());
+            fixture.wiring.wire_execution(
+                &coordinator,
+                &agents,
+                fixture.clock.clone(),
+                Rc::new(|_| {}),
+            );
+            coordinator
+                .create_chat_queue_entry(CHAT, "Synthetic queued input".into(), None)
+                .await
+                .unwrap();
+            fixture.wiring.wait_for_idle().await.unwrap();
+            let wire = fixture.control_events.take();
+            assert_eq!(wire.len(), 1);
+            let bun = Command::new("bun")
+                .arg(
+                    Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("tests/oracles/chat-execution-control-event.ts"),
+                )
+                .output()
+                .unwrap();
+            assert!(
+                bun.status.success(),
+                "{}",
+                String::from_utf8_lossy(&bun.stderr)
+            );
+            assert_eq!(wire[0], String::from_utf8(bun.stdout).unwrap().trim_end());
+            let parsed = garcon_contract::ws_events::parse_server_ws_message(
+                &garcon_js::json::parse(&wire[0]).unwrap(),
+            )
+            .unwrap();
+            assert!(
+                matches!(parsed, Some(ServerWsMessage::ChatExecutionControlUpdated(message))
+            if message.control.queue.entries.len() == 1)
+            );
+        })
+        .await;
 }
