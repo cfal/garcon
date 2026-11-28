@@ -47,6 +47,7 @@ pub mod git_error;
 pub mod git_execution;
 pub mod git_refs;
 pub mod git_request_validation;
+pub mod git_result_validation;
 pub mod handoff_sizing;
 pub mod hidden_bash_command_patterns;
 pub mod http_error;
