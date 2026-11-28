@@ -1,3 +1,4 @@
+pub mod client_events;
 pub mod thread_settings;
 pub mod utility;
 
