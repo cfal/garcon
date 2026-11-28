@@ -5,3 +5,4 @@ pub mod code_mode_command_projection;
 pub mod runtime_types;
 pub mod service_tier;
 pub mod slash_command_discovery;
+pub mod user_input;
