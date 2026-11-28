@@ -4,6 +4,7 @@ pub mod catalog;
 pub mod chats;
 pub mod cli_update;
 pub mod direct;
+pub mod environment;
 pub mod execution;
 pub mod forking;
 pub mod jsonl;

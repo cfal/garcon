@@ -1,0 +1,28 @@
+{"id":"readEnvironment#0","fn":"readEnvironment","args":[{"NAME":"  value  "},"NAME"],"result":"value","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:1"}
+{"id":"readEnvironment#1","fn":"readEnvironment","args":[{"NAME":"value"},"NAME"],"result":"value","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:2"}
+{"id":"readEnvironment#2","fn":"readEnvironment","args":[{"NAME":""},"NAME"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:3"}
+{"id":"readEnvironment#3","fn":"readEnvironment","args":[{"NAME":"   "},"NAME"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:4"}
+{"id":"readEnvironment#4","fn":"readEnvironment","args":[{"NAME":"  x﻿"},"NAME"],"result":"x","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:5"}
+{"id":"readEnvironment#5","fn":"readEnvironment","args":[{"NAME":"line1\nline2\ttab"},"NAME"],"result":"line1\nline2\ttab","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:6"}
+{"id":"readEnvironment#6","fn":"readEnvironment","args":[{},"NAME"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:7"}
+{"id":"readEnvironment#7","fn":"readEnvironment","args":[{"OTHER":"x"},"NAME"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:8"}
+{"id":"readEnvironment#8","fn":"readEnvironment","args":[null,"NAME"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:9"}
+{"id":"readEnvironment#9","fn":"readEnvironment","args":[{"$":"undefined"},"NAME"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:10"}
+{"id":"readEnvironment#10","fn":"readEnvironment","args":[{"NAME":"x"},"OTHER"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:11"}
+{"id":"readEnvironment#11","fn":"readEnvironment","args":[{"NAME":"x"},"__proto__"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:12"}
+{"id":"readEnvironment#12","fn":"readEnvironment","args":[{"NAME":null},"NAME"],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:13"}
+{"id":"readEnvironment#13","fn":"readEnvironment","args":[{"NAME":"x","OTHER":" y "},"OTHER"],"result":"y","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:14"}
+{"id":"readEnvironment#14","fn":"readEnvironment","args":[{"NAME":"K value K"},"NAME"],"result":"K value K","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:15"}
+{"id":"readEnvironment#15","fn":"readEnvironment","args":[{"NAME":" x "},"NAME"],"result":"x","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:16"}
+{"id":"readEnvironment#16","fn":"readEnvironment","args":[{"NAME":"﻿x﻿"},"NAME"],"result":"x","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:17"}
+{"id":"readEnvironment#17","fn":"readEnvironment","args":[{"NAME":" x "},"NAME"],"result":"x","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:18"}
+{"id":"readEnvironment#18","fn":"readEnvironment","args":[{"NAME":"　x "},"NAME"],"result":"x","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:19"}
+{"id":"readEnvironment#19","fn":"readEnvironment","args":[{"NAME":"x​"},"NAME"],"result":"x​","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:20"}
+{"id":"readEnvironment#20","fn":"readEnvironment","args":[{"NAME":"日本😀́ı"},"NAME"],"result":"日本😀́ı","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:21"}
+{"id":"readEnvironment#21","fn":"readEnvironment","args":[{"K":"kelvin","K":"sign"},"K"],"result":"kelvin","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:22"}
+{"id":"readEnvironment#22","fn":"readEnvironment","args":[{"K":"kelvin","K":"sign"},"K"],"result":"sign","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:23"}
+{"id":"readEnvironment#23","fn":"readEnvironment","args":[{"__proto__":"x"},"__proto__"],"result":"x","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:24"}
+{"id":"readEnvironment#24","fn":"readEnvironment","args":[{"constructor":"x"},"constructor"],"result":"x","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:25"}
+{"id":"readEnvironment#25","fn":"readEnvironment","args":[{"toString":"x"},"toString"],"result":"x","origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:26"}
+{"id":"readEnvironment#26","fn":"readEnvironment","args":[{"NAME":"x"},"NAME "],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:27"}
+{"id":"readEnvironment#27","fn":"readEnvironment","args":[{"NAME":"x"},""],"result":null,"origin":"rust/garcon-agents-common/tests/inputs/read-environment.jsonl:28"}

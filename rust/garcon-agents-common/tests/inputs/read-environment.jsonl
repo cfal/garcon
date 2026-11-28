@@ -1,0 +1,28 @@
+{"fn":"readEnvironment","args":[{"NAME":"  value  "},"NAME"]}
+{"fn":"readEnvironment","args":[{"NAME":"value"},"NAME"]}
+{"fn":"readEnvironment","args":[{"NAME":""},"NAME"]}
+{"fn":"readEnvironment","args":[{"NAME":"   "},"NAME"]}
+{"fn":"readEnvironment","args":[{"NAME":"  x﻿"},"NAME"]}
+{"fn":"readEnvironment","args":[{"NAME":"line1\nline2\ttab"},"NAME"]}
+{"fn":"readEnvironment","args":[{},"NAME"]}
+{"fn":"readEnvironment","args":[{"OTHER":"x"},"NAME"]}
+{"fn":"readEnvironment","args":[null,"NAME"]}
+{"fn":"readEnvironment","args":[{"$":"undefined"},"NAME"]}
+{"fn":"readEnvironment","args":[{"NAME":"x"},"OTHER"]}
+{"fn":"readEnvironment","args":[{"NAME":"x"},"__proto__"]}
+{"fn":"readEnvironment","args":[{"NAME":null},"NAME"]}
+{"fn":"readEnvironment","args":[{"NAME":"x","OTHER":" y "},"OTHER"]}
+{"fn":"readEnvironment","args":[{"NAME":"K value K"},"NAME"]}
+{"fn":"readEnvironment","args":[{"NAME":" x "},"NAME"]}
+{"fn":"readEnvironment","args":[{"NAME":"﻿x﻿"},"NAME"]}
+{"fn":"readEnvironment","args":[{"NAME":" x "},"NAME"]}
+{"fn":"readEnvironment","args":[{"NAME":"　x "},"NAME"]}
+{"fn":"readEnvironment","args":[{"NAME":"\u0085x​"},"NAME"]}
+{"fn":"readEnvironment","args":[{"NAME":"日本😀́ı"},"NAME"]}
+{"fn":"readEnvironment","args":[{"K":"kelvin","K":"sign"},"K"]}
+{"fn":"readEnvironment","args":[{"K":"kelvin","K":"sign"},"K"]}
+{"fn":"readEnvironment","args":[{"__proto__":"x"},"__proto__"]}
+{"fn":"readEnvironment","args":[{"constructor":"x"},"constructor"]}
+{"fn":"readEnvironment","args":[{"toString":"x"},"toString"]}
+{"fn":"readEnvironment","args":[{"NAME":"x"},"NAME "]}
+{"fn":"readEnvironment","args":[{"NAME":"x"},""]}
