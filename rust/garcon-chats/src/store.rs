@@ -155,6 +155,17 @@ pub enum RegistryError {
     Domain(#[from] garcon_base::domain_error::DomainError),
 }
 
+impl RegistryError {
+    pub(crate) fn into_original_error(self) -> Box<dyn Error> {
+        match self {
+            Self::Reference(error) | Self::Listener(error) => error,
+            Self::Write(error) => error.cause,
+            Self::Domain(error) => Box::new(error),
+            error => Box::new(error),
+        }
+    }
+}
+
 impl DiagnosticError for RegistryError {
     fn diagnostic_metadata(&self) -> ErrorMetadata<'_> {
         let name = match self {
