@@ -12,7 +12,8 @@ workspace = true
 [dependencies]
 async-trait.workspace = true
 garcon-js.workspace = true
-icu_normalizer = { version = "2.4", default-features = false, features = ["compiled_data"] }
+# Pins Unicode 17 normalization, matching Bun 1.4.3 and the collation data generation.
+icu_normalizer = { version = "=2.3.0", default-features = false, features = ["compiled_data"] }
 indexmap.workspace = true
 regex = "1"
 regress = "0.12"
