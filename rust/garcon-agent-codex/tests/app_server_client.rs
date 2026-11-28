@@ -1,5 +1,8 @@
 #![cfg(unix)]
 
+#[path = "app_server_client/resume.rs"]
+mod resume;
+
 use std::{
     cell::{Cell, RefCell},
     fs,

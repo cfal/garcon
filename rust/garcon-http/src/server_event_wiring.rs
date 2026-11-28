@@ -5,7 +5,7 @@ mod task_queue;
 
 use std::rc::Rc;
 
-use futures::future::{FutureExt, LocalBoxFuture};
+use futures::future::LocalBoxFuture;
 use garcon_base::event_loop_stalls::ActivityTracker;
 use garcon_chats::{
     chat_activity_status::project_chat_activity_status,
@@ -21,13 +21,14 @@ use garcon_contract::{
     chat_transient_feed::ChatTransientFeedMutation,
     chat_types::{ChatMessage, ChatProcessingPhase},
     ws_events::{
-        ChatActivityUpdatedMessage, ChatExecutionControlUpdatedMessage, ChatMessagesMessage,
-        ChatPreamblesInvalidatedMessage, ChatTranscriptReplacedMessage,
-        ChatTransientFeedMutationMessage, ServerWsMessage,
+        ChatActivityUpdatedMessage, ChatExecutionControlUpdatedMessage, ChatListInvalidationReason,
+        ChatListRefreshRequestedMessage, ChatMessagesMessage, ChatPreamblesInvalidatedMessage,
+        ChatTranscriptReplacedMessage, ChatTransientFeedMutationMessage, ServerWsMessage,
     },
 };
 use garcon_execution::{
-    command_ledger::CommandLedger, control_projection::ClientChatExecutionControlState,
+    agent_registry::AgentRegistry, control_projection::ClientChatExecutionControlState,
+    listener_dispatch::ListenerWork,
 };
 use garcon_interface::resources::ExecutorResult;
 use garcon_ledger::{
@@ -35,7 +36,10 @@ use garcon_ledger::{
         LedgerNoticeDetail, LedgerRow, LedgerRowData, RunOutcome, is_conversational_ledger_row,
     },
     presentation::{ledger_row_to_message, ledger_rows_to_transcript_messages},
-    service::{TranscriptCommitEvent, TranscriptCommitWork, TranscriptLedgerService},
+    service::{
+        PermissionActionability as LedgerPermissionActionability, RetiredPermissionControl,
+        TranscriptCommitEvent, TranscriptLedgerService,
+    },
 };
 use serde_json::Value;
 
@@ -53,7 +57,6 @@ pub struct ServerEventWiringDeps {
     pub metadata: Rc<MetadataIndex>,
     pub processing: Rc<ChatProcessingActivity>,
     pub feeds: Rc<ChatTransientFeedStore>,
-    pub command_ledger: Rc<CommandLedger>,
     pub activities: Rc<ActivityTracker>,
     pub replace_metadata: Rc<ReplaceChatMetadata>,
     pub resend_candidates: Rc<ResendCandidates>,
@@ -77,14 +80,46 @@ impl ServerEventWiring {
         })
     }
 
-    pub fn subscribe(self: &Rc<Self>, ledger: &TranscriptLedgerService) -> Box<dyn Fn()> {
+    pub fn wire_transcript(
+        self: &Rc<Self>,
+        agents: &AgentRegistry,
+        ledger: &TranscriptLedgerService,
+    ) -> Box<dyn Fn()> {
         let events = Rc::downgrade(self);
-        ledger.subscribe(Rc::new(move |event| {
-            let Some(events) = events.upgrade() else {
-                return TranscriptCommitWork::Complete(Ok(()));
-            };
-            events.on_commit(event)
-        }))
+        agents.on_transcript_committed(Rc::new(move |event| {
+            ListenerWork::Synchronous(
+                events
+                    .upgrade()
+                    .map_or(Ok(()), |events| events.on_commit(event)),
+            )
+        }));
+        let events = Rc::downgrade(self);
+        let off_retired = ledger.subscribe_permission_retired(Rc::new(move |control| {
+            events.upgrade().map_or(Ok(()), |events| {
+                events.retire_permission(&permission_control(control))
+            })
+        }));
+        let events = Rc::downgrade(self);
+        let off_actionability =
+            ledger.subscribe_permission_actionability_changed(Rc::new(move |change| {
+                events.upgrade().map_or(Ok(()), |events| {
+                    events.permission_actionability_changed(
+                        &permission_control(&change.control),
+                        match change.actionability {
+                            LedgerPermissionActionability::Claimed => {
+                                PermissionActionability::Claimed
+                            }
+                            LedgerPermissionActionability::Actionable => {
+                                PermissionActionability::Actionable
+                            }
+                        },
+                    )
+                })
+            }));
+        Box::new(move || {
+            off_actionability();
+            off_retired();
+        })
     }
 
     pub fn schedule_chat_event(
@@ -142,7 +177,17 @@ impl ServerEventWiring {
         self.queue.wait_for_idle().await
     }
 
-    fn on_commit(self: &Rc<Self>, event: Rc<TranscriptCommitEvent>) -> TranscriptCommitWork {
+    pub async fn repair_chat_metadata(&self) -> ExecutorResult<()> {
+        self.deps.metadata.repair().await;
+        (self.deps.publish)(ServerWsMessage::ChatListRefreshRequested(
+            ChatListRefreshRequestedMessage::new(
+                ChatListInvalidationReason::MetadataRepaired,
+                None,
+            ),
+        ))
+    }
+
+    fn on_commit(self: &Rc<Self>, event: &Rc<TranscriptCommitEvent>) -> ExecutorResult<()> {
         let chat_id = match event.as_ref() {
             TranscriptCommitEvent::Rows { chat_id, .. }
             | TranscriptCommitEvent::Session { chat_id, .. }
@@ -150,10 +195,7 @@ impl ServerEventWiring {
             | TranscriptCommitEvent::RunEnded { chat_id, .. }
             | TranscriptCommitEvent::ViewReplaced { chat_id, .. } => chat_id,
         };
-        let chat_id = match parse_chat_id(&Value::String(chat_id.clone())) {
-            Ok(chat_id) => chat_id,
-            Err(error) => return TranscriptCommitWork::Complete(Err(error.into())),
-        };
+        let chat_id = parse_chat_id(&Value::String(chat_id.clone()))?;
         if let TranscriptCommitEvent::Rows { rows, .. } = event.as_ref()
             && rows.iter().any(|row| {
                 matches!(
@@ -182,7 +224,7 @@ impl ServerEventWiring {
         }
         if self.deps.registry.has_chat(&chat_id) {
             let wiring = Rc::clone(self);
-            let commit = Rc::clone(&event);
+            let commit = Rc::clone(event);
             let chat = chat_id.clone();
             drop(
                 self.queue
@@ -279,32 +321,10 @@ impl ServerEventWiring {
             }
             _ => {}
         }
-        match self.deps.feeds.apply_commit(&event) {
-            Ok(Some(mutation)) => self.schedule_transient_mutation(chat_id, mutation),
-            Ok(None) => {}
-            Err(error) => return TranscriptCommitWork::Complete(Err(error.into())),
+        if let Some(mutation) = self.deps.feeds.apply_commit(event)? {
+            self.schedule_transient_mutation(chat_id, mutation);
         }
-        if matches!(event.as_ref(), TranscriptCommitEvent::RunEnded { .. }) {
-            let commands = self.deps.command_ledger.clone();
-            return TranscriptCommitWork::Pending(
-                async move {
-                    if let TranscriptCommitEvent::RunEnded {
-                        chat_id,
-                        run_id,
-                        final_response,
-                        ..
-                    } = event.as_ref()
-                    {
-                        commands
-                            .set_turn_result(chat_id, run_id, final_response.as_ref())
-                            .await?;
-                    }
-                    Ok(())
-                }
-                .boxed_local(),
-            );
-        }
-        TranscriptCommitWork::Complete(Ok(()))
+        Ok(())
     }
 
     async fn fanout(&self, chat_id: &ChatId, event: &TranscriptCommitEvent) -> ExecutorResult<()> {
@@ -425,5 +445,14 @@ impl ServerEventWiring {
         (self.deps.publish)(ServerWsMessage::ChatActivityUpdated(
             ChatActivityUpdatedMessage::new(chat_id.to_string(), status),
         ))
+    }
+}
+
+fn permission_control(control: &RetiredPermissionControl) -> PermissionControl<'_> {
+    PermissionControl {
+        chat_id: &control.chat_id,
+        view_id: control.view_id.as_str(),
+        run_id: &control.run_id,
+        occurrence_id: &control.permission_occurrence_id,
     }
 }

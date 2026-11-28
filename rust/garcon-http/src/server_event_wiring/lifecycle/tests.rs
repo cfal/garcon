@@ -1,4 +1,4 @@
-use std::{cell::Cell, path::Path, pin::pin, process::Command, time::Duration};
+use std::{cell::Cell, path::Path, process::Command, time::Duration};
 
 use async_trait::async_trait;
 use garcon_base::{KeyedLock, unhandled_rejection_policy::install_unhandled_rejection_policy};
@@ -12,35 +12,44 @@ use garcon_chats::{
 use garcon_contract::{
     chat_types::UserMessage,
     cli_presentation::{CliBodyDisclosure, CliPresentation, CliRowFormat},
+    executors::AgentExecutionTarget,
     ws_requests::AgentCommandImage,
 };
 use garcon_execution::{
     accepted_input_transcript::{
         AcceptedInputTranscriptPort, AcceptedInputTranscriptResult, IdentifiedUserInput,
     },
+    agent_registry::AgentRegistryOptions,
     chat_execution_control_repository::InMemoryChatExecutionControlRepository,
     chat_execution_coordinator::{
         ChatExecutionCoordinatorDeps, ChatExecutionCoordinatorHost, ChatExecutionCoordinatorOptions,
     },
-    command_ledger::{CommandLedger, CommandLedgerStatus, LedgerAcceptInput},
-    event_bus::CommittedRunOutcome,
+    command_ledger::{CommandLedger, CommandLedgerStatus, CommandTurnResult, LedgerAcceptInput},
+    directory::{AgentDirectory, ExecutionIntegrationDirectory},
+    runtime_router::{
+        AgentRuntimeRouterOptions, RoutingChat, RuntimeRouterChats, RuntimeTranscriptLedger,
+    },
     session_types::{AgentSteerOptions, RunAgentTurnOptions},
     types::{
         AgentTurnRunnerPort, PrepareSteerDelivery, ProjectAdmissionPort,
         QueuedAttachmentAdmissionPort, UserInputAdmissionOptions,
     },
 };
-use garcon_interface::services::{AgentSteerResult, AgentSteerTarget};
+use garcon_interface::{
+    integration::AgentIntegration,
+    producer::{AgentFinalResponse, AgentProducerEvent, AgentRunOutcome},
+    services::{AgentSteerResult, AgentSteerTarget},
+};
 use garcon_js::clock::ManualClock;
 use garcon_ledger::{
     service::{
-        AppendChatRowInput, TranscriptCommitWork, TranscriptLedgerService,
+        AppendChatRowInput, TranscriptCommitEvent, TranscriptCommitWork, TranscriptLedgerService,
         TranscriptLedgerServiceOptions,
     },
     store::{InitializeViewInput, TranscriptLedgerStore},
 };
 use serde_json::json;
-use tokio::sync::oneshot;
+use tokio::sync::{Notify, oneshot};
 
 use super::{super::ServerEventWiringDeps, *};
 
@@ -49,6 +58,48 @@ const TURN: &str = "turn-1";
 const REQUEST: &str = "request-1";
 
 struct IdleExecution;
+
+impl ExecutionIntegrationDirectory for IdleExecution {
+    fn require_integration(
+        &self,
+        _: &AgentExecutionTarget,
+    ) -> ExecutorResult<Rc<AgentIntegration>> {
+        panic!("these lifecycle tests do not require integrations");
+    }
+    fn known_integration(&self, _: &AgentExecutionTarget) -> Option<Rc<AgentIntegration>> {
+        None
+    }
+    fn integrations_for(&self, _: &str) -> ExecutorResult<Vec<Rc<AgentIntegration>>> {
+        Ok(vec![])
+    }
+    fn is_ready(&self, _: &str) -> bool {
+        true
+    }
+}
+
+impl RuntimeRouterChats for IdleExecution {
+    fn get_chat(&self, _: &str) -> Option<RoutingChat> {
+        None
+    }
+}
+
+fn agents(ledger: Rc<TranscriptLedgerService>) -> Rc<AgentRegistry> {
+    let logger = Rc::new(create_logger("test"));
+    let idle = Rc::new(IdleExecution);
+    let directory = Rc::new(AgentDirectory::new(idle.clone()));
+    Rc::new(AgentRegistry::new(AgentRegistryOptions {
+        runtime: AgentRuntimeRouterOptions {
+            registry: idle,
+            directory: directory.clone(),
+            ledger: Rc::new(RuntimeTranscriptLedger(ledger)),
+            unhandled_rejections: Rc::new(install_unhandled_rejection_policy(logger.clone())),
+        },
+        directory,
+        get_carry_over_revision: Rc::new(|_| String::new()),
+        ownership_transfer_pending: Rc::new(|_| false),
+        logger,
+    }))
+}
 
 #[async_trait(?Send)]
 impl AgentTurnRunnerPort for IdleExecution {
@@ -220,12 +271,15 @@ impl TurnReservationSource for Processing {
 struct Fixture {
     events: Rc<RefCell<Vec<ServerWsMessage>>>,
     control_events: Rc<RefCell<Vec<String>>>,
-    ledger: TranscriptLedgerService,
+    ledger: Rc<TranscriptLedgerService>,
     store: Rc<TranscriptLedgerStore>,
     wiring: Rc<ServerEventWiring>,
+    agents: Rc<AgentRegistry>,
+    coordinator: Rc<ChatExecutionCoordinator>,
+    commands: Rc<CommandLedger>,
     processing: Rc<Processing>,
     clock: Rc<ManualClock>,
-    _unsubscribe: Box<dyn Fn()>,
+    unsubscribe: [Box<dyn Fn()>; 2],
 }
 
 impl Fixture {
@@ -246,13 +300,13 @@ impl Fixture {
             .unwrap(),
         );
         let clock = Rc::new(ManualClock::new(1_000_000_000_000));
-        let ledger = TranscriptLedgerService::new(
+        let ledger = Rc::new(TranscriptLedgerService::new(
             store.clone(),
             TranscriptLedgerServiceOptions {
                 clock: Some(clock.clone()),
                 ..Default::default()
             },
-        );
+        ));
         let processing = Rc::new(Processing::default());
         let events = Rc::new(RefCell::new(Vec::new()));
         let control_events = Rc::new(RefCell::new(Vec::new()));
@@ -271,7 +325,6 @@ impl Fixture {
                 is_chat_executor_reconnecting: Rc::new(|_| false),
             }),
             feeds: Rc::new(ChatTransientFeedStore::new("fixture-instance".into()).unwrap()),
-            command_ledger: Rc::new(CommandLedger::new(Default::default(), clock.clone()).unwrap()),
             activities: Rc::default(),
             replace_metadata: Rc::new(|_, _| async { Ok(()) }.boxed_local()),
             resend_candidates: Rc::new(|_| Ok(vec![])),
@@ -292,16 +345,34 @@ impl Fixture {
                 })
             },
         });
-        let unsubscribe = wiring.subscribe(&ledger);
+        let agents = agents(ledger.clone());
+        let coordinator = coordinator(clock.clone());
+        let commands = Rc::new(CommandLedger::new(Default::default(), clock.clone()).unwrap());
+        wiring
+            .wire_execution(
+                &coordinator,
+                &agents,
+                commands.clone(),
+                clock.clone(),
+                Rc::new(|_| {}),
+            )
+            .unwrap();
+        let unsubscribe = [
+            wiring.wire_transcript(&agents, &ledger),
+            agents.bind_transcript_commits(&ledger, commands.clone()),
+        ];
         Self {
             events,
             control_events,
             ledger,
             store,
             wiring,
+            agents,
+            coordinator,
+            commands,
             processing,
             clock,
-            _unsubscribe: unsubscribe,
+            unsubscribe,
         }
     }
 
@@ -359,9 +430,7 @@ impl Fixture {
     }
 
     async fn accept_run(&self) {
-        self.wiring
-            .deps
-            .command_ledger
+        self.commands
             .accept(&LedgerAcceptInput {
                 command_type: "agent-run".into(),
                 chat_id: CHAT.into(),
@@ -372,6 +441,14 @@ impl Fixture {
             })
             .await
             .unwrap();
+    }
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        for unsubscribe in &self.unsubscribe {
+            unsubscribe();
+        }
     }
 }
 
@@ -398,9 +475,7 @@ async fn publishes_a_committed_row_before_stop_and_keeps_the_captured_phase() {
             release.send(()).unwrap();
             fixture.wiring.wait_for_idle().await.unwrap();
             let command = fixture
-                .wiring
-                .deps
-                .command_ledger
+                .commands
                 .get_record(&command_ledger_key("agent-run", CHAT, REQUEST))
                 .await
                 .unwrap();
@@ -478,9 +553,7 @@ async fn deduplicates_agent_and_queue_failure_by_turn_and_settles_the_command() 
                 .await
                 .unwrap();
             let command = fixture
-                .wiring
-                .deps
-                .command_ledger
+                .commands
                 .get_record(&command_ledger_key("agent-run", CHAT, REQUEST))
                 .await
                 .unwrap();
@@ -514,32 +587,61 @@ async fn committed_message_fanout_precedes_terminal_processing_and_finished_even
     tokio::task::LocalSet::new().run_until(async {
         let workspace = tempfile::tempdir().unwrap();
         let fixture = Fixture::open(workspace.path()).await;
-        let agents = Rc::new(AgentEventBus::new());
-        let coordinator = coordinator(fixture.clock.clone());
-        fixture.wiring.wire_execution(&coordinator, &agents, fixture.clock.clone(), Rc::new(|_| {}));
+        let agents = &fixture.agents;
         fixture.accept_run().await;
-        agents.track_turn(CHAT, &TurnEventMetadata {
+        agents.events().track_turn(CHAT, &TurnEventMetadata {
             turn_id: Some(TURN.into()),
             client_request_id: Some(REQUEST.into()),
             command_type: Some(TurnCommandType::AgentRun),
             ..Default::default()
         }).unwrap();
         let release = fixture.commit_row().await;
-        let mut terminal = pin!(agents.publish_run_ended(CHAT, TURN, CommittedRunOutcome::Completed(AgentRunCompletionOutcome::Finished), None));
-        assert!(futures::poll!(&mut terminal).is_pending());
+        let dispatch = Rc::new(Notify::new());
+        agents.on_transcript_committed(Rc::new({
+            let dispatch = dispatch.clone();
+            move |event| {
+                if matches!(event.as_ref(), TranscriptCommitEvent::RunEnded { .. }) {
+                    dispatch.notify_one();
+                }
+                ListenerWork::Synchronous(Ok(()))
+            }
+        }));
+        let terminal = Rc::new(Notify::new());
+        agents.events().on_finished(Rc::new({
+            let terminal = terminal.clone();
+            move |_, _, _, _| {
+                terminal.notify_one();
+                ListenerWork::Synchronous(Ok(()))
+            }
+        }));
+        let producer = fixture.ledger.open_producer(CHAT, "shell").unwrap();
+        fixture.ledger.begin_run(CHAT, Some(TURN)).unwrap();
+        producer.sink().publish(AgentProducerEvent::RunEnded {
+            run_id: TURN.into(),
+            outcome: AgentRunOutcome::Finished {
+                final_response: Some(AgentFinalResponse::Text { text: "Synthetic answer".into() }),
+            },
+            working_directory: None,
+        }).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), dispatch.notified()).await.unwrap();
         assert!(fixture.events.borrow().is_empty());
         release.send(()).unwrap();
-        terminal.await;
+        tokio::time::timeout(Duration::from_secs(5), terminal.notified()).await.unwrap();
         fixture.wiring.wait_for_idle().await.unwrap();
-        let command = fixture.wiring.deps.command_ledger.get_record(&command_ledger_key("agent-run", CHAT, REQUEST)).await.unwrap();
+        let command = fixture.commands.get_record(&command_ledger_key("agent-run", CHAT, REQUEST)).await.unwrap();
         assert_eq!(command.status, CommandLedgerStatus::Finished);
         assert!(command.public_terminal_at().is_some());
+        assert!(matches!(command.turn_result(),
+            Some(CommandTurnResult::Available { text, .. }) if text == "Synthetic answer"));
         assert!(matches!(fixture.events.borrow().as_slice(), [
             ServerWsMessage::ChatMessages(_),
+            ServerWsMessage::ChatMessages(run_ended),
+            ServerWsMessage::ChatActivityUpdated(_),
             ServerWsMessage::ChatProcessingUpdated(phase),
             ServerWsMessage::ChatActivityUpdated(_),
             ServerWsMessage::AgentRunFinished(finished),
-        ] if phase.phase.is_none() && finished.turn_id.as_deref() == Some(TURN) && finished.client_request_id.as_deref() == Some(REQUEST)));
+        ] if run_ended.turn_id.as_deref() == Some(TURN) && phase.phase.is_none()
+            && finished.turn_id.as_deref() == Some(TURN) && finished.client_request_id.as_deref() == Some(REQUEST)));
     }).await;
 }
 
@@ -549,15 +651,8 @@ async fn control_update_with_a_queued_entry_matches_bun_bytes_and_the_shared_par
         .run_until(async {
             let workspace = tempfile::tempdir().unwrap();
             let fixture = Fixture::open(workspace.path()).await;
-            let coordinator = coordinator(fixture.clock.clone());
-            let agents = Rc::new(AgentEventBus::new());
-            fixture.wiring.wire_execution(
-                &coordinator,
-                &agents,
-                fixture.clock.clone(),
-                Rc::new(|_| {}),
-            );
-            coordinator
+            fixture
+                .coordinator
                 .create_chat_queue_entry(CHAT, "Synthetic queued input".into(), None)
                 .await
                 .unwrap();

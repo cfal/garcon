@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{OnceCell, RefCell},
     collections::{HashMap, HashSet},
     rc::Rc,
 };
@@ -13,6 +13,7 @@ use garcon_chats::chat_activity_outcomes::ActivityOutcomeAttempt;
 use garcon_contract::{
     chat_stop::{ChatStopIntent, ChatStopOutcome},
     error_codes::{ErrorCode, is_error_code},
+    executors::effective_executor_id,
     ws_events::{
         AgentRunFailedMessage, AgentRunFinishedMessage, AgentRunFinishedOutcome,
         ChatOperationalNoticeDetail, ChatOperationalNoticeMessage, ChatOperationalNoticeType,
@@ -20,13 +21,14 @@ use garcon_contract::{
     },
 };
 use garcon_execution::{
+    agent_registry::AgentRegistry,
     chat_execution_coordinator::ChatExecutionCoordinator,
     command_ledger::{
-        CommandLedgerChange, CommandLedgerDetail, CommandTerminalStatus, InterruptionReason,
-        command_ledger_key,
+        CommandLedger, CommandLedgerChange, CommandLedgerDetail, CommandTerminalStatus,
+        InterruptionReason, command_ledger_key,
     },
     control_state::to_client_chat_execution_control_state,
-    event_bus::{AgentEventBus, AgentRunCompletionOutcome, TurnEventMetadata},
+    event_bus::{AgentRunCompletionOutcome, TurnEventMetadata},
     listener_dispatch::ListenerWork,
     turn_finalization_tracker::QueuedTurnFinalizationOutcome,
     turn_identity::{TurnCommandType, TurnIdentity},
@@ -44,6 +46,7 @@ const TURN_FAILURE_DEDUPE_MS: i64 = 30_000;
 
 #[derive(Default)]
 pub(super) struct LifecycleState {
+    commands: OnceCell<Rc<CommandLedger>>,
     recent_turn_failures: RefCell<HashMap<String, i64>>,
     inline_terminal_releases: RefCell<HashSet<ChatId>>,
 }
@@ -57,10 +60,15 @@ impl ServerEventWiring {
     pub fn wire_execution(
         self: &Rc<Self>,
         coordinator: &Rc<ChatExecutionCoordinator>,
-        agents: &Rc<AgentEventBus>,
+        agents: &Rc<AgentRegistry>,
+        commands: Rc<CommandLedger>,
         clock: Rc<dyn Clock>,
         mark_search_catalog_dirty: Rc<dyn Fn(&str)>,
-    ) {
+    ) -> ExecutorResult<()> {
+        self.lifecycle
+            .commands
+            .set(commands)
+            .map_err(|_| "Execution events are already wired")?;
         let wiring = Rc::downgrade(self);
         coordinator.on_execution_control_updated(move |chat, state| {
             if let Some(wiring) = wiring.upgrade() {
@@ -164,15 +172,15 @@ impl ServerEventWiring {
             Ok(())
         });
         let wiring = Rc::downgrade(self);
-        let agent_bus = Rc::downgrade(agents);
+        let registry = Rc::downgrade(agents);
         coordinator.on_turn_settled(move |chat, turn| {
             if let Some(wiring) = wiring.upgrade()
                 && !wiring.deps.registry.has_chat(chat)
             {
                 wiring.deps.metadata.delete_chat_activity(&chat_id(chat)?);
             }
-            if let Some(agents) = agent_bus.upgrade() {
-                agents.settle_turn(
+            if let Some(agents) = registry.upgrade() {
+                agents.events().settle_turn(
                     chat,
                     &TurnEventMetadata {
                         turn_id: turn.turn_id.clone(),
@@ -184,6 +192,7 @@ impl ServerEventWiring {
             Ok(())
         });
 
+        let agents = agents.events();
         let execution = Rc::downgrade(coordinator);
         agents.on_run_steerable(Rc::new(move |chat| {
             ListenerWork::Synchronous(
@@ -251,6 +260,7 @@ impl ServerEventWiring {
                 clock.clone(),
             )
         }));
+        Ok(())
     }
 
     pub fn notify_operational_notice(
@@ -273,6 +283,21 @@ impl ServerEventWiring {
                 detail,
             ),
         ))
+    }
+
+    pub fn executor_processing_invalidated(self: &Rc<Self>, executor_id: &str) {
+        for chat in self.deps.processing.snapshot() {
+            let entry = self.deps.registry.get_chat(&chat.chat_id);
+            if effective_executor_id(
+                entry
+                    .as_ref()
+                    .and_then(|entry| entry.executor_id.as_deref()),
+            ) == executor_id
+                && let Ok(chat_id) = chat_id(&chat.chat_id)
+            {
+                self.schedule_processing(&chat_id);
+            }
+        }
     }
 
     fn schedule_processing(self: &Rc<Self>, chat_id: &ChatId) {
@@ -336,8 +361,7 @@ impl ServerEventWiring {
                             InterruptionReason::UserStop
                         };
                         wiring
-                            .deps
-                            .command_ledger
+                            .command_ledger()?
                             .mark_interrupted_without_run_terminal(&id, &turn_id, reason)
                             .await?;
                     }
@@ -698,8 +722,7 @@ impl ServerEventWiring {
                         ))),
                     ]
                 });
-            self.deps
-                .command_ledger
+            self.command_ledger()?
                 .settle_terminal(
                     &command_ledger_key(command_type, chat_id, request_id),
                     status,
@@ -720,12 +743,19 @@ impl ServerEventWiring {
             .and_then(|turn| turn.turn_id.as_deref())
             .filter(|id| !id.is_empty())
         {
-            self.deps
-                .command_ledger
+            self.command_ledger()?
                 .mark_public_terminal(chat_id, turn_id, interruption)
                 .await?;
         }
         Ok(())
+    }
+
+    fn command_ledger(&self) -> ExecutorResult<&CommandLedger> {
+        self.lifecycle
+            .commands
+            .get()
+            .map(Rc::as_ref)
+            .ok_or_else(|| "Execution events are not wired".into())
     }
 }
 

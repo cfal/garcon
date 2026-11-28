@@ -7,7 +7,7 @@ use crate::app_server::{
     converter::{convert_codex_app_server_live_item, convert_codex_raw_code_mode_item},
     operation_routes::{CodexOperation, publish_rows},
     protocol::{CodexThreadItem, JsonRpcNotification, read_live_thread_item},
-    runtime_session_state::CodexTurnRoutes,
+    runtime_session_state::{CodexTurnRoutes, RunningStatus},
 };
 
 use super::{
@@ -41,7 +41,11 @@ pub fn dispatch_turn_notification(
                 .session_for_client_thread(client, thread_id);
             if let Some(source) = source {
                 let operation = source.routes.borrow().operation_for_start();
-                CodexTurnRoutes::adopt_turn(&source.routes, turn_id, operation);
+                if CodexTurnRoutes::adopt_turn(&source.routes, turn_id, operation)
+                    && source.status.get() != RunningStatus::Interrupting
+                {
+                    source.status.set(RunningStatus::Running);
+                }
             }
         }
         "item/completed" | "rawResponseItem/completed" => {
@@ -81,7 +85,11 @@ pub fn dispatch_turn_notification(
             let (first_completion, is_active) = {
                 let mut routes = source.routes.borrow_mut();
                 let is_active = is_current_source && routes.active_turn_id() == Some(turn_id);
-                (routes.mark_terminal(turn_id), is_active)
+                let first = routes.mark_terminal(turn_id);
+                if first && is_active {
+                    routes.mark_active_completion(operation.clone());
+                }
+                (first, is_active)
             };
             if first_completion && is_active {
                 source.live_raw_results.borrow_mut().clear();
