@@ -1,9 +1,73 @@
 use std::{error::Error, sync::LazyLock};
 
-use garcon_interface::services::{AgentSteerRejectionReason, AgentSteerResult};
+use futures::FutureExt;
+use garcon_agents_common::execution::runtime_events::RuntimeSteerRequest;
+use garcon_interface::{
+    resources::ExecutorResult,
+    services::{AgentSteerFailureOutcome, AgentSteerRejectionReason, AgentSteerResult},
+};
 use regress::Regex;
+use serde::Serialize;
 
-use super::client::CodexAppServerRpcError;
+use crate::async_questions::codex_question_reply_input;
+
+use super::{
+    client::{
+        CodexAppServerClient, CodexAppServerDeliveryError, CodexAppServerRpcError,
+        CodexDeliveryOutcome, CodexSteerRequestOptions,
+    },
+    request_builders::{CodexUserInput, build_user_input},
+};
+
+pub async fn steer_codex_session(
+    client: &CodexAppServerClient,
+    thread_id: &str,
+    expected_turn_id: &str,
+    request: RuntimeSteerRequest,
+) -> ExecutorResult<AgentSteerResult> {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct NativeSteer<'a> {
+        thread_id: &'a str,
+        expected_turn_id: &'a str,
+        input: Vec<CodexUserInput>,
+        client_user_message_id: &'a str,
+    }
+    let input = codex_question_reply_input(&request.input, request.question_reply.as_ref())?;
+    let params = NativeSteer {
+        thread_id,
+        expected_turn_id,
+        input: build_user_input(&input, &[], &[]),
+        client_user_message_id: &request.client_message_id,
+    };
+    let options = CodexSteerRequestOptions {
+        prepare_delivery: async move { (request.prepare_delivery)().await }.boxed_local(),
+        acknowledgement_timeout: None,
+    };
+    match client.steer_turn(&params, Some(options)).await {
+        Ok(reply) if reply["turnId"] == expected_turn_id => Ok(AgentSteerResult::Accepted),
+        Ok(_) => Ok(AgentSteerResult::Failed {
+            outcome: AgentSteerFailureOutcome::Unknown,
+            message: "Codex acknowledged steering for an unexpected turn".into(),
+        }),
+        Err(error) => {
+            if let Some(rejection) = error.downcast_ref::<CodexAppServerRpcError>() {
+                return Ok(classify_codex_steer_rejection(rejection));
+            }
+            if let Some(delivery) = error.downcast_ref::<CodexAppServerDeliveryError>() {
+                let outcome = match delivery.outcome {
+                    CodexDeliveryOutcome::NotSent => AgentSteerFailureOutcome::NotSent,
+                    CodexDeliveryOutcome::Unknown => AgentSteerFailureOutcome::Unknown,
+                };
+                return Ok(AgentSteerResult::Failed {
+                    outcome,
+                    message: delivery.safe_message.into(),
+                });
+            }
+            Err(error)
+        }
+    }
+}
 
 pub fn rejected_codex_steer(
     reason: AgentSteerRejectionReason,

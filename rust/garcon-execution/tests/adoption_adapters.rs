@@ -59,6 +59,8 @@ use serde_json::{Value, json};
 
 #[path = "adoption_adapters/transcript_commits.rs"]
 mod transcript_commits;
+#[path = "adoption_adapters/transcript_mutation.rs"]
+mod transcript_mutation;
 use tokio::task::LocalSet;
 
 const REMOTE: &str = "11111111-1111-4111-8111-111111111111";
@@ -446,6 +448,30 @@ impl RuntimeRouterLedger for IdleFacets {
     fn is_run_active(&self, _: &str) -> bool {
         false
     }
+    fn active_run_id(&self, _: &str) -> Option<String> {
+        None
+    }
+    fn open_producer(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> ExecutorResult<Rc<garcon_ledger::producer_lease::ProducerLease>> {
+        unused()
+    }
+    fn begin_run(&self, _: &str, _: &str) -> ExecutorResult<String> {
+        unused()
+    }
+    fn interrupt_run(&self, _: &str) -> ExecutorResult<()> {
+        unused()
+    }
+    fn fail_run(
+        &self,
+        _: &str,
+        _: &str,
+        _: garcon_interface::producer::AgentRunFailureDetail,
+    ) -> ExecutorResult<()> {
+        unused()
+    }
     fn claim_permission_resolution(
         &self,
         _: &ChatTransientControlAction,
@@ -492,6 +518,7 @@ async fn describe_source_trace(scenario: &str) -> Value {
             ))),
         },
         directory,
+        ownership_transfer_pending: Rc::new(|_| false),
         get_carry_over_revision: Rc::new({
             let effects = effects.clone();
             move |session| {

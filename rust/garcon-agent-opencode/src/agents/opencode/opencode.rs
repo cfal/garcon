@@ -58,6 +58,7 @@ use crate::{
 
 mod events;
 mod sessions;
+mod single_query;
 #[cfg(test)]
 mod tests;
 mod turns;

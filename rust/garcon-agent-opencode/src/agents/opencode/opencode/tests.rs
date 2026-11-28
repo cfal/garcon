@@ -20,6 +20,7 @@ struct Client {
     permission_reply: bool,
     create: RefCell<Option<oneshot::Receiver<Value>>>,
     prompt: RefCell<Option<Value>>,
+    prompt_parameters: RefCell<Option<Map<String, Value>>>,
 }
 
 #[async_trait(?Send)]
@@ -27,11 +28,12 @@ impl OpenCodeClient for Client {
     async fn request(
         &self,
         operation: OpenCodeRequest,
-        _: Map<String, Value>,
+        parameters: Map<String, Value>,
         signal: &AbortSignal,
     ) -> ExecutorResult<OpenCodeSdkResult> {
         let _ = self.requests.send(operation);
         if operation == OpenCodeRequest::SessionPrompt {
+            self.prompt_parameters.replace(Some(parameters));
             if let Some(response) = self.prompt.take() {
                 return Ok(OpenCodeSdkResult::success(response, 200));
             }
@@ -88,6 +90,7 @@ impl InstanceFixture {
             permission_reply,
             create: RefCell::new(None),
             prompt: RefCell::new(None),
+            prompt_parameters: RefCell::new(None),
         });
         let (terminate, receive) = oneshot::channel();
         let (observed, wait_observed) = oneshot::channel();
@@ -392,6 +395,173 @@ async fn prompt_response_publishes_rows_before_its_terminal_and_retires_its_rout
         assert!(!runtime.is_running("existing"));
         runtime.shutdown().await;
     }).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn one_shot_fences_a_created_session_on_process_death() {
+    LocalSet::new()
+        .run_until(async {
+            let mut first = InstanceFixture::new(true);
+            let mut replacement = InstanceFixture::new(true);
+            let runtime = runtime(&[&first, &replacement]);
+            let (created, wait_created) = oneshot::channel();
+            first.client.create.replace(Some(wait_created));
+            let query = spawn_local({
+                let runtime = runtime.clone();
+                async move {
+                    runtime
+                        .run_single_query(super::single_query::OpenCodeSingleQueryRequest {
+                            prompt: "hello".to_owned(),
+                            project_path: "/query".to_owned(),
+                            model: String::new(),
+                            permission_mode: "default".to_owned(),
+                            thinking_mode: garcon_contract::chat_modes::ThinkingMode::None,
+                            timeout_ms: None,
+                            signal: AbortSignal::new(),
+                        })
+                        .await
+                }
+            });
+            assert_eq!(
+                first.requests.recv().await,
+                Some(OpenCodeRequest::SessionCreate)
+            );
+            let mut retired = first.exit(&runtime).await;
+            created.send(json!({"id": "one-shot-session"})).unwrap();
+            assert_eq!(
+                query.await.unwrap().unwrap_err().to_string(),
+                "OpenCode server process was retired while the request was in flight"
+            );
+            assert!(retired.try_recv().is_err());
+            runtime.get_client().await.unwrap();
+            assert_eq!(
+                replacement.requests.recv().await,
+                Some(OpenCodeRequest::SessionDelete)
+            );
+            runtime.shutdown().await;
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn one_shot_disables_tools_resolves_effort_and_deletes_its_session() {
+    use garcon_contract::chat_modes::ThinkingMode;
+
+    LocalSet::new()
+        .run_until(async {
+            let mut instance = InstanceFixture::new(true);
+            let runtime = runtime(&[&instance]);
+            for (mode, variant) in [
+                (ThinkingMode::None, None),
+                (ThinkingMode::Xhigh, Some("xhigh")),
+            ] {
+                instance.client.prompt.replace(Some(json!({"parts": [
+                    {"type":"reasoning","text":"not a reply"},
+                    {"type":"text","text":" hello "},
+                    {"type":"text","text":"world"},
+                ]})));
+                let output = runtime
+                    .run_single_query(super::single_query::OpenCodeSingleQueryRequest {
+                        prompt: "query".to_owned(),
+                        project_path: "/query".to_owned(),
+                        model: "provider/model".to_owned(),
+                        permission_mode: "default".to_owned(),
+                        thinking_mode: mode,
+                        timeout_ms: None,
+                        signal: AbortSignal::new(),
+                    })
+                    .await
+                    .unwrap();
+                assert_eq!(output, "hello\nworld");
+                let params = instance.client.prompt_parameters.take().unwrap();
+                assert_eq!(params.get("variant").and_then(Value::as_str), variant);
+                assert_eq!(params["tools"], json!({"*":false}));
+                assert_eq!(
+                    params["model"],
+                    json!({"providerID":"provider","modelID":"model"})
+                );
+                assert_eq!(params["directory"], "/query");
+                let mut expected = vec![OpenCodeRequest::SessionCreate];
+                if mode != ThinkingMode::None {
+                    expected.push(OpenCodeRequest::ProviderList);
+                }
+                expected.extend([
+                    OpenCodeRequest::SessionPrompt,
+                    OpenCodeRequest::SessionDelete,
+                ]);
+                for operation in expected {
+                    assert_eq!(instance.requests.try_recv(), Ok(operation));
+                }
+            }
+            runtime.shutdown().await;
+        })
+        .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn one_shot_timeout_keeps_native_session_cleanup_alive() {
+    use std::{path::Path, time::Duration};
+
+    use garcon_contract::{agent_integration::AgentSettingsEnvelope, chat_modes::ThinkingMode};
+    use garcon_interface::{
+        errors::{AgentIntegrationError, AgentIntegrationErrorCode},
+        services::AgentSingleQueryRequest,
+    };
+
+    LocalSet::new()
+        .run_until(async {
+            let mut first = InstanceFixture::new(true);
+            let runtime = runtime(&[&first]);
+            let timed_out = spawn_local({
+                let runtime = runtime.clone();
+                async move {
+                    runtime
+                        .run_isolated_query(AgentSingleQueryRequest {
+                            prompt: "hello".to_owned(),
+                            model: String::new(),
+                            thinking_mode: ThinkingMode::None,
+                            timeout_ms: Some(garcon_js::Number(1000.0)),
+                            settings: AgentSettingsEnvelope {
+                                owner_id: "opencode".to_owned(),
+                                schema_version: 1,
+                                values: json!({}).into(),
+                            },
+                            endpoint: None,
+                            signal: CancellationToken::new(),
+                        })
+                        .await
+                }
+            });
+            assert_eq!(
+                first.requests.recv().await,
+                Some(OpenCodeRequest::SessionCreate)
+            );
+            assert_eq!(
+                first.requests.recv().await,
+                Some(OpenCodeRequest::SessionPrompt)
+            );
+            let parameters = first.client.prompt_parameters.take().unwrap();
+            let directory = Path::new(parameters["directory"].as_str().unwrap());
+            assert!(directory.is_dir());
+            tokio::time::advance(Duration::from_secs(1)).await;
+            let failure = timed_out
+                .await
+                .unwrap()
+                .unwrap_err()
+                .downcast::<AgentIntegrationError>()
+                .unwrap();
+            assert_eq!(failure.code, AgentIntegrationErrorCode::TIMEOUT);
+            assert_eq!(failure.message, "Single query timed out after 1000ms.");
+            assert!(!directory.exists());
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(1), first.requests.recv())
+                    .await
+                    .unwrap(),
+                Some(OpenCodeRequest::SessionDelete),
+            );
+            runtime.shutdown().await;
+        })
+        .await;
 }
 
 #[tokio::test(start_paused = true)]
