@@ -1,4 +1,5 @@
 pub mod catalog;
+pub mod cli_update;
 pub mod direct;
 pub mod execution;
 pub mod lifecycle;
