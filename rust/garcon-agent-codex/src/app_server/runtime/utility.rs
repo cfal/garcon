@@ -12,11 +12,13 @@ use serde_json::json;
 use tokio::{sync::Mutex, time::sleep};
 
 use super::super::{
+    approvals::is_approval_request,
     client::{CodexAppServerClient, CodexAppServerEvent, shared_error},
     durability::accessible_thread_path,
     native_path_discovery_refresh::NativePathDiscoveryRefreshLimiter,
     runtime_support::is_utility_overload,
 };
+use super::{deny_unowned_approval, reject_unsupported_request, wire_client};
 
 type Threads = Rc<IndexMap<String, Opaque>>;
 type ThreadListTask = Shared<LocalBoxFuture<'static, Result<Threads, Rc<dyn Error>>>>;
@@ -178,7 +180,16 @@ impl CodexAppServerUtility {
                 let generation = state.next_generation;
                 state.next_generation += 1;
                 let utility = Rc::downgrade(&self.0);
-                let _unsubscribe = client.on_event(Rc::new(move |event| {
+                wire_client(&client, self.0.logger.clone(), move |client, event| {
+                    if let CodexAppServerEvent::ServerRequest(request) = event
+                        && let Some(utility) = utility.upgrade()
+                    {
+                        return if is_approval_request(request) {
+                            deny_unowned_approval(client, utility.logger.as_ref(), request)
+                        } else {
+                            reject_unsupported_request(client, request)
+                        };
+                    }
                     if matches!(event, CodexAppServerEvent::Exit(_))
                         && let Some(utility) = utility.upgrade()
                     {
@@ -192,7 +203,7 @@ impl CodexAppServerUtility {
                         }
                     }
                     Ok(())
-                }));
+                });
                 state.client = Some((generation, client.clone()));
                 (generation, client)
             }

@@ -19,11 +19,17 @@ use garcon_agent_codex::app_server::{
     },
     native_path_discovery_refresh::NativePathDiscoveryRefreshLimiter,
     protocol::JsonRpcId,
-    runtime::utility::CodexAppServerUtility,
+    request_builders::{
+        CodexThreadConfiguration, CodexThreadSettings, thread_settings_target_from_snapshot,
+    },
+    runtime::{thread_settings::CodexSourceThreadSettings, utility::CodexAppServerUtility},
+    steering::classify_codex_steer_rejection,
 };
 use garcon_agent_codex::slash_command_discovery::CodexSkillDiscovery;
+use garcon_contract::chat_modes::{PermissionMode, ThinkingMode};
 use garcon_interface::errors::{AgentIntegrationError, AgentIntegrationErrorCode};
 use garcon_interface::host::AgentLogger;
+use garcon_interface::services::{AgentSteerRejectionReason, AgentSteerResult};
 use garcon_js::json::{Opaque, from_str};
 use indexmap::IndexMap;
 use serde::Serialize;
@@ -109,6 +115,146 @@ fn steer_options() -> CodexSteerRequestOptions<'static> {
     }
 }
 
+fn settings_source(client: CodexAppServerClient, timeout: Duration) -> CodexSourceThreadSettings {
+    let snapshot = serde_json::from_value(json!({
+        "model":"m", "serviceTier":"default", "effort":"medium",
+        "approvalPolicy":"never", "approvalsReviewer":"user",
+        "sandboxPolicy":{"type":"workspaceWrite"},
+    }))
+    .unwrap();
+    CodexSourceThreadSettings::new(
+        client,
+        "thread".into(),
+        thread_settings_target_from_snapshot(&snapshot, PermissionMode::Default),
+        true,
+        timeout,
+    )
+}
+
+fn settings_target() -> CodexThreadConfiguration {
+    CodexThreadConfiguration {
+        model: "m".into(),
+        permission_mode: PermissionMode::ManualBypass,
+        thinking_mode: Some(ThinkingMode::High),
+    }
+}
+
+#[tokio::test]
+async fn confirms_settings_when_notification_precedes_the_rpc_response() {
+    LocalSet::new()
+        .run_until(async {
+            let fixture = Fixture::new(FIXTURE);
+            let client = CodexAppServerClient::new(fixture.options(""));
+            let source = settings_source(client.clone(), Duration::from_secs(2));
+            let detach = client.on_event(Rc::new({
+                let source = source.clone();
+                move |event| {
+                    if let CodexAppServerEvent::Notification(note) = event
+                        && note.method == "thread/settings/updated"
+                    {
+                        let params = note.params.as_ref().unwrap();
+                        assert_eq!(params["threadId"], "thread");
+                        assert_eq!(source.permission_mode(), PermissionMode::Default);
+                        let settings: CodexThreadSettings =
+                            serde_json::from_value(params["threadSettings"].clone()).unwrap();
+                        source.handle_updated(&settings);
+                    }
+                    Ok(())
+                }
+            }));
+            let target = settings_target();
+            let result = source.update(&target);
+            assert!(source.has_pending_configuration());
+            result.await.unwrap();
+            assert_eq!(source.permission_mode(), PermissionMode::ManualBypass);
+            assert!(!source.provider_owns_effort());
+            assert!(!source.has_pending_configuration());
+            source.update(&target).await.unwrap();
+            client.shutdown().await.unwrap();
+            detach();
+            let frames = fixture.frames();
+            let mut updates = frames
+                .iter()
+                .filter(|frame| frame["method"] == "thread/settings/update");
+            assert_eq!(
+                updates.next().unwrap()["params"],
+                json!({
+                    "threadId":"thread", "model":"m", "approvalPolicy":"on-request",
+                    "approvalsReviewer":"user", "sandboxPolicy":{
+                        "type":"workspaceWrite","writableRoots":[],"networkAccess":false,
+                        "excludeTmpdirEnvVar":false,"excludeSlashTmp":false,
+                    }, "effort":"high",
+                })
+            );
+            assert!(updates.next().is_none());
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn fences_a_settings_timeout_but_not_an_explicit_rpc_rejection() {
+    LocalSet::new()
+        .run_until(async {
+            for (mode, expected_fence) in [("settings-failure", false), ("settings-timeout", true)]
+            {
+                let fixture = Fixture::new(FIXTURE);
+                let client = CodexAppServerClient::new(fixture.options(mode));
+                client.connect().await.unwrap();
+                let source = settings_source(client.clone(), Duration::from_millis(80));
+                let error = source.update(&settings_target()).await.unwrap_err();
+                assert_eq!(source.is_fenced(), expected_fence);
+                assert_eq!(source.permission_mode(), PermissionMode::Default);
+                assert!(!source.has_pending_configuration());
+                if expected_fence {
+                    assert_eq!(
+                        error.downcast_ref::<AgentIntegrationError>().unwrap().code,
+                        AgentIntegrationErrorCode::TIMEOUT
+                    );
+                    let next = source.update(&settings_target()).await.unwrap_err();
+                    assert_eq!(
+                        next.downcast_ref::<AgentIntegrationError>().unwrap().code,
+                        AgentIntegrationErrorCode::INVALID_SETTINGS
+                    );
+                } else {
+                    assert_eq!(error.to_string(), "Synthetic settings failure");
+                    assert!(error.is::<CodexAppServerRpcError>());
+                }
+                client.shutdown().await.unwrap();
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn maps_a_native_turn_mismatch_without_retrying_another_turn() {
+    LocalSet::new()
+        .run_until(async {
+            let fixture = Fixture::new(FIXTURE);
+            let client = CodexAppServerClient::new(fixture.options("steer-mismatch"));
+            let error = client
+                .steer_turn(&steer_params(), Some(steer_options()))
+                .await
+                .unwrap_err();
+            let rpc = error.downcast_ref::<CodexAppServerRpcError>().unwrap();
+            assert_eq!(
+                classify_codex_steer_rejection(rpc),
+                AgentSteerResult::Rejected {
+                    reason: AgentSteerRejectionReason::TurnChanged,
+                    message: "The active Codex turn changed".into(),
+                }
+            );
+            client.shutdown().await.unwrap();
+            let frames: Vec<_> = fixture
+                .frames()
+                .into_iter()
+                .filter(|frame| frame["method"] == "turn/steer")
+                .collect();
+            assert_eq!(frames.len(), 1);
+            assert_eq!(frames[0]["params"]["expectedTurnId"], "turn");
+        })
+        .await;
+}
+
 fn utility_fixture(
     fixture: Rc<Fixture>,
     mode: &'static str,
@@ -128,19 +274,74 @@ fn utility_fixture(
     )
 }
 
+async fn original_utility_trace(
+    fixture: &Fixture,
+    native_path: &std::path::Path,
+    mode: &str,
+) -> String {
+    let output = tokio::process::Command::new("bun")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/oracles/app-server-utility.ts"
+        ))
+        .arg(&fixture.command)
+        .arg(native_path)
+        .arg(&fixture.trace)
+        .arg(mode)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let original = fs::read_to_string(&fixture.trace).unwrap();
+    fs::remove_file(&fixture.trace).unwrap();
+    original
+}
+
+#[tokio::test]
+async fn utility_rejects_unsupported_requests_and_denies_unowned_approvals() {
+    LocalSet::new().run_until(async {
+        let fixture = Rc::new(Fixture::new(FIXTURE));
+        let mode = "utility-server-requests";
+        let original = original_utility_trace(&fixture, &fixture._directory.path().join("unused.jsonl"), mode).await;
+        let logger = Rc::new(DiscoveryLogger::default());
+        let utility = CodexAppServerUtility::new(
+            Rc::new({
+                let fixture = fixture.clone();
+                move || CodexAppServerClient::new(fixture.options(mode))
+            }),
+            logger.clone(),
+            NativePathDiscoveryRefreshLimiter::default(),
+        );
+        let result = tokio::time::timeout(Duration::from_secs(3), utility.resolve_native_path(Some("thread"))).await;
+        utility.shutdown().await;
+        assert_eq!(result.expect("utility did not answer the peer requests").unwrap(), None);
+        assert_eq!(fs::read_to_string(&fixture.trace).unwrap(), original);
+        let frames = fixture.frames();
+        assert!(frames.contains(&json!({
+            "id":"unsupported", "error":{"code":-32601,"message":"Unsupported Codex app-server request: synthetic/unknown"},
+        })));
+        assert!(frames.contains(&json!({"id":101,"result":{"decision":"cancel"}})));
+        let mut warnings = logger.0.borrow().clone();
+        warnings.sort();
+        assert_eq!(warnings, [
+            "Codex app-server emitted invalid JSON.",
+            "Codex app-server stderr",
+            "Dropped an unowned Codex approval request",
+        ]);
+    }).await;
+}
+
 #[tokio::test]
 async fn retries_retryable_utility_app_server_overloads_and_reads_the_next_page() {
     LocalSet::new().run_until(async {
         let fixture = Rc::new(Fixture::new(FIXTURE));
         let path = fixture._directory.path().join("synthetic.jsonl");
         tokio::fs::write(&path, "{}\n").await.unwrap();
-        let output = tokio::process::Command::new("bun")
-            .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/oracles/app-server-utility.ts"))
-            .arg(&fixture.command).arg(&path).arg(&fixture.trace)
-            .output().await.unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        let original = fs::read_to_string(&fixture.trace).unwrap();
-        fs::remove_file(&fixture.trace).unwrap();
+        let original = original_utility_trace(&fixture, &path, "utility-overload").await;
         let utility = utility_fixture(fixture.clone(), "utility-overload", path.clone());
         let (left, right) = tokio::join!(utility.resolve_native_path(Some("thread")), utility.resolve_native_path(Some("thread")));
         assert_eq!(left.unwrap().as_deref(), path.to_str());

@@ -15,6 +15,7 @@ base64 = "0.23"
 bytes.workspace = true
 futures.workspace = true
 garcon-base.workspace = true
+garcon-chats = { path = "../garcon-chats" }
 garcon-contract.workspace = true
 garcon-interface.workspace = true
 garcon-js.workspace = true
