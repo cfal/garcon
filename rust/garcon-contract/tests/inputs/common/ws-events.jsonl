@@ -1,0 +1,44 @@
+{"fn":"parseServerWsMessage","args":[{"type":"ws-fault","error":"disconnected"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"ws-fault","error":" disconnected "}]}
+{"fn":"parseServerWsMessage","args":[{"type":"ws-fault","error":42}]}
+{"fn":"parseServerWsMessage","args":[{"type":"ws-fault"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"ws-pong","clientRequestId":" ping-1 ","sentAt":42,"serverTime":" 2026-07-27T00:00:00.000Z ","processing":{"outcome":"snapshot","chats":[{"chatId":" chat-a ","phase":"stopping","extra":true}]},"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"ws-pong","clientRequestId":"ping","sentAt":42.25,"serverTime":"anything","processing":{"outcome":"unavailable","chats":null},"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"ws-pong","clientRequestId":"ping","sentAt":1e21,"serverTime":"now","processing":{"outcome":"unavailable"},"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"ws-pong","clientRequestId":"ping","sentAt":-0,"serverTime":"now","processing":{"outcome":"unavailable"},"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"ws-pong","clientRequestId":"ping","sentAt":"42","serverTime":"now","processing":{"outcome":"unavailable"},"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"ws-pong","clientRequestId":"ping","sentAt":null,"serverTime":"now","processing":{"outcome":"unavailable"},"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"ws-pong","clientRequestId":"ping","sentAt":42,"serverTime":"now","processing":{"outcome":"snapshot","chats":{}},"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"ws-pong","clientRequestId":"ping","sentAt":42,"serverTime":"now","processing":{"outcome":"unavailable"},"serverInstanceId":" server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"ws-pong","clientRequestId":"ping"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"reconnect-state","clientRequestId":" req ","processing":{"outcome":"snapshot","chats":[{"chatId":"chat-b","phase":"stopping"},{"chatId":" chat-a ","phase":"running"},{"chatId":"legacy","phase":"reconnecting"}]},"controlResults":[{"chatId":"missing","outcome":"not-found"},{"chatId":"offline","outcome":"unavailable","control":42},{"chatId":" chat-a ","outcome":"snapshot","control":{"serverInstanceId":"server-a","queue":{"entries":[],"steeringEntryId":null,"recentlyDispatched":[],"pause":null,"reorderRevision":0},"version":4,"updatedAt":"2026-07-18T00:00:00.000Z"}}],"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"reconnect-state","processing":{"outcome":"snapshot","chats":[]},"controlResults":[],"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"reconnect-state","clientRequestId":"","processing":{"outcome":"unavailable"},"controlResults":[],"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"reconnect-state","clientRequestId":42,"processing":{"outcome":"unavailable"},"controlResults":[],"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"reconnect-state","serverInstanceId":"server-a","sessions":{},"controlResults":[]}]}
+{"fn":"parseServerWsMessage","args":[{"type":"reconnect-state","processing":null,"controlResults":[],"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"reconnect-state","processing":{"outcome":"snapshot","chats":[42]},"controlResults":[],"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"reconnect-state","processing":{"outcome":"snapshot","chats":[{"chatId":"chat-a","phase":"unknown"}]},"controlResults":[],"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"reconnect-state","processing":{"outcome":"snapshot","chats":[{"chatId":"chat-a","phase":"running"},{"chatId":" chat-a ","phase":"stopping"}]},"controlResults":[],"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"reconnect-state","processing":{"outcome":"unavailable"},"controlResults":[{"chatId":" chat-a","outcome":"unavailable"},{"chatId":"chat-a ","outcome":"not-found"}],"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"reconnect-state","processing":{"outcome":"unavailable"},"controlResults":[{"chatId":"chat-a","outcome":"snapshot","control":{"serverInstanceId":"server-b","queue":{"entries":[],"steeringEntryId":null,"recentlyDispatched":[],"pause":null,"reorderRevision":0},"version":0,"updatedAt":null}}],"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"reconnect-state","processing":{"outcome":"unavailable"},"controlResults":[{"chatId":"chat-a","outcome":"snapshot","control":null}],"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"reconnect-state","processing":{"outcome":"unavailable"},"controlResults":[{"chatId":"chat-a","outcome":"unknown"}],"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"reconnect-state","processing":{"outcome":"unavailable"},"controlResults":{},"serverInstanceId":"server-a"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"reconnect-state","processing":{"outcome":"unavailable"},"controlResults":[]}]}
+{"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":" req ","requestType":" chat-log ","code":"SESSION_NOT_FOUND","message":" Session not found ","retryable":false}]}
+{"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":"req","requestType":"chat-reload","code":"CHAT_RUNNING","message":"","retryable":true,"chatId":" chat-1 "}]}
+{"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":"req","requestType":"ping","code":"MISSING_CHAT_ID","message":"failure","retryable":false}]}
+{"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":"req","requestType":"ping","code":"REQUEST_VALIDATION_FAILED","message":"failure","retryable":false}]}
+{"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":"req","requestType":"ping","code":"NATIVE_PATH_UNRESOLVED","message":"failure","retryable":false}]}
+{"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":"req","requestType":"ping","code":"HISTORY_LOAD_FAILED","message":"failure","retryable":false}]}
+{"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":"req","requestType":"ping","code":"STALE_TRANSCRIPT_VIEW","message":"failure","retryable":false}]}
+{"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":"req","requestType":"ping","code":"REQUEST_TIMEOUT","message":"failure","retryable":false}]}
+{"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":"req","requestType":"ping","code":"REQUEST_CANCELLED","message":"failure","retryable":false}]}
+{"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":"req","requestType":"ping","code":"INTERNAL_ERROR","message":"failure","retryable":false}]}
+{"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":"req","requestType":"chat-reload","code":"UNKNOWN","message":"failure","retryable":false}]}
+{"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":"req","requestType":"chat-reload","code":"CHAT_RUNNING","message":"failure","retryable":false,"chatId":null}]}
+{"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":"req","requestType":"chat-reload","code":"CHAT_RUNNING","message":"failure","retryable":false,"chatId":" "}]}
+{"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":"req","requestType":"chat-reload","code":"CHAT_RUNNING","message":42,"retryable":false}]}
+{"fn":"parseServerWsMessage","args":[{"type":"client-request-error","clientRequestId":"req","requestType":"chat-reload","code":"CHAT_RUNNING","message":"failure","retryable":"false"}]}
+{"fn":"parseServerWsMessage","args":[{"type":"unknown-event"}]}

@@ -156,6 +156,23 @@ async fn readonly_git_disables_optional_locks_without_changing_default_environme
 }
 
 #[tokio::test]
+async fn git_spawns_with_the_explicit_worker_child_environment() {
+    locally(async {
+        let git = FakeGit::new(
+            r#"printf '%s:%s:%s:%s' "$GARCON_CONFIG_DIR" "$GARCON_RUNTIME" "${GARCON_CONTROLLER_URL-unset}" "$GIT_OPTIONAL_LOCKS""#,
+        );
+        let mut options = git.options();
+        options.base_environment = Some(vec![
+            ("GARCON_CONFIG_DIR".into(), "/synthetic-config".into()),
+            ("GARCON_RUNTIME".into(), "executor".into()),
+        ].into());
+        let result = run_git(git.cwd(), args("status"), read_only_git_options(options))
+            .await.unwrap();
+        assert_eq!(result.stdout, "/synthetic-config:executor:unset:0");
+    }).await;
+}
+
+#[tokio::test]
 async fn drains_real_pipes_and_never_retries_a_stdout_overflow() {
     locally(async {
         let git = FakeGit::new(

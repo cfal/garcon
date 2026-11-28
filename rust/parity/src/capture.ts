@@ -75,9 +75,14 @@ export interface CapturedSocket {
 
 export type Capture = CapturedExchange | CapturedSocket;
 
+function isUnportedFrame(frame: Json): boolean {
+  return isObject(frame) && frame.garconRsUnported === true;
+}
+
 export function isUnported(capture: Capture): boolean {
   const status = 'status' in capture ? capture.status : capture.refusal?.status;
-  return status === 501 && capture.rawHeaders?.get('x-garcon-rs-unported') === '1';
+  return (status === 501 && capture.rawHeaders?.get('x-garcon-rs-unported') === '1')
+    || ('frames' in capture && capture.frames.some(isUnportedFrame));
 }
 
 function base64Url(input: string | Buffer): string {
@@ -313,7 +318,10 @@ async function captureWebSocket(server: StartedServer, step: WebSocketStep, plac
     socket.onmessage = (event) => {
       const frame = parseFrame(event.data);
       const requestId = isObject(frame) ? frame.clientRequestId : undefined;
-      if (typeof requestId !== 'string' || !requestIds.has(requestId)) return;
+      const matched = typeof requestId === 'string' && requestIds.has(requestId);
+      const uncorrelatedUnportedFault = requestId === undefined && isObject(frame)
+        && frame.type === 'ws-fault' && isUnportedFrame(frame);
+      if (!matched && !uncorrelatedUnportedFault) return;
       frames.push(frame);
       if (step.frames !== undefined && frames.length >= step.frames) {
         finish();

@@ -1,0 +1,18 @@
+{
+  "module": "common/ticket-chat.ts",
+  "tests": [
+    "common/__tests__/ticket-chat.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/ticket-chat.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "renderTicketChatPrompt",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 151,
+  "sha256": "806c7095ffdc5d39e14b11c55eeac79d87a56ba84356afa6aa077a4b140c0322"
+}

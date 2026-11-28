@@ -1,0 +1,26 @@
+{
+  "module": "common/garcon-command-rejection.ts",
+  "tests": [
+    "common/__tests__/garcon-command-rejection.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/garcon-command-rejection.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "garconCommandRejectionContent",
+      "argument": 0
+    },
+    {
+      "fn": "garconCommandRejectionGuidance",
+      "argument": 0
+    },
+    {
+      "fn": "garconCommandRejectionNotice",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 1070,
+  "sha256": "8b35f13daa5ab92a749f721b1bf92a8ac8b8dc9b14ad3f392dce880dbda2743e"
+}

@@ -1,0 +1,4 @@
+{"fn":"ticketChatPromptError","args":["{{ticket_id}} {{{unknown}}}"]}
+{"fn":"ticketChatPromptError","args":["{{ticket_id}} {not_a_variable}"]}
+{"fn":"renderTicketChatPrompt","args":["{{{ticket_id}}}: {{ticket_description}}",{"id":"G-7","title":"Synthetic","project":"Project","description":"$& {{ticket_id}}"}]}
+{"fn":"renderTicketChatPrompt","args":["\ufeff\u00a0",{"id":"G-7","title":"","project":"\u6c34","description":""}]}

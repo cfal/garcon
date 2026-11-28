@@ -1,0 +1,18 @@
+{
+  "module": "common/ticket-source-navigation.ts",
+  "tests": [
+    "common/__tests__/ticket-source-navigation.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/ticket-source-navigation.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseTicketSourceResolution",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 78,
+  "sha256": "b538e19d240bb3d6b44ab9284f3eb05012493287e781df696a779af7c7c41acb"
+}

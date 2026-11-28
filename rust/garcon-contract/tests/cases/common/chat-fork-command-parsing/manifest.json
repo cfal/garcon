@@ -1,0 +1,27 @@
+{
+  "module": "common/chat-fork-command-parsing.ts",
+  "tests": [
+    "common/__tests__/chat-command-contracts.test.js",
+    "rust/garcon-contract/tests/inputs/common/chat-fork-command-parsing.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseDeleteChatCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseForkChatCommandRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseHandoffForkConsent",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 185,
+  "sha256": "335b379820d3b40765d14c3fa1ed5356ad3e0764511c233584bd120d8d87ebcf"
+}
