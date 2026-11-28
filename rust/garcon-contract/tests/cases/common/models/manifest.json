@@ -1,0 +1,13 @@
+{
+  "module": "common/models.ts",
+  "tests": [
+    "common/__tests__/models.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/models.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 72,
+  "sha256": "7616b0d2204b4c2ef357000c9d1217ae49290c9b205b7903264968a23c7084ae"
+}
