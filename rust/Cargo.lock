@@ -1182,7 +1182,9 @@ dependencies = [
  "garcon-js",
  "getrandom 0.4.3",
  "jsonwebtoken",
+ "libc",
  "regex",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1190,6 +1192,8 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
