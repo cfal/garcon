@@ -1,5 +1,5 @@
 //! JavaScript semantics the integration relies on that `garcon-js` does not
-//! hold: truthiness, strict equality, `Number(text)`, the property reads the
+//! hold: truthiness, strict equality, the property reads the
 //! original writes with optional chaining, an `AbortController`'s reason, and
 //! one error object shared by several consumers.
 
@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use garcon_base::errors::NamedError;
 use garcon_js::json::Opaque;
-use garcon_js::{parse_int, trim};
+use garcon_js::trim;
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
@@ -114,53 +114,6 @@ pub fn strictly_equal(left: &Value, right: &Value) -> bool {
 /// only for `NaN`, which no JSON value holds.
 pub fn same_value_zero(left: &Value, right: &Value) -> bool {
     strictly_equal(left, right)
-}
-
-/// `Number(text)`: a trimmed numeric literal, `0` for blank text, and `NaN`
-/// for anything else.
-pub fn string_to_number(text: &str) -> f64 {
-    let value = trim(text);
-    if value.is_empty() {
-        return 0.0;
-    }
-    // A radix prefix takes no sign.
-    for (prefix, radix) in [
-        ("0x", 16),
-        ("0X", 16),
-        ("0b", 2),
-        ("0B", 2),
-        ("0o", 8),
-        ("0O", 8),
-    ] {
-        if let Some(digits) = value.strip_prefix(prefix) {
-            return radix_digits(digits, radix);
-        }
-    }
-    let (sign, magnitude) = match value.as_bytes()[0] {
-        b'+' => (1.0, &value[1..]),
-        b'-' => (-1.0, &value[1..]),
-        _ => (1.0, value),
-    };
-    if magnitude.is_empty() || magnitude.starts_with(['+', '-']) {
-        return f64::NAN;
-    }
-    if magnitude == "Infinity" {
-        return sign * f64::INFINITY;
-    }
-    if !magnitude
-        .bytes()
-        .all(|byte| matches!(byte, b'0'..=b'9' | b'+' | b'-' | b'.' | b'e' | b'E'))
-    {
-        return f64::NAN;
-    }
-    sign * magnitude.parse::<f64>().unwrap_or(f64::NAN)
-}
-
-fn radix_digits(digits: &str, radix: u32) -> f64 {
-    if digits.is_empty() || !digits.chars().all(|digit| digit.is_digit(radix)) {
-        return f64::NAN;
-    }
-    parse_int(digits, radix).unwrap_or(f64::NAN)
 }
 
 /// One failure every consumer sees the same way, as the original passes one
@@ -368,60 +321,6 @@ pub fn strip_name_separators(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn reads_numbers_as_javascript_does() {
-        for (text, expected) in [
-            ("", 0.0),
-            ("  \u{feff}\u{a0}", 0.0),
-            ("42", 42.0),
-            (" 4.5 ", 4.5),
-            ("+1.", 1.0),
-            (".5", 0.5),
-            ("1e2", 100.0),
-            ("1E-2", 0.01),
-            ("0x10", 16.0),
-            ("0XfF", 255.0),
-            ("0b11", 3.0),
-            ("0O17", 15.0),
-            ("Infinity", f64::INFINITY),
-            ("-Infinity", f64::NEG_INFINITY),
-            ("1e400", f64::INFINITY),
-            ("-0", -0.0),
-            ("9007199254740993", 9_007_199_254_740_992.0),
-        ] {
-            assert_eq!(string_to_number(text), expected, "{text:?}");
-        }
-        assert!(string_to_number("-0").is_sign_negative());
-        for text in [
-            "abc",
-            "12px",
-            "0b12",
-            "1_000",
-            "1 2",
-            "1e",
-            "e5",
-            ".",
-            "-.",
-            "+0x1",
-            "-0b1",
-            "inf",
-            "Infinityx",
-            "\u{d66}",
-            "--1",
-            "++1",
-            "-+1",
-            "0x",
-            "NaN",
-            "nan",
-            "infinity",
-        ] {
-            assert!(string_to_number(text).is_nan(), "{text:?}");
-        }
-        // A sign is allowed only before a decimal literal or an infinity.
-        assert_eq!(string_to_number("-5"), -5.0);
-        assert_eq!(string_to_number("+5"), 5.0);
-    }
 
     #[test]
     fn strips_the_javascript_whitespace_and_name_separators() {

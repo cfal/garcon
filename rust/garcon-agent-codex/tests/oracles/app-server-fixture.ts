@@ -75,6 +75,33 @@ for await (const line of input) {
       write({ id: 'string-id', method: 'approve', params: { synthetic: true } });
       write({ id, result: {} });
       break;
+    case 'send-turn-events': {
+      const { threadId, turnId, start } = params;
+      const live = { type: 'agentMessage', id: `${turnId}-live`, text: 'Live', phase: 'commentary' };
+      const final = { type: 'agentMessage', id: `${turnId}-final`, text: 'Final\n', phase: 'final_answer' };
+      if (start) write({ method: 'turn/started', params: { threadId, turn: { id: turnId } } });
+      write({ method: 'item/completed', params: { threadId, turnId, item: live } });
+      write({ method: 'turn/completed', params: { threadId, turn: {
+        id: turnId, status: 'completed', items: [live, final],
+      } } });
+      write({ method: 'turn/completed', params: { threadId, turn: {
+        id: turnId, status: 'completed', items: [final],
+      } } });
+      write({ id, result: {} });
+      break;
+    }
+    case 'send-approval': {
+      const { requestId, threadId, turnId } = params;
+      write({ id: requestId, method: 'item/commandExecution/requestApproval', params: {
+        itemId: 'command', threadId, turnId, command: 'pwd',
+      } });
+      write({ id, result: {} });
+      break;
+    }
+    case 'resolve-approval':
+      write({ method: 'serverRequest/resolved', params });
+      write({ id, result: {} });
+      break;
     case 'bad':
       write({ id, error: { code: -32001, message: 'Synthetic RPC error', data: { reason: 'synthetic' } } });
       break;

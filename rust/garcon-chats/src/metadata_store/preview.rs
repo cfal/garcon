@@ -23,7 +23,7 @@ fn bounded_preview(text: &str, maximum: usize) -> String {
     }
 }
 
-pub(super) fn text(message: &ChatMessage) -> &str {
+pub(crate) fn text(message: &ChatMessage) -> &str {
     match message {
         ChatMessage::User(message) => &message.content,
         ChatMessage::Assistant(message) => &message.content,
@@ -32,7 +32,7 @@ pub(super) fn text(message: &ChatMessage) -> &str {
     }
 }
 
-pub(super) fn timestamp(message: &ChatMessage) -> &str {
+pub(crate) fn timestamp(message: &ChatMessage) -> &str {
     match message {
         ChatMessage::User(message) => &message.timestamp,
         ChatMessage::Assistant(message) => &message.timestamp,

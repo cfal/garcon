@@ -101,6 +101,10 @@ pub struct TranscriptLedgerService {
 }
 
 impl TranscriptLedgerService {
+    pub(crate) fn store(&self) -> &TranscriptLedgerStore {
+        &self.store
+    }
+
     pub fn new(
         store: Rc<TranscriptLedgerStore>,
         mut options: TranscriptLedgerServiceOptions,

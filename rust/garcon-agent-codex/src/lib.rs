@@ -11,4 +11,5 @@ pub mod service_tier;
 pub mod slash_command_discovery;
 pub mod subagent_lifecycle;
 pub mod subagent_tool_use;
+pub mod usage_format;
 pub mod user_input;

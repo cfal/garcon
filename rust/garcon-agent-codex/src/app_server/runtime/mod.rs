@@ -1,6 +1,10 @@
 pub mod client_events;
 pub mod interrupt;
+pub mod permission_events;
+pub mod source_registry;
+pub mod terminal;
 pub mod thread_settings;
+pub mod turn_events;
 pub mod utility;
 
 use std::rc::Rc;
