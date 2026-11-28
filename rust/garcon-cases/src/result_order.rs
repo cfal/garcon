@@ -46,10 +46,6 @@ impl<'a> OrderExceptions<'a> {
         }
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
     pub(crate) fn visit(&mut self, function: &str, result_path: &str) -> bool {
         let tail = result_path.strip_prefix('$').unwrap_or(result_path);
         let mut ignored = false;

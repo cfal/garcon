@@ -18,3 +18,6 @@ pub mod route_table;
 pub mod routes;
 pub mod static_assets;
 pub mod unported_routes;
+mod websocket_auth;
+mod websocket_capacity;
+pub mod ws;

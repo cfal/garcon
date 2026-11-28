@@ -102,7 +102,7 @@ separate scenario. The [replay report](replay-report.md) has per-scenario counts
 
 ## Recorded runtime behavior
 
-These are observations, except for the proposed 431 difference below. See
+These are observations, except for the native differences below. See
 [ADR-015](../DECISIONS.md#adr-015-accidental-behavior-becomes-a-listed-difference) and the
 [HTTP listener note](../research/http-listener.md).
 
@@ -153,6 +153,26 @@ The cases are `request-target-over-listener-limit` and
 `~double-slash` variants. These entries in
 [`known-differences.json`](known-differences.json) only apply to
 `--label native`. The front door still compares with the original's framing.
+
+### Native HTTP/1.0 WebSocket upgrade
+
+Bun upgrades an HTTP/1.0 GET to `/ws` with a valid key and version. The
+native listener answers plain 400 `WebSocket upgrade failed`: Hyper
+cannot hand off HTTP/1.0, and RFC 6455 requires HTTP/1.1 or higher.
+Approved by the manager on 2026-11-28 under ADR-028. This has a transport
+test but no edge recording; list only the native label if a case is
+recorded. Missing or non-Upgrade `Connection` fields on HTTP/1.1 still
+upgrade in both.
+
+### Browser session scope
+
+The edge port handles session pings, empty reconnect snapshots, and request
+validation. A valid chat subscription or reload, or a reconnect that asks
+for chat control data, is marked unported until the chat state has moved;
+the native session does not read `chats.json` to reproduce
+`SESSION_NOT_FOUND`. A reload cancellation without an active reload is
+still a no-op. Terminal stream handling and chat event broadcasts are
+outside the edge unit.
 
 ## Ledger responsiveness
 

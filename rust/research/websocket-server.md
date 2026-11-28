@@ -57,22 +57,32 @@ the benchmark enables `connect` and `handshake` on tokio-tungstenite
 with defaults off. Both compiled on Rust 1.99.1 with
 `cargo test -p garcon-bench -p garcon-server --locked`. See
 `rust/Cargo.lock` and both crates' `Cargo.toml`.
-An earlier scratch hyper upgrade with tokio-tungstenite 0.30.0 compiled on
-Rust 1.99.1; it did not establish full Bun parity.
 
-- After a custom HTTP 101, use hyper's upgrade and tokio-tungstenite's
-  `from_raw_socket` with server role. Hyper transfers already-read bytes;
-  using raw WebSocket handling avoids doing the HTTP handshake twice.
-- Set frame and reassembled message limits explicitly: tungstenite defaults
-  to 16 MiB frames and 64 MiB messages. Its write-buffer ceiling is not an
-  implementation of Bun's post-send budget or drop/terminate policy. It
-  queues automatic pong and close replies; keep driving or flushing the
-  stream so they reach the peer.
-- **Compression gap:** neither 0.27.0 nor 0.30.0 implements permessage-deflate.
-  A plain hyper/tokio-tungstenite stack cannot reproduce Bun's negotiated
-  compressed browser sessions. Do not advertise the extension until the
-  frame stack implements it. A replacement or compression layer was not
-  build-tested here; retain the relay where full native parity is required.
+The native browser transport uses `yawc 0.5.0` (MPL-2.0), with default
+features off and `zlib` enabled. Neither tungstenite 0.27.0 nor 0.30.0
+implements permessage-deflate. Soketto 0.8.1 implements it, but its receive
+size check precedes inflation without bounding the inflater's output, and
+its normal sender close API does not take an application close reason.
+This choice does not change the executor link's transport.
+
+- Hyper parses the handshake and hands off the connection, including
+  already-read bytes. The application writes Bun's choice of subprotocol
+  and extension explicitly; yawc's raw stream starts after the HTTP 101
+  and uses those extension parameters without another handshake.
+- Yawc bounds frame, assembled message, and inflate sizes. Translate the
+  inclusive Bun ceiling to yawc's exclusive limit. Apply the browser's
+  own byte limit to the decoded message separately to keep its 1009
+  response distinguishable from a transport drop.
+- The native sender stages encoded bytes at the client socket. Its queue
+  counts only bytes the socket has not accepted; both direct and broadcast
+  delivery enforce the browser's post-send limit against that count.
+- The `garcon-http` transport test runs the same raw client against Bun
+  1.4.3 and a real Hyper listener. It checks exact browser extension
+  offers, independently compressed replies, rejection of a message that
+  relies on the previous message's deflate dictionary, fragmented and
+  oversized inputs, close/pong frames, and terminating a paused client
+  during a burst while another remains responsive. The broadcast path
+  uses the same budget and is covered separately at the delivery layer.
 
 ## Traps
 
@@ -87,6 +97,8 @@ probe's application, which used the controller's plain-text fallback.
 | Version 12 or missing version; valid version with no key | First two return 426 with `Sec-WebSocket-Version: 13` and empty body. Missing key returns false from upgrade and the app returns 400 `WebSocket upgrade failed`. |
 | Client WebSocket upgrade refused with HTTP 401 | No open event; Bun 1.4.3 reports close 1002, `Expected 101 status code`, while 1.4.5 reports 1006 with no reason. This is a client event, not a close frame sent by the HTTP server. |
 | Offer `permessage-deflate; client_max_window_bits=12` | Negotiates `permessage-deflate; client_no_context_takeover; server_no_context_takeover`. |
+| HTTP/1.1 upgrade without `Connection`, or with `Connection: keep-alive` | Bun upgrades; the native listener preserves this. |
+| HTTP/1.0 GET upgrade with a valid key and version | Bun upgrades. Native returns plain 400 `WebSocket upgrade failed` because Hyper only hands off HTTP/1.1 upgrades. RFC 6455 requires HTTP/1.1 or higher for an opening handshake; manager-approved 2026-11-28 under ADR-028. The transport test covers this unrecorded difference. |
 | Limit 1024, text of 1024 or 1025 bytes; fragmented text 600 + 600 bytes | 1024 delivered. 1025 and 600 + 600 end the transport without a close frame or message callback. |
 | Limit 1024, negotiated compressed text inflating to 1024 or 1025 bytes | 1024 delivered; 1025 ends the transport without a close frame. Count inflated bytes too. |
 | Valid binary containing bytes `66 80 6f` vs. the same bytes as text | Binary delivered unchanged; invalid text ends the transport without a close frame. |
@@ -109,4 +121,6 @@ probe's application, which used the controller's plain-text fallback.
 - [hyper upgrade](https://docs.rs/hyper/1.13.0/hyper/upgrade/),
   [tokio-tungstenite stream](https://docs.rs/tokio-tungstenite/0.27.0/tokio_tungstenite/struct.WebSocketStream.html),
   [tungstenite protocol config and frame handling](https://docs.rs/tungstenite/0.27.0/src/tungstenite/protocol/mod.rs.html),
-  [tungstenite 0.30 features](https://docs.rs/crate/tungstenite/0.30.0/features).
+  [tungstenite 0.30 features](https://docs.rs/crate/tungstenite/0.30.0/features),
+  [soketto 0.8.1 connection](https://docs.rs/soketto/0.8.1/src/soketto/connection.rs.html),
+  [yawc 0.5.0 raw stream](https://docs.rs/yawc/0.5.0/yawc/struct.WebSocket.html#method.from_stream_with_extensions).

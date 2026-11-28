@@ -175,8 +175,6 @@ pub struct GitReviewDocumentSummary {
 #[serde(rename_all = "camelCase")]
 pub struct GitReviewFilePatchBody {
     pub path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub patch_digest: Option<String>,
     pub body_fingerprint: String,
     pub body_state: GitReviewBodyState,
     pub category: GitFileReviewCategory,
@@ -191,6 +189,8 @@ pub struct GitReviewFilePatchBody {
     pub limit_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub patch_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
