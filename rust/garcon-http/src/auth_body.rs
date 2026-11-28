@@ -54,7 +54,7 @@ impl AuthBodyReaders {
         B: Body<Data = Bytes> + Unpin,
         B::Error: Into<Box<dyn Error + Send + Sync>>,
     {
-        self.read_with(request, signal, |_, _| {}).await
+        self.read_with(request, signal, json::parse).await
     }
 
     pub(crate) async fn read_username_write<B>(
@@ -66,15 +66,14 @@ impl AuthBodyReaders {
         B: Body<Data = Bytes> + Unpin,
         B::Error: Into<Box<dyn Error + Send + Sync>>,
     {
-        self.read_with(request, signal, preserve_username_rejection)
-            .await
+        self.read_with(request, signal, parse_username_write).await
     }
 
     async fn read_with<B>(
         &self,
         request: Request<B>,
         signal: &CancellationToken,
-        normalize: fn(&[u8], &mut Value),
+        parse: fn(&str) -> serde_json::Result<Value>,
     ) -> Result<Value, Box<dyn Error>>
     where
         B: Body<Data = Bytes> + Unpin,
@@ -114,7 +113,7 @@ impl AuthBodyReaders {
         tokio::select! {
             biased;
             _ = signal.cancelled() => Err(invalid_body().into()),
-            result = tokio::time::timeout(DEADLINE, read_json(request.into_body(), normalize)) => {
+            result = tokio::time::timeout(DEADLINE, read_json(request.into_body(), parse)) => {
                 result.unwrap_or_else(|_| Err(invalid_body().into()))
             }
         }
@@ -123,7 +122,7 @@ impl AuthBodyReaders {
 
 async fn read_json<B>(
     mut body: B,
-    normalize: fn(&[u8], &mut Value),
+    parse: fn(&str) -> serde_json::Result<Value>,
 ) -> Result<Value, Box<dyn Error>>
 where
     B: Body<Data = Bytes> + Unpin,
@@ -150,22 +149,16 @@ where
     }
     let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes);
     let text = std::str::from_utf8(bytes).map_err(|_| invalid_body())?;
-    let mut value = json::parse(text).map_err(|_| invalid_body())?;
-    normalize(bytes, &mut value);
-    Ok(value)
+    parse(text).map_err(|_| invalid_body().into())
 }
 
-fn preserve_username_rejection(raw: &[u8], value: &mut Value) {
-    if let Some(username) = value.get_mut("username")
-        && username
-            .as_str()
-            .is_some_and(|name| name.contains('\u{fffd}'))
-        && json::contains_unpaired_surrogate_escape(raw)
-    {
+fn parse_username_write(text: &str) -> serde_json::Result<Value> {
+    let (mut value, [unpaired]) = json::parse_with_unpaired_surrogate_fields(text, ["username"])?;
+    if unpaired && let Some(username) = value.get_mut("username") {
         // The validator rejects this control marker in its normal check order.
-        // A genuine U+FFFD with an unrelated lone surrogate also fails this check.
         *username = Value::String("\0".into());
     }
+    Ok(value)
 }
 
 #[cfg(test)]
@@ -330,6 +323,14 @@ mod tests {
         for (raw, expected) in [
             (
                 r#"{"username":"\uFFFDarity","password":"fixture-password"}"#,
+                "\u{fffd}arity",
+            ),
+            (
+                r#"{"username":"\uD800arity","username":"\uFFFDarity","password":"fixture-password"}"#,
+                "\u{fffd}arity",
+            ),
+            (
+                r#"{"username":"\uFFFDarity","password":"fixture-\uD800"}"#,
                 "\u{fffd}arity",
             ),
             (
