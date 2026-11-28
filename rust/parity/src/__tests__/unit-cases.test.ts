@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CASES_FILE, MANIFEST_FILE, MAX_CASE_BYTES, mergeCaptured, readCases, writeCases, type CaptureRecord } from '../unit/cases.js';
+import { CASES_FILE, MANIFEST_FILE, MAX_CASE_BYTES, mergeCaptured, readCases, recordedBunVersion, writeCases, type CaptureRecord } from '../unit/cases.js';
 import type { Json } from '../wildcard.js';
 
 const call = (seq: number, fn: string, args: Json[], result: Json): CaptureRecord => ({ seq, fn, args, result });
@@ -86,7 +86,18 @@ describe('recordings on disk', () => {
     { id: 'parse#0', fn: 'parse', args: [''] as Json[], result: '' as Json, origin: 'test' },
     { id: 'parse#1', fn: 'parse', args: ['/x'] as Json[], result: { $: 'error', name: 'Error', message: 'bad', properties: {} } as Json, origin: 'trap:empty@$.args[0]' },
   ];
-  const manifest = { module: 'common/parse.ts', tests: ['common/__tests__/parse.test.js'], inputs: null, guards: [], notCaptured: [] };
+  const manifest = { module: 'common/parse.ts', tests: ['common/__tests__/parse.test.js'], inputs: null, guards: [], jsonArguments: [], bunVersion: '1.4.3', notCaptured: [] };
+
+  test('say which Bun made them, as a replay warns when it is another', async () => {
+    const directory = await temporary();
+    await writeCases(directory, cases, manifest);
+    expect(await recordedBunVersion(directory)).toBe('1.4.3');
+    // A manifest made before the version was recorded, and no recording at all.
+    const path = join(directory, MANIFEST_FILE);
+    await writeFile(path, (await Bun.file(path).text()).replace('"bunVersion": "1.4.3",\n', ''));
+    expect(await recordedBunVersion(directory)).toBeNull();
+    expect(await recordedBunVersion(join(directory, 'missing'))).toBeNull();
+  });
 
   test('are one JSON line per case and a manifest with the digest of the case file', async () => {
     const directory = await temporary();

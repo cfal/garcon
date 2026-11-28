@@ -11,8 +11,8 @@ use crate::markers;
 /// How many failing cases are listed before the grouped differences.
 const LISTED_FAILURES: usize = 50;
 
-/// What the port did for a call where the original threw, or that it has no
-/// port of the function.
+/// What the port did for a call where the original threw, that it has no port
+/// of the function, or that it cannot receive an argument of the case.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CaseError {
     outcome: Outcome,
@@ -27,6 +27,8 @@ enum Outcome {
     },
     Thrown(Value),
     Unhandled,
+    /// A recorded argument that cannot be given to the port, with the reason.
+    Undeliverable(String),
 }
 
 impl CaseError {
@@ -64,11 +66,18 @@ impl CaseError {
         }
     }
 
-    fn is_unhandled(&self) -> bool {
-        matches!(self.outcome, Outcome::Unhandled)
+    /// An argument of the case cannot be given to the port as it was
+    /// recorded. The case fails whatever the recording holds: the recording
+    /// holds a call the port cannot receive, and `--guard` and `--json` of the
+    /// recorder keep those out of it.
+    pub fn undeliverable(reason: impl Into<String>) -> Self {
+        Self {
+            outcome: Outcome::Undeliverable(reason.into()),
+        }
     }
 
-    // The outcome in the recording's form.
+    // The outcome in the recording's form, for a throw. The other outcomes
+    // fail the case by themselves and are never compared.
     fn recorded(&self) -> Value {
         match &self.outcome {
             Outcome::Error {
@@ -82,7 +91,7 @@ impl CaseError {
                 "properties": properties,
             }),
             Outcome::Thrown(value) => markers::marker("throw", value.clone()),
-            Outcome::Unhandled => json!({ "$": "unhandled" }),
+            Outcome::Unhandled | Outcome::Undeliverable(_) => Value::Null,
         }
     }
 }
@@ -123,14 +132,24 @@ where
     let mut with_wildcards = 0;
     for case in &recording.cases {
         let difference = match dispatch(&case.function, &case.args) {
-            Err(error) if error.is_unhandled() => Some(Difference {
-                path: "$".to_owned(),
-                kind: "unhandled",
-                expected: "a ported function".to_owned(),
-                actual: format!("no port of `{}`", case.function),
-            }),
             Ok(value) => compare::first_difference(&case.result, &value).map(in_case),
-            Err(error) => compare::first_difference(&case.result, &error.recorded()).map(in_case),
+            Err(error) => match &error.outcome {
+                Outcome::Error { .. } | Outcome::Thrown(_) => {
+                    compare::first_difference(&case.result, &error.recorded()).map(in_case)
+                }
+                Outcome::Unhandled => Some(Difference {
+                    path: "$".to_owned(),
+                    kind: "unhandled",
+                    expected: "a ported function".to_owned(),
+                    actual: format!("no port of `{}`", case.function),
+                }),
+                Outcome::Undeliverable(reason) => Some(Difference {
+                    path: "$".to_owned(),
+                    kind: "undeliverable",
+                    expected: "an argument the port can receive".to_owned(),
+                    actual: reason.clone(),
+                }),
+            },
         };
         if !compare::wildcard_paths(&case.result, "$").is_empty() {
             with_wildcards += 1;
@@ -316,6 +335,33 @@ mod tests {
         assert_eq!(report.failures[0].difference.kind, "unhandled");
         assert!(render(&report).contains(
             "FAIL absent#1 at $ (unhandled): expected a ported function, got no port of `absent`"
+        ));
+    }
+
+    #[test]
+    fn an_undeliverable_argument_fails_the_case_with_its_reason() {
+        // Even against a wildcard: a port that cannot receive the argument has shown nothing.
+        let (_directory, recording) = recording(&[
+            (
+                "f",
+                json!([{ "$": "number", "value": "NaN" }]),
+                json!("[..]"),
+            ),
+            ("g", json!([1]), json!([1])),
+        ]);
+        let report = check(&recording, &mut |function, args| {
+            if function == "f" {
+                Err(CaseError::undeliverable(
+                    "`f` received NaN, which JSON cannot carry. Read the argument with `javascript_number`.",
+                ))
+            } else {
+                echo(function, args)
+            }
+        });
+        assert_eq!(report.stats.passed, 1);
+        assert_eq!(report.failures[0].difference.kind, "undeliverable");
+        assert!(render(&report).contains(
+            "FAIL f#0 at $ (undeliverable): expected an argument the port can receive, got `f` received NaN, which JSON cannot carry. Read the argument with `javascript_number`."
         ));
     }
 

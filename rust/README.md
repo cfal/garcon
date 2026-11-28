@@ -157,7 +157,10 @@ bun run parity:unit:replay rust/garcon-contract/tests/cases/chat-id
 
 A recording is two files. `cases.jsonl` holds one `{ id, fn, args, result,
 origin }` per line; `manifest.json` holds the module, the tests, the SHA-256 of
-the case file, the guards, and the calls that were not captured.
+the case file, the guards, JSON argument declarations, the Bun version, and
+the calls that were not captured. Use the repository's pinned Bun (1.4.3):
+`record` refuses a different version unless given `--any-bun`, and
+`replay` warns about version mismatches.
 
 - `fn` is the export's name, `Class.method` for a static method, and
   `new Class` for a constructor call. A function the module calls through its
@@ -176,8 +179,10 @@ the case file, the guards, and the calls that were not captured.
   no-break space, and a 10,000-unit string, and each number leaf by 0, -0, -1,
   0.5, 1e21, 1e-7, and 2^53. An argument that is itself a number, which a
   port receives as the exact JavaScript number, is replaced by NaN and the two
-  infinities as well. A number inside an object or an array is not: it reaches
-  a port as JSON, which cannot carry them. A string leaf that keeps its value
+  infinities as well. A nested number or an argument declared with
+  `--json <function>:<argument index>` (repeatable, zero-based) does not get
+  those traps: it reaches the port as JSON, which cannot carry them. Calls
+  the tests make with those values are still recorded. A string leaf that keeps its value
   then takes the trap after its first character and at its end, so that a trap
   reaches past a check on how a value has to start: replacing a whole argument
   with the Kelvin sign never tests `parseBasePath('/K')`. A function gets at
@@ -194,14 +199,10 @@ the case file, the guards, and the calls that were not captured.
   that argument is recorded only when the original's guard accepts the value:
   it does not throw and returns something other than `null`, `undefined`, or
   `false`. Calls the tests made themselves are always kept, and so is every
-  variant of another argument. `record` prints what each guard dropped, and
-  the manifest keeps it, so a reviewer sees what is not recorded. No trap
-  variant of `parseExecutorId`'s argument is an executor ID, so the guard
-  above drops every one of them:
-
-  ```json
-  "guards": [{ "fn": "parseExecutorId", "argument": 0, "guard": "isExecutorId", "dropped": 60, "kept": 0 }]
-  ```
+  variant of another argument within the function's budget. Rejected
+  variants do not spend that budget: the recorder continues in candidate order
+  until 60 variants are accepted or none remain. `record` prints what each
+  guard dropped, and the manifest keeps the counts for review.
 - Every call is recorded twice, from two runs of the tests and two runs of the
   trap variants. A result that differs becomes a `[..]` wildcard and is printed
   as `noise:`; review each one, and prefer a test or an input whose result is
@@ -272,8 +273,9 @@ the port the JSON the recorded value round-trips to:
 - `bigint` is the argument as the `bigint` the original received.
 
 A port that takes a JSON value gets negative zero as `-0.0`. NaN and the
-infinities have no JSON form; one that reaches a JSON reader is read as `0`,
-so an argument that can be one of them is read with `javascript_number`. An
+infinities have no JSON form; one that reaches a JSON reader fails the replay
+case. Use `javascript_number` when the port takes a number, or declare the
+argument with `--json` to avoid generating non-finite traps. An
 argument that holds any other marker, such as a Date, a Map, or a Set, is not
 handled by these readers: the dispatcher decodes it with
 `garcon_cases::markers`, which also builds the markers a result needs.

@@ -96,10 +96,10 @@ function collect(value: Json, location: Location, leaves: Leaf[]): void {
   }
 }
 
-// A port receives an argument that is a number as the exact JavaScript
+// A port receives an argument that is itself a number as the exact JavaScript
 // number, NaN and the infinities included. A number inside an object or an
 // array reaches it as JSON, which cannot carry them, so only an argument that
-// is itself a number takes those traps.
+// is itself a number is a candidate for those traps.
 function numberLeaf(location: Location): Leaf {
   return { location, type: 'number', topLevel: location.length === 1 };
 }
@@ -149,13 +149,20 @@ export function locationPath(location: Location): string {
   );
 }
 
-// Generates at most MAX_VARIANTS_PER_FUNCTION variants of the calls of one
-// function. The budget is spent breadth first: every position gets a trap with
-// the first call that has it, so many calls with the same shape do not crowd
-// out the rest, and every trap reaches every position before a trap repeats
-// with a later call. `isKnown` skips a variant equal to a case already
-// recorded. The `origin` names the trap, how it meets the leaf, and the leaf.
-export function trapVariants(calls: readonly Json[][], isKnown: (args: Json[]) => boolean): Variant[] {
+// Yields the trap variants of the calls of one function, in order and without
+// a limit. The order is breadth first: every position gets a trap with the
+// first call that has it, so many calls with the same shape do not crowd out
+// the rest, and every trap reaches every position before a trap repeats with
+// a later call. `isKnown` skips a variant equal to a case already recorded.
+// `jsonArguments` are argument indexes declared with `--json`, which a port
+// receives as JSON even when they are a number: NaN and the infinities are not
+// made for them. The `origin` of a variant names the trap, how it meets the
+// leaf, and the leaf.
+export function* candidateVariants(
+  calls: readonly Json[][],
+  isKnown: (args: Json[]) => boolean,
+  jsonArguments: ReadonlySet<number> = new Set(),
+): Generator<Variant> {
   const positions = new Map<string, { location: Location; calls: Array<{ type: LeafType; topLevel: boolean; args: Json[] }> }>();
   for (const args of calls) {
     const leaves: Leaf[] = [];
@@ -169,7 +176,6 @@ export function trapVariants(calls: readonly Json[][], isKnown: (args: Json[]) =
   }
   const ordered = [...positions.values()];
   const callCount = Math.max(0, ...ordered.map((position) => position.calls.length));
-  const variants: Variant[] = [];
   for (const placements of STAGES) {
     for (const [trap, rank] of pairs(TRAP_COUNT, callCount)) {
       for (const { location, calls: atLocation } of ordered) {
@@ -177,24 +183,35 @@ export function trapVariants(calls: readonly Json[][], isKnown: (args: Json[]) =
         if (!call) continue;
         const text = call.type === 'string';
         const entry = (text ? STRING_TRAPS : NUMBER_TRAPS)[trap];
-        // A number has no text to embed a trap in, and NaN and the infinities
-        // replace only an argument that is itself a number.
-        if (!entry || (!text && placements.length > 1) || (!text && !call.topLevel && trap >= FIRST_NON_FINITE_TRAP)) continue;
+        // A number has no text to embed a trap in. NaN and the infinities are
+        // made only for an argument that is itself a number and is not
+        // declared JSON, since they cannot reach a port as JSON.
+        const undeliverable = !call.topLevel || jsonArguments.has(location[0] as number);
+        if (!entry || (!text && placements.length > 1) || (!text && undeliverable && trap >= FIRST_NON_FINITE_TRAP)) continue;
         for (const placement of text ? placements : ['replace' as const]) {
           const leaf = text
             ? trapString(leafAt(call.args, location) as string, entry[1] as string, placement)
             : encodeNumber(entry[1] as number);
           const args = replaceLeaf(call.args, location, leaf);
           if (isKnown(args)) continue;
-          variants.push({
+          yield {
             args,
             origin: `trap:${entry[0]}${placement === 'replace' ? '' : `+${placement}`}@${locationPath(location)}`,
             argument: location[0] as number,
-          });
-          if (variants.length >= MAX_VARIANTS_PER_FUNCTION) return variants;
+          };
         }
       }
     }
+  }
+}
+
+// The first MAX_VARIANTS_PER_FUNCTION variants of a function: what it gets
+// when no guard holds any of them back.
+export function trapVariants(calls: readonly Json[][], isKnown: (args: Json[]) => boolean, jsonArguments: readonly number[] = []): Variant[] {
+  const variants: Variant[] = [];
+  for (const variant of candidateVariants(calls, isKnown, new Set(jsonArguments))) {
+    variants.push(variant);
+    if (variants.length >= MAX_VARIANTS_PER_FUNCTION) break;
   }
   return variants;
 }
