@@ -54,12 +54,23 @@ export interface Guard {
 
 export type GuardSpec = Omit<Guard, 'dropped' | 'kept'>;
 
+// An argument of calls to `fn` that reaches a port as JSON even when it is a
+// number, declared with `--json`: the recorder makes no NaN and infinity trap
+// for it, since JSON cannot carry them.
+export interface JsonArgument {
+  fn: string;
+  argument: number;
+}
+
 export interface Manifest {
   // Repository-relative path of the recorded module.
   module: string;
   tests: string[];
   inputs: string | null;
   guards: Guard[];
+  jsonArguments: JsonArgument[];
+  // The Bun the original ran on while being recorded (ADR-026).
+  bunVersion: string;
   cases: number;
   sha256: string;
   notCaptured: NotCaptured[];
@@ -206,4 +217,16 @@ export async function readCases(outDirectory: string): Promise<{ manifest: Manif
     throw new Error(`${outDirectory}/${CASES_FILE}: ${cases.length} cases, manifest ${manifest.cases}`);
   }
   return { manifest, cases };
+}
+
+// The Bun a recording on disk was made with, as its manifest says. Null for a
+// manifest made before the version was recorded and for no recording at all;
+// reading the cases then reports what is missing.
+export async function recordedBunVersion(outDirectory: string): Promise<string | null> {
+  try {
+    const { bunVersion } = JSON.parse(await readFile(join(outDirectory, MANIFEST_FILE), 'utf8')) as Partial<Manifest>;
+    return bunVersion ?? null;
+  } catch {
+    return null;
+  }
 }

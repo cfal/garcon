@@ -13,6 +13,10 @@
 //! - A number has its exact recorded value. A function that takes a JavaScript
 //!   number reads it with [`javascript_number`], which keeps NaN and the
 //!   infinities.
+//! - NaN and an infinity have no JSON form, so no port that takes JSON can
+//!   receive them. A JSON reader fails such a case and names the two ways out.
+//!   The recorder makes those traps only for an argument that is a number and
+//!   is not declared with `--json`.
 //! - Any other marker, such as a Date, a Map, or a Set, is a value JSON cannot
 //!   round-trip to. A reader reports such an argument as not handled, and the
 //!   dispatcher decodes it with [`crate::markers`].
@@ -27,9 +31,9 @@ use crate::markers;
 /// An argument as the JSON it round-trips to, or `None` where the original
 /// received `undefined` or no argument.
 ///
-/// A port that takes a JSON value gets negative zero as `-0.0`. NaN and the
-/// infinities have no JSON form, and the recorder makes those traps only for
-/// an argument a port reads as a number; one that reaches here is read as `0`.
+/// A port that takes a JSON value gets negative zero as `-0.0`. An argument
+/// that holds NaN or an infinity, anywhere, fails the case: JSON cannot carry
+/// it, and anything put in its place could let a port pass by luck.
 pub fn round_tripped<'a>(
     function: &str,
     argument: Option<&'a Value>,
@@ -41,55 +45,86 @@ pub fn round_tripped<'a>(
         return Ok(None);
     }
     match json_of(value) {
-        Some(json) => Ok(Some(json)),
-        None => Err(CaseError::unhandled(function)),
+        Json::Value(json) => Ok(Some(json)),
+        Json::Marker => Err(CaseError::unhandled(function)),
+        Json::Number(number) => Err(undeliverable(function, &number)),
     }
 }
 
-// The JSON of a recorded value, or `None` when it holds a marker JSON cannot
-// carry.
-fn json_of(value: &Value) -> Option<Cow<'_, Value>> {
+// What a recorded value is for a port that takes JSON.
+enum Json<'a> {
+    Value(Cow<'a, Value>),
+    // A marker JSON cannot carry, which the dispatcher decodes itself.
+    Marker,
+    // NaN or an infinity, by the name the recording gives it.
+    Number(String),
+}
+
+fn json_of(value: &Value) -> Json<'_> {
     if let Some(kind) = markers::kind(value) {
         return match kind {
-            "number" => Some(Cow::Owned(match value["value"].as_str() {
-                Some("-0") => json!(-0.0),
-                _ => json!(0.0),
-            })),
+            "number" => match value["value"].as_str() {
+                Some("-0") => Json::Value(Cow::Owned(json!(-0.0))),
+                Some(number @ ("NaN" | "Infinity" | "-Infinity")) => {
+                    Json::Number(number.to_owned())
+                }
+                _ => Json::Marker,
+            },
             // A plain object with a `$` property of its own, which the
             // recording wraps to tell it from a marker.
             "object" => object_json(&value["value"]),
-            _ => None,
+            _ => Json::Marker,
         };
     }
     match value {
         Value::Array(items) => {
             let mut kept = Vec::with_capacity(items.len());
             for item in items {
-                kept.push(if markers::is_undefined(item) {
-                    Value::Null
+                let json = if markers::is_undefined(item) {
+                    Json::Value(Cow::Borrowed(&Value::Null))
                 } else {
-                    json_of(item)?.into_owned()
-                });
+                    json_of(item)
+                };
+                match json {
+                    Json::Value(json) => kept.push(json.into_owned()),
+                    other => return other,
+                }
             }
-            Some(Cow::Owned(Value::Array(kept)))
+            Json::Value(Cow::Owned(Value::Array(kept)))
         }
         Value::Object(_) => object_json(value),
-        other => Some(Cow::Borrowed(other)),
+        other => Json::Value(Cow::Borrowed(other)),
     }
 }
 
 // An object as JSON, without the properties whose value was `undefined`. The
 // object itself is not tested for being a marker: inside an `object` wrapper
 // its `$` key is data.
-fn object_json(value: &Value) -> Option<Cow<'_, Value>> {
+fn object_json(value: &Value) -> Json<'_> {
+    let Some(entries) = value.as_object() else {
+        return Json::Marker;
+    };
     let mut kept = Map::new();
-    for (key, item) in value.as_object()? {
+    for (key, item) in entries {
         if markers::is_undefined(item) {
             continue;
         }
-        kept.insert(key.clone(), json_of(item)?.into_owned());
+        match json_of(item) {
+            Json::Value(json) => {
+                kept.insert(key.clone(), json.into_owned());
+            }
+            other => return other,
+        }
     }
-    Some(Cow::Owned(Value::Object(kept)))
+    Json::Value(Cow::Owned(Value::Object(kept)))
+}
+
+// The failure for an argument that holds NaN or an infinity. The two ways out
+// are the reader for numbers and the recorder's `--json`.
+fn undeliverable(function: &str, number: &str) -> CaseError {
+    CaseError::undeliverable(format!(
+        "`{function}` received {number}, which JSON cannot carry. Read the argument with `javascript_number` if the port takes a number there, or record the module again with `--json {function}:<argument index>`, which keeps the recorder from making that trap."
+    ))
 }
 
 /// An argument the original typed `unknown`, where `undefined` and `null`
@@ -113,7 +148,7 @@ pub fn text<'a>(function: &str, argument: Option<&'a Value>) -> Result<Option<&'
             .as_str()
             .map(Some)
             .ok_or_else(|| CaseError::unhandled(function)),
-        // What had to be rebuilt is an array, an object, or a number.
+        // What had to be rebuilt is an array or an object.
         Some(Cow::Owned(_)) => Err(CaseError::unhandled(function)),
     }
 }
@@ -199,32 +234,53 @@ mod tests {
         );
     }
 
+    // How every JSON reader fails an argument that holds NaN or an infinity.
+    fn not_delivered(number: &str) -> CaseError {
+        CaseError::undeliverable(format!(
+            "`f` received {number}, which JSON cannot carry. Read the argument with `javascript_number` if the port takes a number there, or record the module again with `--json f:<argument index>`, which keeps the recorder from making that trap."
+        ))
+    }
+
     #[test]
-    fn negative_zero_stays_and_the_other_numbers_json_cannot_hold_are_zero() {
-        for (recorded, negative) in [
-            ("-0", true),
-            ("NaN", false),
-            ("Infinity", false),
-            ("-Infinity", false),
-        ] {
-            let argument = number(recorded);
-            let json = round_tripped("f", Some(&argument))
-                .expect("a number")
-                .expect("a value");
-            assert_eq!(is_negative_zero(&json), negative, "{recorded}");
-            if !negative {
-                assert_eq!(json.as_f64(), Some(0.0), "{recorded}");
-            }
-            // The same inside an object and an array.
-            let nested = json!({ "a": [number(recorded)] });
-            let json = round_tripped("f", Some(&nested))
-                .expect("a number")
-                .expect("a value");
+    fn negative_zero_stays_negative_zero() {
+        let argument = number("-0");
+        let json = round_tripped("f", Some(&argument))
+            .expect("a value")
+            .expect("a value");
+        assert!(is_negative_zero(&json));
+        // The same inside an object and an array.
+        let nested = json!({ "a": [number("-0"), markers::undefined()] });
+        let json = round_tripped("f", Some(&nested))
+            .expect("a value")
+            .expect("a value");
+        assert!(is_negative_zero(&json["a"][0]));
+        assert!(json["a"][1].is_null());
+    }
+
+    #[test]
+    fn nan_and_the_infinities_fail_the_case_and_reach_no_port_as_something_else() {
+        // JSON cannot carry them, so no value put in their place is the one the original received.
+        for recorded in ["NaN", "Infinity", "-Infinity"] {
             assert_eq!(
-                is_negative_zero(&json["a"][0]),
-                negative,
-                "{recorded} nested"
+                round_tripped("f", Some(&number(recorded))),
+                Err(not_delivered(recorded))
             );
+            assert_eq!(
+                unknown("f", Some(&number(recorded))),
+                Err(not_delivered(recorded))
+            );
+            assert_eq!(
+                text("f", Some(&number(recorded))),
+                Err(not_delivered(recorded))
+            );
+            // Wherever they sit in the argument.
+            let nested = json!({ "a": [1, { "b": number(recorded) }] });
+            assert_eq!(
+                round_tripped("f", Some(&nested)),
+                Err(not_delivered(recorded))
+            );
+            // The reader for numbers is the way out when the port takes one there.
+            assert!(javascript_number("f", Some(&number(recorded))).is_ok());
         }
     }
 
@@ -291,7 +347,7 @@ mod tests {
         for not_text in [
             json!(1),
             json!(true),
-            json!(number("NaN")),
+            json!(number("-0")),
             json!(["a"]),
             json!({ "a": "b" }),
         ] {

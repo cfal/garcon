@@ -5,6 +5,8 @@
   ],
   "inputs": null,
   "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
   "notCaptured": [],
   "cases": 155,
   "sha256": "6b3311e99d606f489d9f6a81742966e8fe352e925ccab0c50d3127764f6e4ffb"

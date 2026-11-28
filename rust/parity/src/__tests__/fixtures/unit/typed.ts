@@ -23,3 +23,24 @@ export function total(parts: { first: number; second?: number }): number {
 export function triple(count: number): number {
   return count * 3;
 }
+
+// Takes `unknown`, so its port reads the argument as JSON.
+export function half(value: unknown): unknown {
+  return typeof value === 'number' ? value / 2 : null;
+}
+
+// A typed argument that many calls share, so that a guard which rejects some
+// variants has more candidates to draw on.
+export function labelOf(value: unknown): string | null {
+  return typeof value === 'string' && value.length <= 3 ? `<${value}>` : null;
+}
+
+export function isLabel(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 3;
+}
+
+// A guard that gives no answer for the empty string, and accepts the rest.
+export function stallsOnEmpty(value: unknown): boolean {
+  if (value === '') while (true) { /* A guard that does not answer. */ }
+  return true;
+}
