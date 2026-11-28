@@ -118,3 +118,9 @@ test('captures latency counts, independent quantiles and eviction', () => {
   ]);
   queryLatencySnapshot(Array.from({ length: 20 }, (_, index) => ['served', index, index, index * 2]));
 });
+
+test('orders integer indices before other provider keys', () => {
+  projectSearchMessage(tool('unknown-tool-use', { rawName: 'custom', input: { b: 'bee', '10': 'ten', '2': 'two' } }));
+  const states = { normal: { status: 'running' }, '10': { status: 'completed' }, '2': { status: 'pendingInit' } };
+  projectSearchMessage(tool('codex-subagent-tool-use', { action: 'spawn_agent', details: { agentStates: states } }));
+});

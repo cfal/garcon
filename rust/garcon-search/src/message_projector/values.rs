@@ -12,7 +12,7 @@ use garcon_js::Number;
 
 use super::{
     enum_text,
-    extraction::{Compound, ExtractionBudget},
+    extraction::{Compound, ExtractionBudget, javascript_keys},
 };
 
 pub(super) fn ask_question(
@@ -144,10 +144,11 @@ pub(super) fn subagent_details(
         if let Some(states) = &value.agent_states {
             object.field("agentStates", |budget, depth| {
                 budget.compound(depth, |object| {
-                    for (key, state) in states {
+                    for key in javascript_keys(states.keys()) {
                         if !object.can_add_field() {
                             break;
                         }
+                        let state = &states[key];
                         object.field(key, |budget, depth| {
                             budget.compound(depth, |object| {
                                 object.text("status", &enum_text(state.status));
