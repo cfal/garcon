@@ -1,0 +1,35 @@
+{
+  "module": "server-agents/codex/src/agents/codex/service-tier.ts",
+  "tests": [
+    "server-agents/codex/src/agents/codex/__tests__/service-tier.test.ts"
+  ],
+  "inputs": "rust/garcon-agent-codex/tests/inputs/service-tier.jsonl",
+  "guards": [
+    {
+      "fn": "codexSpeed",
+      "argument": 0,
+      "guard": "common/agent-integration.ts#parseAgentSettingsEnvelope",
+      "dropped": 32,
+      "kept": 60
+    },
+    {
+      "fn": "codexServiceTier",
+      "argument": 0,
+      "guard": "rust/garcon-agent-codex/tests/oracles/service-tier-guards.ts#acceptsSpeed",
+      "dropped": 29,
+      "kept": 0
+    },
+    {
+      "fn": "assertEffectiveTier",
+      "argument": 0,
+      "guard": "rust/garcon-agent-codex/tests/oracles/service-tier-guards.ts#acceptsTier",
+      "dropped": 30,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 212,
+  "sha256": "afe3c88a138c7e2e079d8ec35874f98542b7d18700354b95cf2ecbff6d8d4799"
+}
