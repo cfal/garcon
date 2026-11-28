@@ -10,7 +10,9 @@ use garcon_base::http_error::json_error;
 use garcon_base::log::{Logger, ScopedLogger, create_logger};
 use garcon_contract::base_path::strip_base_path;
 use garcon_contract::server_runtime::CLI_SERVER_INSTANCE_HEADER;
-use http::header::{CACHE_CONTROL, CONTENT_TYPE, HeaderName, HeaderValue, LOCATION};
+use http::header::{
+    CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HeaderName, HeaderValue, LOCATION,
+};
 use http::{Method, Response, StatusCode};
 use http_body_util::Full;
 use tokio::io::AsyncWriteExt;
@@ -109,7 +111,7 @@ impl HttpRouter {
                 return shutting_down();
             }
             return request_url(&request)
-                .map_or_else(|error| self.unhandled(&error), |_| not_found());
+                .map_or_else(|error| self.unhandled(&error), |_| not_found(method));
         };
         let metadata = match route {
             Route::Ported { metadata, .. } | Route::Unported(metadata) => metadata,
@@ -135,6 +137,9 @@ impl HttpRouter {
             target.push_str(query);
         }
         let mut redirect = response(StatusCode::PERMANENT_REDIRECT, None);
+        redirect
+            .headers_mut()
+            .insert(CONTENT_LENGTH, HeaderValue::from_static("0"));
         redirect
             .headers_mut()
             .insert(LOCATION, HeaderValue::from_str(&target)?);
@@ -189,7 +194,7 @@ impl HttpRouter {
             return Ok(finish_native(
                 request.method(),
                 request.headers(),
-                not_found(),
+                not_found(request.method()),
                 self.options.compression_enabled,
             )
             .await?);
@@ -273,15 +278,18 @@ fn response(status: StatusCode, body: Option<Bytes>) -> RouteResponse {
     response
 }
 
-fn not_found() -> RouteResponse {
+fn not_found(method: &Method) -> RouteResponse {
     let mut reply = response(
         StatusCode::NOT_FOUND,
         Some(Bytes::from_static(b"Not found")),
     );
-    reply.headers_mut().insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("text/plain;charset=utf-8"),
-    );
+    // Bun omits the implicit string-body media type on a HEAD response.
+    if *method != Method::HEAD {
+        reply.headers_mut().insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("text/plain;charset=utf-8"),
+        );
+    }
     reply
 }
 

@@ -7,8 +7,6 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::rc::Rc;
 
-use garcon_base::http_body::get_token_from_request;
-use garcon_base::http_error::json_error;
 use garcon_base::log::{Logger, ScopedLogger, create_logger};
 use garcon_base::server_runtime::{
     ServerListener, advertised_server_url, create_server_runtime_state, log_server_ready,
@@ -17,12 +15,10 @@ use garcon_base::server_runtime::{
 use garcon_contract::cli_runtime_paths::{RuntimeKind, cli_runtime_file};
 use garcon_contract::tickets::TicketProjectDefault;
 use garcon_http::app_title::PublicAppTitle;
+use garcon_http::http_request::HttpAuthentication;
 use garcon_http::http_route::{HttpRouteOptions, HttpRouter};
-use garcon_http::http_route_types::{
-    AuthenticateHttpRequest, RouteFuture, RouteResponse, ServerPrincipal,
-};
-use garcon_http::listener::{HttpRequest, Listener};
-use garcon_http::routes::{create_edge_routes, r#static::StaticRoutes};
+use garcon_http::listener::Listener;
+use garcon_http::routes::{auth::AuthRoutes, create_edge_routes, r#static::StaticRoutes};
 use garcon_interface::errors::{AgentCallError, AgentDeliveryOutcome};
 use garcon_interface::execution_runtime::{
     ExecutionProjectInspectRequest, ExecutionProjectInspectResponse, ExecutionProjectService,
@@ -30,7 +26,10 @@ use garcon_interface::execution_runtime::{
 };
 use garcon_interface::resources::{ExecutorCallOptions, ExecutorResult};
 use garcon_js::SystemClock;
-use subtle::ConstantTimeEq;
+use garcon_stores::auth::passwords::BunPasswords;
+use garcon_stores::auth::service::AuthService;
+use garcon_stores::auth::store::AuthAccountStore;
+use garcon_stores::auth::token::AuthTokens;
 use tokio::fs;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -46,6 +45,7 @@ pub struct Controller {
     local: Rc<dyn ExecutionProjectService>,
     lease: ControllerLease,
     listener: JoinHandle<()>,
+    auth_routes: Rc<AuthRoutes>,
     listener_shutdown: CancellationToken,
     lease_lost: CancellationToken,
     shutting_down: Rc<Cell<bool>>,
@@ -163,7 +163,14 @@ impl Controller {
         .await?;
         let shutting_down = Rc::new(Cell::new(false));
         let result = bind_controller(&config, &lease, Rc::clone(&shutting_down), &logger).await;
-        let (listener, router, address, runtime_file, instance_id) = match result {
+        let BoundController {
+            listener,
+            router,
+            address,
+            runtime_file,
+            instance_id,
+            auth_routes,
+        } = match result {
             Ok(values) => values,
             Err(error) => {
                 if let Err(release) = lease.release().await {
@@ -197,6 +204,7 @@ impl Controller {
             local,
             lease,
             listener,
+            auth_routes,
             listener_shutdown,
             lease_lost,
             shutting_down,
@@ -217,6 +225,7 @@ impl Controller {
         self.logger.info("server: shutting down...");
         self.listener_shutdown.cancel();
         let listener = self.listener.await;
+        self.auth_routes.drain().await;
         let runtime = remove_server_runtime(self.runtime_file, &self.instance_id).await;
         let lease = self.lease.release().await;
         listener?;
@@ -226,12 +235,21 @@ impl Controller {
     }
 }
 
+struct BoundController {
+    listener: Listener,
+    router: HttpRouter,
+    address: SocketAddr,
+    runtime_file: String,
+    instance_id: String,
+    auth_routes: Rc<AuthRoutes>,
+}
+
 async fn bind_controller(
     config: &ServerConfig,
     lease: &ControllerLease,
     shutting_down: Rc<Cell<bool>>,
     logger: &ScopedLogger,
-) -> Result<(Listener, HttpRouter, SocketAddr, String, String), Box<dyn Error>> {
+) -> Result<BoundController, Box<dyn Error>> {
     let path = cli_runtime_file(&config.config_dir, RuntimeKind::Controller);
     match fs::remove_file(path).await {
         Ok(()) => {}
@@ -243,6 +261,19 @@ async fn bind_controller(
         &SystemClock,
     )?);
     open_workspace(lease.workspace_dir()).await?;
+    let clock: Rc<dyn garcon_js::Clock> = Rc::new(SystemClock);
+    let store = AuthAccountStore::open(&config.config_dir, clock.clone()).await?;
+    let auth = Rc::new(AuthService::new(
+        store,
+        AuthTokens::new(config.jwt_token_expiry.clone(), clock.clone()),
+        Rc::new(BunPasswords),
+        clock,
+    ));
+    let auth_routes = AuthRoutes::new(
+        auth.clone(),
+        config.auth_disabled,
+        config.trust_proxy_enabled,
+    )?;
     let routes = create_edge_routes(
         Rc::clone(&runtime),
         config.workspace_name.clone(),
@@ -251,6 +282,7 @@ async fn bind_controller(
             base_path: config.base_path.clone(),
             app_title: Rc::new(PublicAppTitle::default),
         },
+        &auth_routes,
     )?;
     let router = HttpRouter::new(
         routes,
@@ -264,7 +296,10 @@ async fn bind_controller(
                 .filter(|value| !value.is_empty())
                 .map(PathBuf::from),
         },
-        Rc::new(LocalCapabilityAuth(runtime.local_capability.clone())),
+        Rc::new(HttpAuthentication::new(
+            auth,
+            runtime.local_capability.clone(),
+        )),
     )?;
     if config.http_idle_timeout_seconds.0 > f64::from(u8::MAX) {
         return Err("Bun.serve expects idleTimeout to be 255 or less".into());
@@ -287,41 +322,14 @@ async fn bind_controller(
         "Published controller runtime at {} ({base_url})",
         published.file_path
     ));
-    Ok((
+    Ok(BoundController {
         listener,
         router,
         address,
-        published.file_path,
-        runtime.identity.instance_id.clone(),
-    ))
-}
-
-struct LocalCapabilityAuth(String);
-
-impl AuthenticateHttpRequest for LocalCapabilityAuth {
-    fn authenticate<'a>(
-        &'a self,
-        request: &'a HttpRequest,
-    ) -> RouteFuture<'a, Result<ServerPrincipal, Box<RouteResponse>>> {
-        Box::pin(async move {
-            let token = get_token_from_request(request);
-            if token.is_some_and(|token| bool::from(token.as_bytes().ct_eq(self.0.as_bytes()))) {
-                return Ok(ServerPrincipal::Local);
-            }
-            // INFALLIBLE: the fixed status and string-only error envelope are valid.
-            Err(Box::new(
-                json_error(
-                    "Invalid token",
-                    401.0,
-                    Some("AUTH_SESSION_INVALID"),
-                    None,
-                    None,
-                )
-                .expect("fixed invalid-token response")
-                .map(Some),
-            ))
-        })
-    }
+        runtime_file: published.file_path,
+        instance_id: runtime.identity.instance_id.clone(),
+        auth_routes,
+    })
 }
 
 pub struct UnavailableLocalExecutor;
@@ -449,6 +457,42 @@ mod tests {
                 assert!(!workspace.join(WORKSPACE_LOCK_NAME).exists());
                 assert!(!config_dir.join(WORKSPACE_LOCK_NAME).exists());
                 assert!(!config_dir.join("runtime.json").exists());
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn serves_invalid_login_and_rate_limit_errors_with_auth_response_headers() {
+        LocalSet::new()
+            .run_until(async {
+                let root = tempfile::tempdir().unwrap();
+                let controller = Controller::start(config(root.path()), Rc::new(UnavailableLocalExecutor)).await.unwrap();
+                let address = SocketAddr::from(([127, 0, 0, 1], controller.address.port()));
+                let body = r#"{"username":"fixture","password":"password"}"#;
+                for attempt in 0..=10 {
+                    let mut socket = TcpStream::connect(address).await.unwrap();
+                    let request = format!(
+                        "POST /fixture/api/v1/auth/login HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                        body.len(),
+                    );
+                    socket.write_all(request.as_bytes()).await.unwrap();
+                    let mut response = String::new();
+                    tokio::time::timeout(Duration::from_secs(3), socket.read_to_string(&mut response)).await.unwrap().unwrap();
+                    let (head, body) = response.split_once("\r\n\r\n").unwrap();
+                    assert!(head.contains("\r\ncache-control: no-store"), "{head}");
+                    let payload = garcon_js::json::parse(body).unwrap();
+                    if attempt == 10 {
+                        assert!(head.starts_with("HTTP/1.1 429 "), "{response}");
+                        assert!(head.contains("\r\nretry-after: 5"), "{head}");
+                        assert_eq!(payload["errorCode"], "RATE_LIMITED");
+                        assert_eq!(payload["retryable"], true);
+                    } else {
+                        assert!(head.starts_with("HTTP/1.1 401 "), "{response}");
+                        assert!(!head.contains("\r\nretry-after:"), "{head}");
+                        assert_eq!(payload["errorCode"], "AUTH_CREDENTIALS_INVALID");
+                    }
+                }
+                controller.shutdown().await.unwrap();
             })
             .await;
     }

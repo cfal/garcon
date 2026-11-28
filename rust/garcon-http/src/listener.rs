@@ -36,12 +36,17 @@ pub struct RequestBody {
     body: Limited<Incoming>,
     exceeded: Rc<Cell<bool>>,
     idle: Arc<ConnectionIdle>,
+    cancellation: CancellationToken,
 }
 
 impl RequestBody {
     /// Disables the idle timeout until this request's handler returns.
     pub fn disable_idle_timeout(&self) {
         self.idle.deadline_millis.store(0, Ordering::Relaxed);
+    }
+
+    pub fn cancellation(&self) -> &CancellationToken {
+        &self.cancellation
     }
 }
 
@@ -287,10 +292,13 @@ where
         return empty_and_close(StatusCode::PAYLOAD_TOO_LARGE);
     }
     let exceeded = Rc::new(Cell::new(false));
+    let cancellation = CancellationToken::new();
+    let _cancel_on_drop = cancellation.clone().drop_guard();
     let request = request.map(|body| RequestBody {
         body: Limited::new(body, body_limit),
         exceeded: Rc::clone(&exceeded),
         idle,
+        cancellation,
     });
     let response = handler(request, peer).await;
     if exceeded.get() {
@@ -371,6 +379,50 @@ mod tests {
                 }
                 assert_eq!(calls.get(), 3);
                 shutdown.cancel();
+            })
+            .await;
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_connection_signals_the_request_after_its_body_is_consumed() {
+        LocalSet::new()
+            .run_until(async {
+                let listener = Listener::bind("0.0.0.0", 0, 64, 0).await.unwrap();
+                let addr =
+                    SocketAddr::from(([127, 0, 0, 1], listener.local_addr().unwrap().port()));
+                let shutdown = CancellationToken::new();
+                let started = Rc::new(Cell::new(None));
+                let (send, receive) = tokio::sync::oneshot::channel();
+                started.set(Some(send));
+                let task = tokio::task::spawn_local(listener.serve(
+                    move |request, _| {
+                        let started = started.take().unwrap();
+                        async move {
+                            let cancellation = request.body().cancellation().clone();
+                            let body = request.into_body().collect().await.unwrap().to_bytes();
+                            assert_eq!(body, "{}");
+                            started.send(cancellation).unwrap();
+                            std::future::pending::<HttpResponse>().await
+                        }
+                    },
+                    shutdown.clone(),
+                ));
+                let mut stream = TcpStream::connect(addr).await.unwrap();
+                stream
+                    .write_all(b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\n\r\n{}")
+                    .await
+                    .unwrap();
+                let cancellation = tokio::time::timeout(Duration::from_secs(3), receive)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(!cancellation.is_cancelled());
+                drop(stream);
+                tokio::time::timeout(Duration::from_secs(3), cancellation.cancelled())
+                    .await
+                    .unwrap();
+                shutdown.cancel();
+                task.await.unwrap();
             })
             .await;
     }

@@ -60,56 +60,62 @@ fn replace_lone_surrogates(input: &[u8]) -> Cow<'_, [u8]> {
     if !input.windows(2).any(|window| window == b"\\u") {
         return Cow::Borrowed(input);
     }
+    let mut escapes = unpaired_surrogate_escapes(input);
+    let Some(first) = escapes.next() else {
+        return Cow::Borrowed(input);
+    };
     let mut output = Vec::with_capacity(input.len());
+    let mut copied = 0;
+    for start in std::iter::once(first).chain(escapes) {
+        output.extend_from_slice(&input[copied..start]);
+        output.extend_from_slice(b"\\uFFFD");
+        copied = start + 6;
+    }
+    output.extend_from_slice(&input[copied..]);
+    Cow::Owned(output)
+}
+
+/// Checks valid JSON text for unpaired surrogate escapes in string keys or values.
+pub fn contains_unpaired_surrogate_escape(raw: &[u8]) -> bool {
+    raw.windows(2).any(|window| window == b"\\u")
+        && unpaired_surrogate_escapes(raw).next().is_some()
+}
+
+fn unpaired_surrogate_escapes(input: &[u8]) -> impl Iterator<Item = usize> + '_ {
     let mut index = 0;
     let mut in_string = false;
-    while index < input.len() {
-        let byte = input[index];
-        if !in_string {
-            in_string = byte == b'"';
-            output.push(byte);
-            index += 1;
-            continue;
-        }
-        if byte != b'\\' {
-            in_string = byte != b'"';
-            output.push(byte);
-            index += 1;
-            continue;
-        }
-        if input.get(index + 1) == Some(&b'u') {
-            if let Some(unit) = hex_escape(input, index + 2) {
-                if (0xD800..=0xDBFF).contains(&unit) {
-                    let partner = input.get(index + 6) == Some(&b'\\')
-                        && input.get(index + 7) == Some(&b'u')
-                        && hex_escape(input, index + 8)
-                            .is_some_and(|low| (0xDC00..=0xDFFF).contains(&low));
-                    if partner {
-                        output.extend_from_slice(&input[index..index + 12]);
-                        index += 12;
-                    } else {
-                        output.extend_from_slice(b"\\uFFFD");
-                        index += 6;
-                    }
-                    continue;
-                }
-                if (0xDC00..=0xDFFF).contains(&unit) {
-                    output.extend_from_slice(b"\\uFFFD");
-                    index += 6;
-                    continue;
-                }
+    std::iter::from_fn(move || {
+        while let Some(&byte) = input.get(index) {
+            if byte == b'"' {
+                in_string = !in_string;
             }
-            // Any other `u`: the parser reads it and reports what is wrong.
-            output.extend_from_slice(&input[index..index + 2]);
+            if !in_string || byte != b'\\' {
+                index += 1;
+                continue;
+            }
+            let start = index;
             index += 2;
-            continue;
+            if input.get(start + 1) != Some(&b'u') {
+                continue;
+            }
+            let Some(unit) = hex_escape(input, index) else {
+                continue;
+            };
+            index += 4;
+            if !(0xD800..=0xDFFF).contains(&unit) {
+                continue;
+            }
+            let paired = unit <= 0xDBFF
+                && input.get(index..index + 2) == Some(b"\\u")
+                && hex_escape(input, index + 2).is_some_and(|low| (0xDC00..=0xDFFF).contains(&low));
+            if paired {
+                index += 6;
+            } else {
+                return Some(start);
+            }
         }
-        // Another escape: its next byte is quoted, whatever it is.
-        let end = (index + 2).min(input.len());
-        output.extend_from_slice(&input[index..end]);
-        index = end;
-    }
-    Cow::Owned(output)
+        None
+    })
 }
 
 /// The code unit of the four hex digits of a `\\u` escape that starts at

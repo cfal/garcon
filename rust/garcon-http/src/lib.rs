@@ -5,6 +5,7 @@
 
 pub mod app_title;
 pub mod asset_cache;
+mod auth_body;
 pub mod compose_routes;
 pub mod compression;
 pub mod http_request;
