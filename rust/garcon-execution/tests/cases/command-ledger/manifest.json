@@ -1,0 +1,20 @@
+{
+  "module": "rust/garcon-execution/tests/support/command-ledger-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-execution/tests/inputs/command-ledger.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "commandLedgerTrace",
+      "argument": 0
+    },
+    {
+      "fn": "commandLedgerTrace",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 13,
+  "sha256": "d58e934ead2dbd3ca70ad95473e99cb60a62e10f1302cdf1d8ee9d390b5aca67"
+}
