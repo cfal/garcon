@@ -1001,6 +1001,7 @@ name = "garcon-chats"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "futures",
  "garcon-base",
  "garcon-cases",
  "garcon-contract",
@@ -1009,6 +1010,7 @@ dependencies = [
  "indexmap",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
