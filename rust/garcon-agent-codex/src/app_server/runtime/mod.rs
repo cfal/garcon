@@ -1,5 +1,6 @@
 pub mod client_events;
 pub mod interrupt;
+pub mod managed;
 pub mod permission_events;
 pub mod source_registry;
 pub mod terminal;

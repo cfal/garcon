@@ -1,12 +1,19 @@
 use std::sync::LazyLock;
 
+use futures::{FutureExt, future::LocalBoxFuture};
+use garcon_agents_common::shared::{
+    attachment_files::materialize_attachment_files,
+    attachments::{AttachmentInput, is_image_attachment},
+};
 use garcon_contract::{
+    agent_execution::AgentAttachment,
     chat_modes::{PermissionMode, ThinkingMode},
     models::{
         GPT_6_1_SOL_MODEL, GPT_6_1_TERRA_MODEL, GPT_6_2_ASTRA_MODEL, GPT_6_2_SOL_MODEL,
         GPT_6_ASTRA_MODEL, GPT_6_LUNA_MODEL, GPT_6_SOL_MODEL,
     },
 };
+use garcon_interface::resources::ExecutorResult;
 use garcon_js::{json::stringify, trim};
 use indexmap::IndexMap;
 use regress::Regex;
@@ -573,6 +580,33 @@ fn command_with_attachment_paths(command: &str, file_paths: &[String]) -> String
         .filter(|part| !trim(part).is_empty())
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+pub struct CodexTurnAttachments {
+    pub image_paths: Vec<String>,
+    pub file_paths: Vec<String>,
+    pub cleanup: LocalBoxFuture<'static, ()>,
+}
+
+pub async fn write_attachments_to_temp_files(
+    attachments: &[AgentAttachment],
+) -> ExecutorResult<CodexTurnAttachments> {
+    let inputs: Vec<_> = attachments.iter().map(AttachmentInput::from).collect();
+    let mut materialized = materialize_attachment_files("codex-attachments", &inputs).await?;
+    let mut image_paths = Vec::new();
+    let mut file_paths = Vec::new();
+    for file in std::mem::take(&mut materialized.files) {
+        if is_image_attachment(file.attachment) {
+            image_paths.push(file.path);
+        } else {
+            file_paths.push(file.path);
+        }
+    }
+    Ok(CodexTurnAttachments {
+        image_paths,
+        file_paths,
+        cleanup: materialized.into_cleanup().boxed_local(),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
