@@ -1,14 +1,30 @@
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     rc::{Rc, Weak},
     time::Duration,
 };
 
+use garcon_agents_common::execution::runtime_events::{RuntimeSteerRequest, RuntimeSteerTarget};
+use garcon_interface::{
+    host::AgentLogger,
+    resources::ExecutorResult,
+    services::{AgentSteerFailureOutcome, AgentSteerRejectionReason, AgentSteerResult},
+};
+use garcon_js::json::Opaque;
 use indexmap::{IndexMap, IndexSet};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::{task::AbortHandle, time::Instant};
 
-use crate::cli_protocol::{ClaudeTurnStartSource, ClaudeTurnTerminalState};
+use crate::{
+    active_turn::ClaudeActiveTurn,
+    cli_process_transport::ClaudeWriteLineOptions,
+    cli_protocol::{ClaudeTurnStartSource, ClaudeTurnTerminalState},
+    runtime_state::{ClaudeRunningSession, ClaudeSessionProcess},
+    user_input::{
+        ClaudeUserInputFrameOptions, ClaudeUserInputPriority, build_claude_steering_user_content,
+        build_claude_user_input_frame,
+    },
+};
 
 pub const CLAUDE_STEER_WRITE_TIMEOUT: Duration = Duration::from_secs(15);
 pub const CLAUDE_STEER_IDLE_FENCE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -298,6 +314,295 @@ impl ClaudeTurnSteeringState {
         state.inputs.clear();
         state.reservations.clear();
     }
+}
+
+type SessionLookup = dyn Fn(&str) -> Option<Rc<ClaudeRunningSession>>;
+type FlushDeferredIdle = dyn Fn(&Rc<ClaudeRunningSession>, &Rc<ClaudeActiveTurn>);
+
+pub struct ClaudeSteeringControllerOptions {
+    pub session: Rc<SessionLookup>,
+    pub is_shutting_down: Rc<dyn Fn() -> bool>,
+    pub logger: Rc<dyn AgentLogger>,
+    pub write_timeout: Duration,
+    pub flush_deferred_idle: Rc<FlushDeferredIdle>,
+}
+
+pub struct ClaudeSteeringController {
+    options: ClaudeSteeringControllerOptions,
+    identity: Rc<()>,
+}
+
+struct CapturedTarget {
+    session: Rc<ClaudeRunningSession>,
+    active_turn: Rc<ClaudeActiveTurn>,
+    process: ClaudeSessionProcess,
+}
+
+struct SteeringTarget {
+    owner: Weak<()>,
+    captured: RefCell<Option<CapturedTarget>>,
+}
+
+struct SteeringDelivery<'a> {
+    reservation: Option<ClaudeSteeringReservation>,
+    target: &'a CapturedTarget,
+    flush: &'a FlushDeferredIdle,
+}
+
+impl Drop for SteeringDelivery<'_> {
+    fn drop(&mut self) {
+        drop(self.reservation.take());
+        (self.flush)(&self.target.session, &self.target.active_turn);
+    }
+}
+
+impl ClaudeSteeringController {
+    pub fn new(options: ClaudeSteeringControllerOptions) -> Self {
+        Self {
+            options,
+            identity: Rc::new(()),
+        }
+    }
+
+    pub fn capture_target(&self, agent_session_id: &str) -> Option<RuntimeSteerTarget> {
+        if (self.options.is_shutting_down)() {
+            return None;
+        }
+        let session = (self.options.session)(agent_session_id)?;
+        let turn = session.active_turn.borrow().clone()?;
+        if !can_steer(&turn) {
+            return None;
+        }
+        let process = session.process.borrow().clone()?;
+        Some(Rc::new(SteeringTarget {
+            owner: Rc::downgrade(&self.identity),
+            captured: RefCell::new(Some(CapturedTarget {
+                session,
+                active_turn: turn,
+                process,
+            })),
+        }))
+    }
+
+    pub async fn steer(&self, request: RuntimeSteerRequest) -> ExecutorResult<AgentSteerResult> {
+        let target = request
+            .target
+            .as_deref()
+            .and_then(|target| target.downcast_ref::<SteeringTarget>())
+            .filter(|target| target.owner.ptr_eq(&Rc::downgrade(&self.identity)))
+            .and_then(|target| target.captured.take());
+        let Some(target) = target else {
+            return Ok(no_active_turn());
+        };
+        if let Some(rejection) = self.validate_target(&request, &target) {
+            return Ok(rejection);
+        }
+        let _delivery = SteeringDelivery {
+            reservation: Some(target.active_turn.steering.reserve_delivery()),
+            target: &target,
+            flush: self.options.flush_deferred_idle.as_ref(),
+        };
+        let native_input_id = uuid::Uuid::new_v4().to_string();
+        let frame = build_claude_user_input_frame(ClaudeUserInputFrameOptions {
+            content: &build_claude_steering_user_content(&request.input),
+            session_id: &target.session.id,
+            uuid: &native_input_id,
+            priority: Some(ClaudeUserInputPriority::Next),
+        })?;
+        (request.prepare_delivery)().await?;
+        if let Some(rejection) = self.validate_target(&request, &target) {
+            return Ok(rejection);
+        }
+
+        let attempted = Rc::new(Cell::new(false));
+        let write_started_at = Instant::now();
+        let options = ClaudeWriteLineOptions {
+            before_write: Some(Box::new({
+                let attempted = attempted.clone();
+                let turn = target.active_turn.clone();
+                let input_id = native_input_id.clone();
+                move || {
+                    attempted.set(true);
+                    turn.steering.mark_submitted(input_id);
+                    Ok(())
+                }
+            })),
+            attempt_timeout: Some(self.options.write_timeout),
+            kill_process_after_attempt_failure: true,
+        };
+        if target
+            .process
+            .transport
+            .write_line(frame, options)
+            .await
+            .is_err()
+        {
+            target
+                .active_turn
+                .steering
+                .remove_submitted(&native_input_id);
+            return Ok(if attempted.get() {
+                AgentSteerResult::Failed {
+                    outcome: AgentSteerFailureOutcome::Unknown,
+                    message: "Claude steering delivery could not be confirmed".into(),
+                }
+            } else {
+                AgentSteerResult::Failed {
+                    outcome: AgentSteerFailureOutcome::NotSent,
+                    message: "Claude steering input was not sent".into(),
+                }
+            });
+        }
+        self.options.logger.debug(
+            "Claude steering input accepted for native delivery",
+            Some(&steering_fields(
+                &target.session,
+                &target.active_turn,
+                &native_input_id,
+                [
+                    ("writeMs", json!(write_started_at.elapsed().as_millis())),
+                    (
+                        "submittedSteers",
+                        json!(target.active_turn.steering.submitted_count()),
+                    ),
+                ],
+            )),
+        );
+        Ok(AgentSteerResult::Accepted)
+    }
+
+    fn validate_target(
+        &self,
+        request: &RuntimeSteerRequest,
+        captured: &CapturedTarget,
+    ) -> Option<AgentSteerResult> {
+        let Some(current) = (self.options.session)(&request.agent_session_id) else {
+            return Some(no_active_turn());
+        };
+        if current.active_turn.borrow().is_none() || (self.options.is_shutting_down)() {
+            return Some(no_active_turn());
+        }
+        if !Rc::ptr_eq(&current, &captured.session)
+            || current.chat_id != request.chat_id
+            || !current.is_current_turn(&captured.active_turn)
+            || !current.is_current_process(&captured.process.identity)
+            || !can_steer(&captured.active_turn)
+        {
+            return Some(AgentSteerResult::Rejected {
+                reason: AgentSteerRejectionReason::TurnChanged,
+                message: "The active Claude turn changed".into(),
+            });
+        }
+        None
+    }
+
+    pub fn handle_observation(
+        &self,
+        session: &Rc<ClaudeRunningSession>,
+        turn: &Rc<ClaudeActiveTurn>,
+        observation: ClaudeSteeringInputObservation,
+    ) {
+        if !session.is_current_turn(turn) {
+            return;
+        }
+        match observation {
+            ClaudeSteeringInputObservation::Queued { .. } => return,
+            ClaudeSteeringInputObservation::Started { uuid, source, wait } => {
+                self.options.logger.debug(
+                    "Claude steering input started",
+                    Some(&steering_fields(
+                        session,
+                        turn,
+                        &uuid,
+                        [
+                            ("source", json!(source)),
+                            ("submitToStartMs", json!(wait.as_millis())),
+                            ("remainingSubmitted", json!(turn.steering.submitted_count())),
+                        ],
+                    )),
+                );
+                return;
+            }
+            ClaudeSteeringInputObservation::DuplicateReplay { .. } => {
+                turn.steering.record_protocol_failure(
+                    "Claude CLI replayed steering input without accepting it into the command queue.".into(),
+                );
+            }
+            ClaudeSteeringInputObservation::Terminal { uuid, phase, state } => {
+                if !(phase == ClaudeSteeringTerminalPhase::AfterStart
+                    && state == ClaudeTurnTerminalState::Completed)
+                {
+                    let abort_requested = turn.protocol.borrow().abort_requested();
+                    let state = match state {
+                        ClaudeTurnTerminalState::Completed => "completed",
+                        ClaudeTurnTerminalState::Cancelled => "cancelled",
+                        ClaudeTurnTerminalState::Discarded => "discarded",
+                    };
+                    if !abort_requested {
+                        let message = match phase {
+                            ClaudeSteeringTerminalPhase::BeforeStart => format!(
+                                "Claude CLI {state} accepted steering input before it started."
+                            ),
+                            ClaudeSteeringTerminalPhase::AfterStart => {
+                                format!("Claude CLI {state} steering input before it completed.")
+                            }
+                        };
+                        turn.steering.record_protocol_failure(message);
+                    }
+                    let phase = match phase {
+                        ClaudeSteeringTerminalPhase::BeforeStart => "before-start",
+                        ClaudeSteeringTerminalPhase::AfterStart => "after-start",
+                    };
+                    self.options.logger.warn(
+                        "Claude steering input ended without normal completion",
+                        Some(&steering_fields(
+                            session,
+                            turn,
+                            &uuid,
+                            [
+                                ("phase", json!(phase)),
+                                ("state", json!(state)),
+                                ("abortRequested", json!(abort_requested)),
+                            ],
+                        )),
+                    );
+                }
+            }
+        }
+        (self.options.flush_deferred_idle)(session, turn);
+    }
+}
+
+fn can_steer(turn: &ClaudeActiveTurn) -> bool {
+    let protocol = turn.protocol.borrow();
+    protocol.input_started() && !protocol.abort_requested()
+}
+
+fn no_active_turn() -> AgentSteerResult {
+    AgentSteerResult::Rejected {
+        reason: AgentSteerRejectionReason::NoActiveTurn,
+        message: "No active Claude turn".into(),
+    }
+}
+
+fn steering_fields<const N: usize>(
+    session: &ClaudeRunningSession,
+    turn: &ClaudeActiveTurn,
+    uuid: &str,
+    fields: [(&str, Value); N],
+) -> IndexMap<String, Opaque> {
+    let prefix =
+        |value: &str| String::from_utf16_lossy(&value.encode_utf16().take(8).collect::<Vec<_>>());
+    [
+        ("chatId", json!(session.chat_id)),
+        ("runId", json!(turn.operation.run_id)),
+        ("sessionId", json!(prefix(&session.id))),
+        ("inputId", json!(prefix(uuid))),
+    ]
+    .into_iter()
+    .chain(fields)
+    .map(|(key, value)| (key.to_owned(), value.into()))
+    .collect()
 }
 
 #[cfg(test)]

@@ -73,7 +73,7 @@ pub enum ClaudeProcessSignal {
 }
 
 pub type ClaudeExitStatus = Shared<LocalBoxFuture<'static, Result<i32, String>>>;
-type Retirement = Shared<LocalBoxFuture<'static, Result<(), String>>>;
+pub type Retirement = Shared<LocalBoxFuture<'static, Result<(), String>>>;
 pub type ProcessInput = Pin<Box<dyn AsyncWrite>>;
 pub type ProcessOutput = Pin<Box<dyn AsyncRead>>;
 pub type KillProcess = dyn Fn(ClaudeProcessSignal) -> io::Result<()>;
