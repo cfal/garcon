@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agents-common/tests/oracles/acp-errors.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/acp-errors.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 323,
+  "sha256": "20c960121e7f19cc351056cf9ed8eb81e82b08abccd03c2c6262c4186066f7bb"
+}

@@ -103,8 +103,8 @@ impl AgentExecutionV5 for TestAgent {
 
 #[async_trait(?Send)]
 impl AgentProducers for TestAgent {
-    fn scope(&self) -> &AgentResourceScope {
-        &self.scope
+    fn scope(&self) -> ExecutorResult<AgentResourceScope> {
+        Ok(self.scope.clone())
     }
     async fn bind(
         &self,

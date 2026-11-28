@@ -9,8 +9,10 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+futures.workspace = true
 garcon-base.workspace = true
 garcon-contract.workspace = true
+garcon-interface.workspace = true
 garcon-js.workspace = true
 indexmap.workspace = true
 oxc_allocator = "=0.160.0"
@@ -18,9 +20,16 @@ oxc_ast = "=0.160.0"
 oxc_parser = "=0.160.0"
 oxc_semantic = "=0.160.0"
 oxc_span = "=0.160.0"
+regress = "0.12"
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 garcon-cases.workspace = true

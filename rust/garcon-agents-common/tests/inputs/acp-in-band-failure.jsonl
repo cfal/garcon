@@ -1,0 +1,171 @@
+{"fn":"acpOutputUpdateType","args":[{},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk"},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":""},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":null},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":""}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":{"type":"text"}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Hello."}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message","content":[{"type":"text","text":""}]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":[]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":["",""]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":["x"]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":{"text":"","content":"x"}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":{"content":"x","text":""}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":{"type":"other","text":""}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update"},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update"},["call-1"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":""},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":""},[""]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":null},["call-1"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":"call-1"},["call-1"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":"call-2"},["call-1"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":"call-2"},["call-1","call-2"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":7},["7"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":"constructor"},["__proto__","toString"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call","toolCallId":"call-2"},["call-2"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","content":"","toolCallId":"x"},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"","content":""},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":5,"content":""},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":""},["x"]]}
+{"fn":"inBandFailure","args":[null,[{"offer":"Hello."}]]}
+{"fn":"inBandFailure","args":[null,[{"offer":""},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"before ERROR after"}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"before ERROR after"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"before ERROR after"},{"continueOn":"agent_message_chunk"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"before ERROR after"},{"continueOn":"tool_call"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"before ERROR after"},{"continueOn":"tool_call_update"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"before ERROR after"},{"continueOn":null},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"before ERROR after"},{"continueOn":"AGENT_MESSAGE_CHUNK"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR"},{"offer":"text"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR"},{"take":null},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR"},{"reset":null},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"continueOn":"tool_call"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR at end"},{"offer":"ERROR again"},{"continueOn":"tool_call"},{"take":null},{"continueOn":"tool_call"},{"take":null}]]}
+{"fn":"inBandFailure","args":["",[{"offer":"text"},{"take":null}]]}
+{"fn":"inBandFailure","args":["text",[{"offer":"text"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"a ERROR ERROR b"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"😀 ERROR x"},{"continueOn":"tool_call"},{"take":null}]]}
+{"fn":"inBandFailure","args":["😀",[{"offer":"a😀b"},{"take":null}]]}
+{"fn":"inBandFailure","args":["E",[{"offer":"😀E x"},{"continueOn":null},{"take":null}]]}
+{"fn":"inBandFailure","args":["E",[{"offer":"😀E x"},{"continueOn":"tool_call"},{"take":null}]]}
+{"fn":"inBandFailure","args":["E",[{"offer":"😀E x"},{"continueOn":"tool_call"},{"take":null},{"offer":"E y"},{"take":null}]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":""},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":{"type":"","text":""}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message","content":[{"type":"","text":""}]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":{"text":"","content":""}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update"},[""]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":"call-2"},["call-1",""]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"Ünïcödé"},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":"Ünïcödé"},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":{"type":"Ünïcödé","text":""}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Ünïcödé"}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message","content":[{"type":"Ünïcödé","text":""}]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message","content":[{"type":"text","text":"Ünïcödé"}]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":["Ünïcödé",""]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":["","Ünïcödé"]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":{"text":"","content":"Ünïcödé"}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update"},["Ünïcödé"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":"Ünïcödé"},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":"call-2"},["call-1","Ünïcödé"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":{"type":""}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":[""]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":{"content":"","text":""}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":"constructor"},["__proto__",""]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"日本語雪"},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":"日本語雪"},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":{"type":"日本語雪","text":""}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"日本語雪"}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message","content":[{"type":"日本語雪","text":""}]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message","content":[{"type":"text","text":"日本語雪"}]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":["日本語雪",""]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":["","日本語雪"]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":{"text":"","content":"日本語雪"}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update"},["日本語雪"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":"日本語雪"},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":"call-2"},["call-1","日本語雪"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"Ünïcödé","content":""},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","content":"Ünïcödé","toolCallId":"x"},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":{"type":"Ünïcödé"}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":["Ünïcödé"]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":{"content":"Ünïcödé","text":""}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":""},["Ünïcödé"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":"Ünïcödé"},[""]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":"constructor"},["__proto__","Ünïcödé"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"","content":null},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":{"type":"","text":"Hello."}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":null},[""]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":""},["call-1"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"😀"},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":"😀"},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":{"type":"😀","text":""}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"😀"}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message","content":[{"type":"😀","text":""}]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_message","content":[{"type":"text","text":"😀"}]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":["😀",""]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":["","😀"]},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"agent_thought_chunk","content":{"text":"","content":"😀"}},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update"},["😀"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":"😀"},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","toolCallId":"call-2"},["call-1","😀"]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"日本語雪","content":""},[]]}
+{"fn":"acpOutputUpdateType","args":[{"sessionUpdate":"tool_call_update","content":"日本語雪","toolCallId":"x"},[]]}
+{"fn":"inBandFailure","args":[null,[{"offer":""}]]}
+{"fn":"inBandFailure","args":["",[{"offer":"before ERROR after"}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"before ERROR after"},{"continueOn":""},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR"},{"offer":""},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"continueOn":""},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR at end"},{"offer":"ERROR again"},{"continueOn":""},{"take":null},{"continueOn":"tool_call"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR at end"},{"offer":"ERROR again"},{"continueOn":"tool_call"},{"take":null},{"continueOn":""},{"take":null}]]}
+{"fn":"inBandFailure","args":["E",[{"offer":"😀E x"},{"continueOn":"tool_call"},{"take":null},{"offer":""},{"take":null}]]}
+{"fn":"inBandFailure","args":[null,[{"offer":"Ünïcödé"}]]}
+{"fn":"inBandFailure","args":["Ünïcödé",[{"offer":"before ERROR after"}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"before ERROR after"},{"continueOn":"Ünïcödé"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR"},{"offer":"Ünïcödé"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"continueOn":"Ünïcödé"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR at end"},{"offer":"ERROR again"},{"continueOn":"Ünïcödé"},{"take":null},{"continueOn":"tool_call"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR at end"},{"offer":"ERROR again"},{"continueOn":"tool_call"},{"take":null},{"continueOn":"Ünïcödé"},{"take":null}]]}
+{"fn":"inBandFailure","args":["E",[{"offer":"😀E x"},{"continueOn":"tool_call"},{"take":null},{"offer":"Ünïcödé"},{"take":null}]]}
+{"fn":"inBandFailure","args":["",[{"offer":"before ERROR after"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR at end"},{"offer":""},{"continueOn":"tool_call"},{"take":null},{"continueOn":"tool_call"},{"take":null}]]}
+{"fn":"inBandFailure","args":[null,[{"offer":"日本語雪"}]]}
+{"fn":"inBandFailure","args":["日本語雪",[{"offer":"before ERROR after"}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"before ERROR after"},{"continueOn":"日本語雪"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR"},{"offer":"日本語雪"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"continueOn":"日本語雪"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR at end"},{"offer":"ERROR again"},{"continueOn":"日本語雪"},{"take":null},{"continueOn":"tool_call"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR at end"},{"offer":"ERROR again"},{"continueOn":"tool_call"},{"take":null},{"continueOn":"日本語雪"},{"take":null}]]}
+{"fn":"inBandFailure","args":["E",[{"offer":"😀E x"},{"continueOn":"tool_call"},{"take":null},{"offer":"日本語雪"},{"take":null}]]}
+{"fn":"inBandFailure","args":[null,[{"offer":"Ünïcödé"},{"take":null}]]}
+{"fn":"inBandFailure","args":["Ünïcödé",[{"offer":"before ERROR after"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR at end"},{"offer":"Ünïcödé"},{"continueOn":"tool_call"},{"take":null},{"continueOn":"tool_call"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":""}]]}
+{"fn":"inBandFailure","args":["",[{"offer":"before ERROR after"},{"continueOn":"agent_message_chunk"},{"take":null}]]}
+{"fn":"inBandFailure","args":[null,[{"offer":"😀"}]]}
+{"fn":"inBandFailure","args":["😀",[{"offer":"before ERROR after"}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"before ERROR after"},{"continueOn":"😀"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR"},{"offer":"😀"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"continueOn":"😀"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR at end"},{"offer":"ERROR again"},{"continueOn":"😀"},{"take":null},{"continueOn":"tool_call"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR at end"},{"offer":"ERROR again"},{"continueOn":"tool_call"},{"take":null},{"continueOn":"😀"},{"take":null}]]}
+{"fn":"inBandFailure","args":["E",[{"offer":"😀E x"},{"continueOn":"tool_call"},{"take":null},{"offer":"😀"},{"take":null}]]}
+{"fn":"inBandFailure","args":[null,[{"offer":"日本語雪"},{"take":null}]]}
+{"fn":"inBandFailure","args":["日本語雪",[{"offer":"before ERROR after"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR at end"},{"offer":"日本語雪"},{"continueOn":"tool_call"},{"take":null},{"continueOn":"tool_call"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"Ünïcödé"}]]}
+{"fn":"inBandFailure","args":["Ünïcödé",[{"offer":"before ERROR after"},{"continueOn":"agent_message_chunk"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":""},{"take":null}]]}
+{"fn":"inBandFailure","args":["",[{"offer":"before ERROR after"},{"continueOn":"tool_call"},{"take":null}]]}
+{"fn":"inBandFailure","args":[null,[{"offer":"é"}]]}
+{"fn":"inBandFailure","args":["é",[{"offer":"before ERROR after"}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"before ERROR after"},{"continueOn":"é"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR"},{"offer":"é"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"continueOn":"é"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR at end"},{"offer":"ERROR again"},{"continueOn":"é"},{"take":null},{"continueOn":"tool_call"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR at end"},{"offer":"ERROR again"},{"continueOn":"tool_call"},{"take":null},{"continueOn":"é"},{"take":null}]]}
+{"fn":"inBandFailure","args":["E",[{"offer":"😀E x"},{"continueOn":"tool_call"},{"take":null},{"offer":"é"},{"take":null}]]}
+{"fn":"inBandFailure","args":[null,[{"offer":"😀"},{"take":null}]]}
+{"fn":"inBandFailure","args":["😀",[{"offer":"before ERROR after"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"ERROR at end"},{"offer":"😀"},{"continueOn":"tool_call"},{"take":null},{"continueOn":"tool_call"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"日本語雪"}]]}
+{"fn":"inBandFailure","args":["日本語雪",[{"offer":"before ERROR after"},{"continueOn":"agent_message_chunk"},{"take":null}]]}
+{"fn":"inBandFailure","args":["ERROR",[{"offer":"Ünïcödé"},{"take":null}]]}

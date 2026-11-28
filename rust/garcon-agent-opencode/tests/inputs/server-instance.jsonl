@@ -1,0 +1,100 @@
+{"fn":"mergeOpenCodeConfigContent","args":[{"$":"undefined"},"file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["  \n ","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{/*note*/\"z\":[1,], \"a\":2,}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":[" // only comment","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"😀\": }","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"x\":01}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"mode\":1,\"mode\":2}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["[]","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["null","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["5","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["\"text\"","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\":[[\"bad\",null]]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\":[\"file:///plugin.js\",\"other\",[\"file:///plugin.js\",{\"value\":1}]]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\n      // Operator-owned inline settings stay intact.\n      \"mode\": \"user\",\n      \"plugin\": [\n        \"file:///opt/user/plugin.js\",\n        [\"package-plugin\", { \"enabled\": true }],\n      ],\n    }","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\": [\"user-plugin\", [\"file:///plugin.js\", { \"configured\": true }]]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{ broken","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{} trailing","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{ \"plugin\": \"wrong\" }","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{ \"plugin\": [[\"incomplete\"]] }","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{ \"plugin\": null }","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{ \"plugin\": [null, \"x\"] }","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{ \"plugin\": [[\"x\", []]] }","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{ \"plugin\": [[\"x\", \"options\"]] }","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{ \"plugin\": [\"file:///plugin.js\", [\"file:///plugin.js\", {}], \"file:///plugin.js\"] }","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":1e2,\"b\":0.5,\"c\":-0,\"d\":1e21,\"e\":[1.0,true,null]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"2\":\"b\",\"1\":\"a\",\"x\":\"c\",\"10\":\"d\"}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":1,}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":1,\"b\":[1,2,]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["/* block */ {\"a\":/* inline */1}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":1}/* unterminated","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":\"unterminated}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":tru}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\" 1}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{1:2}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":[1 2]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":{\"b\":1}}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\":[\"file:///plugin.js\"]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"constructor\":1,\"toString\":2}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"__proto__\":{\"x\":1},\"a\":2}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"__proto__\":\"not an object\",\"a\":2}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":1e}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":1.}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":.5}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":+1}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":01}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":0x10}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":Infinity}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":NaN}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":\"\\u00e9\\n\\t\"}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":\"\\q\"}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":\"\\u12\"}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":'single'}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{a:1}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":[,]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":[1,,2]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":{}}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":[}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":1","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["[1,2","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":[{\"b\":1},{\"c\":2}]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":99999999999999999999}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":1,\"b\":[true,false,null,\"s\"],\"c\":{}}","file:///plugin.js"]}
+{"fn":"buildOpenCodeServerEnv","args":[{"KEEP_ME":"yes","OPENCODE_DISABLE_AUTOCOMPACT":"0","OPENCODE_DISABLE_AUTOUPDATE":"0","OPENCODE_PURE":"1"},"file:///plugin.js","linux"]}
+{"fn":"buildOpenCodeServerEnv","args":[{},"file:///plugin.js","linux"]}
+{"fn":"buildOpenCodeServerEnv","args":[{"KEEP_ME":"yes","OPENCODE_CONFIG_CONTENT":"{ \"formatter\": false }","OPENCODE_PURE":"1","OPENCODE_SESSION_ID":"ambient-session"},"file:///plugin.js","linux"]}
+{"fn":"buildOpenCodeServerEnv","args":[{"Opencode_Config_Content":"{ \"formatter\": false }","opencode_pure":"1","opencode_session_id":"ambient-session"},"file:///plugin.js","win32"]}
+{"fn":"buildOpenCodeServerEnv","args":[{"Opencode_Config_Content":"{ \"formatter\": false }","opencode_pure":"1"},"file:///plugin.js","linux"]}
+{"fn":"buildOpenCodeServerEnv","args":[{"PATH":"/usr/bin","UNSET":{"$":"undefined"},"OPENCODE_CONFIG_CONTENT":"  "},"file:///plugin.js","linux"]}
+{"fn":"buildOpenCodeServerEnv","args":[{"OPENCODE_CONFIG_CONTENT":"{\"a\":1,\"b\":2}","OPENCODE_CONFIG_CONTENT ":"x"},"file:///plugin.js","linux"]}
+{"fn":"buildOpenCodeServerEnv","args":[{"OPENCODE_CONFIG_CONTENT":null,"opencode_config_content":"{\"from\":\"second\"}"},"file:///plugin.js","win32"]}
+{"fn":"buildOpenCodeServerEnv","args":[{"b":"2","1":"1","a":"1"},"file:///plugin.js","linux"]}
+{"fn":"buildOpenCodeServerEnv","args":[{"OPENCODE_DISABLE_AUTOUPDATE":"0"},"file:///plugin.js","darwin"]}
+{"fn":"buildOpenCodeServerEnv","args":[{"OPENCODE_CONFIG_CONTENT":"{ broken"},"file:///plugin.js","linux"]}
+{"fn":"buildOpenCodeServerEnv","args":[{"OPENCODE_CONFIG_CONTENT":{"$":"undefined"},"opencode_config_content":"{\"from\":\"lower\"}"},"file:///plugin.js","win32"]}
+{"fn":"buildOpenCodeServerEnv","args":[{"OPENCODE_PURE":"1","opencode_pure":"2","OPENCODE_SESSION_ID":"a","Opencode_Session_Id":"b"},"file:///plugin.js","win32"]}
+{"fn":"buildOpenCodeServerEnv","args":[{"opencode_conf\u0131g_content":"x","opencode_pure":"1"},"file:///plugin.js","win32"]}
+{"fn":"buildOpenCodeServerEnv","args":[{"opencode_püre":"keep"},"file:///opt/Garçon plugins/x.mjs","linux"]}
+{"fn":"buildOpenCodeServerEnv","args":[{"OPENCODE_CONFIG_CONTENT":"\ufeff{\"a\":1}"},"file:///plugin.js","linux"]}
+{"fn":"buildOpenCodeServerEnv","args":[{"OPENCODE_CONFIG_CONTENT":{"$":"undefined"}},"file:///plugin.js","linux"]}
+{"fn":"buildOpenCodeServerEnv","args":[{},"file:///opt/Gar%C3%A7on%20plugins/100%25%20session%20%231.mjs","linux"]}
+{"fn":"mergeOpenCodeConfigContent","args":["\ufeff{\"a\":1}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\":[\"file:///plugin.js\",[\"file:///plugin.js\",{\"a\":1}],[\"other\",{\"b\":2}]]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\":[\"\u00e9\",\"\ud83d\ude00\"]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":[{"$":"undefined"},"file:///opt/Garçon plugins/100% session #1.mjs"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":1}",""]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\":[]}", "file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\":[[\"x\",{\"nested\":{\"deep\":[1,2,3]}}]]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\":[\"file:///plugin.js\",\"file:///plugin.js\"]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\":[[\"file:///plugin.js\",1]]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\":[[\"file:///plugin.js\",null]]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\":[[\"file:///plugin.js\",{\"a\":1},\"extra\"]]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\":{}}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\":\"file:///plugin.js\"}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\":[[\"\",{}]]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"plugin\":[[\"x\",{\"__proto__\":{\"a\":1}}]]}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":\"\\ud83d\\ude00\"}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":\"\\ud800\"}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":-1.5e-3,\"b\":123456789012345678901234567890}","file:///plugin.js"]}
+{"fn":"mergeOpenCodeConfigContent","args":["{\"a\":0.1,\"b\":1,\"10\":1,\"b1\":1}","file:///plugin.js"]}

@@ -6,8 +6,10 @@ use std::{
 
 use async_trait::async_trait;
 use garcon_base::{
-    domain_error::DomainError, errors::error_metadata,
-    executor_disconnect::ExecutorSessionLostError, log::create_logger,
+    domain_error::{DomainError, as_domain_error},
+    errors::error_metadata,
+    executor_disconnect::ExecutorSessionLostError,
+    log::create_logger,
     unhandled_rejection_policy::install_unhandled_rejection_policy,
 };
 use garcon_cases::{CaseError, replay, text};
@@ -383,29 +385,53 @@ impl CatalogDirectory for Directory {
 }
 
 impl CatalogEndpointResolver for Integration {
-    fn model_supports_images(&self, _: ModelImageSupport<'_>) -> bool {
-        false
+    fn model_supports_images(&self, _: ModelImageSupport<'_>) -> ExecutionOperationResult<bool> {
+        if self.mode == "provider-storage-unavailable" {
+            return Err(providers_unavailable());
+        }
+        Ok(false)
     }
-    fn get_model_options(&self, agent: &str, executor: &str) -> Vec<AgentModelOption> {
+    fn get_model_options(
+        &self,
+        agent: &str,
+        executor: &str,
+    ) -> ExecutionOperationResult<Vec<AgentModelOption>> {
         self.effects
             .borrow_mut()
             .push(json!(["models", agent, executor]));
-        if self.mode == "merge" {
-            ["sample-model", "", "endpoint-model"]
+        match self.mode.as_str() {
+            "merge" => Ok(["sample-model", "", "endpoint-model"]
                 .into_iter()
                 .map(|value| typed(&model(value)))
-                .collect()
-        } else {
-            Vec::new()
+                .collect()),
+            "provider-storage-unavailable" => Err(providers_unavailable()),
+            "missing-executor" => Err(DomainError::new(
+                ErrorCode::EXECUTOR_NOT_FOUND,
+                "Missing executor",
+                404,
+                false,
+            )
+            .into()),
+            "unexpected-provider-error" => Err(std::io::Error::other("Unexpected failure").into()),
+            _ => Ok(Vec::new()),
         }
     }
 }
 
-async fn service_trace(mode: &str) -> Value {
-    let signal = CancellationToken::new();
-    let integration = Rc::new(Integration {
+fn providers_unavailable() -> Box<dyn std::error::Error> {
+    DomainError::new(
+        ErrorCode::API_PROVIDER_STORAGE_UNAVAILABLE,
+        "Provider storage unavailable",
+        503,
+        true,
+    )
+    .into()
+}
+
+fn test_integration(mode: &str, signal: CancellationToken) -> Rc<Integration> {
+    Rc::new(Integration {
         mode: mode.into(),
-        signal: signal.clone(),
+        signal,
         effects: RefCell::default(),
         settings: typed(&settings()),
         descriptor: typed(&json!({
@@ -413,7 +439,12 @@ async fn service_trace(mode: &str) -> Value {
             "supportedThinkingModes":["none","ultra"],"supportsImages":true,"supportsProjectPathUpdate":true,
             "requiresNativePathForProjectPathUpdate":false,"supportedEndpointProtocols":["openai-compatible"],"configuration":[]
         })),
-    });
+    })
+}
+
+async fn service_trace(mode: &str) -> Value {
+    let signal = CancellationToken::new();
+    let integration = test_integration(mode, signal.clone());
     let catalog =
         AgentCatalogService::new(Rc::new(Directory(integration.clone())), integration.clone());
     let id = if mode == "missing" {
@@ -446,6 +477,92 @@ async fn service_trace(mode: &str) -> Value {
         "entry":entry, "strict":catalog.requires_strict_model_discovery(id, Some(REMOTE)),
         "localStrict":catalog.requires_strict_model_discovery(id,None), "effects":&*integration.effects.borrow(),
     })
+}
+
+fn endpoint_catalog(mode: &str) -> AgentCatalogService {
+    let integration = test_integration(mode, CancellationToken::new());
+    AgentCatalogService::new(Rc::new(Directory(integration.clone())), integration)
+}
+
+#[tokio::test]
+async fn provider_storage_unavailability_omits_only_endpoint_options() {
+    let catalog = endpoint_catalog("provider-storage-unavailable");
+    assert!(
+        !catalog
+            .has_endpoint_models("sample-agent", Some("remote"))
+            .unwrap()
+    );
+    let entry = catalog
+        .get_agent_catalog_entry(
+            "sample-agent",
+            AgentModelQuery {
+                executor_id: Some("remote"),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        entry
+            .models
+            .iter()
+            .map(|model| model.value.as_str())
+            .collect::<Vec<_>>(),
+        ["sample-model"]
+    );
+}
+
+#[tokio::test]
+async fn catalog_listing_does_not_suppress_executor_or_unexpected_provider_errors() {
+    for (scenario, message, code) in [
+        (
+            "missing-executor",
+            "Missing executor",
+            Some(ErrorCode::EXECUTOR_NOT_FOUND),
+        ),
+        ("unexpected-provider-error", "Unexpected failure", None),
+    ] {
+        let catalog = endpoint_catalog(scenario);
+        let lookup = catalog
+            .has_endpoint_models("sample-agent", Some("remote"))
+            .unwrap_err();
+        let entry = catalog
+            .get_agent_catalog_entry(
+                "sample-agent",
+                AgentModelQuery {
+                    executor_id: Some("remote"),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        for error in [lookup, entry] {
+            assert_eq!(error.to_string(), message);
+            assert_eq!(
+                as_domain_error(error.as_ref()).map(|domain| domain.code),
+                code
+            );
+        }
+    }
+}
+
+#[test]
+fn image_checks_propagate_provider_storage_unavailability() {
+    let catalog = endpoint_catalog("provider-storage-unavailable");
+    let error = catalog
+        .model_supports_images(ModelImageSupport {
+            executor_id: Some("remote"),
+            agent_id: "sample-agent",
+            model: "endpoint-model",
+            api_provider_id: Some("provider"),
+            model_endpoint_id: Some("endpoint"),
+        })
+        .unwrap_err();
+    assert_eq!(
+        as_domain_error(error.as_ref()).unwrap().code,
+        ErrorCode::API_PROVIDER_STORAGE_UNAVAILABLE
+    );
 }
 
 #[test]

@@ -1,4 +1,11 @@
 pub mod app_server;
+pub mod build;
 mod code_mode_command_expressions;
 pub mod code_mode_command_parser;
 pub mod code_mode_command_projection;
+pub mod runtime_types;
+pub mod service_tier;
+pub mod slash_command_discovery;
+pub mod subagent_lifecycle;
+pub mod subagent_tool_use;
+pub mod user_input;

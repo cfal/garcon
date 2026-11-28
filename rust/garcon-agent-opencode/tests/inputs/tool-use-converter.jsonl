@@ -1,0 +1,7 @@
+{"fn":"convertOpenCodeToolUse","args":["2026-03-01T00:00:00.000Z",{"tool":"todoread","id":"fixture","state":{}}]}
+{"fn":"convertOpenCodeToolUse","args":["2026-03-01T00:00:00.000Z",{"tool":"update_plan","id":"fixture","state":{"input":{"items":[{"step":"Check the port","status":"in-progress"},{"text":"Use the original","completed":true}]}}}]}
+{"fn":"convertOpenCodeToolUse","args":["2026-03-01T00:00:00.000Z",{"tool":"write_stdin","id":"fixture","state":{"input":{"sessionId":"synthetic-terminal","data":"yes\n"}}}]}
+{"fn":"convertOpenCodeToolUse","args":["2026-03-01T00:00:00.000Z",{"tool":"read","id":"fixture","state":{"input":{"path":"/fixture.txt","offset":"0x10","limit":"0b11","endLine":"\ufeff20"}}}]}
+{"fn":"convertOpenCodeToolUse","args":["2026-03-01T00:00:00.000Z",{"tool":"read","id":"fixture","state":{"input":{"path":"/fixture.txt","offset":"-1.5","limit":"--1","endLine":"Infinity"}}}]}
+{"fn":"convertOpenCodeToolUse","args":["2026-03-01T00:00:00.000Z",{"tool":"edit","id":"fixture","state":{"input":{"changes":[null,{"path":"/fixture.txt","kind":"update"},42]}}}]}
+{"fn":"convertOpenCodeToolUse","args":["2026-03-01T00:00:00.000Z",{"tool":"plan_exit","id":"fixture","state":{"input":{"allowedPrompts":[{"tool":"Bash","prompt":"read fixture"},null,{}]}}}]}

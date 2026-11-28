@@ -1,0 +1,139 @@
+{"fn":"parseJsonc","args":[""]}
+{"fn":"parseJsonc","args":["   "]}
+{"fn":"parseJsonc","args":["{}"]}
+{"fn":"parseJsonc","args":["[]"]}
+{"fn":"parseJsonc","args":["null"]}
+{"fn":"parseJsonc","args":["true"]}
+{"fn":"parseJsonc","args":["false"]}
+{"fn":"parseJsonc","args":["0"]}
+{"fn":"parseJsonc","args":["-0"]}
+{"fn":"parseJsonc","args":["1.5"]}
+{"fn":"parseJsonc","args":["1e2"]}
+{"fn":"parseJsonc","args":["1E-2"]}
+{"fn":"parseJsonc","args":["1e+2"]}
+{"fn":"parseJsonc","args":["1e400"]}
+{"fn":"parseJsonc","args":["1."]}
+{"fn":"parseJsonc","args":["1.e2"]}
+{"fn":"parseJsonc","args":[".5"]}
+{"fn":"parseJsonc","args":["-.5"]}
+{"fn":"parseJsonc","args":["-"]}
+{"fn":"parseJsonc","args":["01"]}
+{"fn":"parseJsonc","args":["0x10"]}
+{"fn":"parseJsonc","args":["+1"]}
+{"fn":"parseJsonc","args":["Infinity"]}
+{"fn":"parseJsonc","args":["NaN"]}
+{"fn":"parseJsonc","args":["tru"]}
+{"fn":"parseJsonc","args":["True"]}
+{"fn":"parseJsonc","args":["\"s\""]}
+{"fn":"parseJsonc","args":["\"a\\\"b\\\\c\\/b\\nf\\rg\\ti\""]}
+{"fn":"parseJsonc","args":["\"\\u0041\\u00e9\\u4e2d\\ud83d\\ude00\""]}
+{"fn":"parseJsonc","args":["\"\\u12\""]}
+{"fn":"parseJsonc","args":["\"\\uZZZZ\""]}
+{"fn":"parseJsonc","args":["\"\\q\""]}
+{"fn":"parseJsonc","args":["\"unterminated"]}
+{"fn":"parseJsonc","args":["\"line\nbreak\""]}
+{"fn":"parseJsonc","args":["\"tab\tinside\""]}
+{"fn":"parseJsonc","args":["\""]}
+{"fn":"parseJsonc","args":["\"a\\"]}
+{"fn":"parseJsonc","args":["{\"a\":1}"]}
+{"fn":"parseJsonc","args":["{\"a\":1,\"b\":[1,2,{\"c\":null}],\"d\":{}}"]}
+{"fn":"parseJsonc","args":["{\"a\":1,}"]}
+{"fn":"parseJsonc","args":["[1,2,]"]}
+{"fn":"parseJsonc","args":["{\"a\":1,,\"b\":2}"]}
+{"fn":"parseJsonc","args":["[1,,2]"]}
+{"fn":"parseJsonc","args":["[,]"]}
+{"fn":"parseJsonc","args":["{,}"]}
+{"fn":"parseJsonc","args":["[1 2]"]}
+{"fn":"parseJsonc","args":["{\"a\":1 \"b\":2}"]}
+{"fn":"parseJsonc","args":["{\"a\":1} trailing"]}
+{"fn":"parseJsonc","args":["{} {}"]}
+{"fn":"parseJsonc","args":["[1,2"]}
+{"fn":"parseJsonc","args":["{\"a\":1"]}
+{"fn":"parseJsonc","args":["{\"a\":{\"b\":1}"]}
+{"fn":"parseJsonc","args":["{\"a\":"]}
+{"fn":"parseJsonc","args":["{\"a\"}"]}
+{"fn":"parseJsonc","args":["{\"a\" 1}"]}
+{"fn":"parseJsonc","args":["{a:1}"]}
+{"fn":"parseJsonc","args":["{'a':1}"]}
+{"fn":"parseJsonc","args":["{1:2}"]}
+{"fn":"parseJsonc","args":["[}"]}
+{"fn":"parseJsonc","args":["{]"]}
+{"fn":"parseJsonc","args":["[1}"]}
+{"fn":"parseJsonc","args":["{\"a\":1]"]}
+{"fn":"parseJsonc","args":["// only a line comment"]}
+{"fn":"parseJsonc","args":["// c\n{\"a\":1 // after\n}"]}
+{"fn":"parseJsonc","args":["/* block */ {\"a\":/* inline */1}"]}
+{"fn":"parseJsonc","args":["/* unterminated"]}
+{"fn":"parseJsonc","args":["/* unterminated *"]}
+{"fn":"parseJsonc","args":["/**/"]}
+{"fn":"parseJsonc","args":["/* multi\nline */ [1]"]}
+{"fn":"parseJsonc","args":["/ not a comment"]}
+{"fn":"parseJsonc","args":["{\"a\":/}"]}
+{"fn":"parseJsonc","args":["/* c1 /* c2 */ 1"]}
+{"fn":"parseJsonc","args":["//comment\r\n1"]}
+{"fn":"parseJsonc","args":["\r\n\t 1 \r\n"]}
+{"fn":"parseJsonc","args":["{\"a\":1}\n"]}
+{"fn":"parseJsonc","args":["{\"😀\": }"]}
+{"fn":"parseJsonc","args":["{\"😀\":1}"]}
+{"fn":"parseJsonc","args":["{\"mode\":1,\"mode\":2}"]}
+{"fn":"parseJsonc","args":["{\"2\":\"b\",\"1\":\"a\",\"x\":\"c\",\"10\":\"d\"}"]}
+{"fn":"parseJsonc","args":["{\"a\":[{\"b\":1},{\"c\":2}]}"]}
+{"fn":"parseJsonc","args":["{\"a\":99999999999999999999}"]}
+{"fn":"parseJsonc","args":["{\"__proto__\":{\"x\":1},\"a\":2}"]}
+{"fn":"parseJsonc","args":["[1,[2,[3,[4]]]]"]}
+{"fn":"parseJsonc","args":["\u00a0"]}
+{"fn":"parseJsonc","args":["\"\u0001\""]}
+{"fn":"parseJsonc","args":["{\"a\":0.1e1}"]}
+{"fn":"parseJsonc","args":["{\"a\":1e}"]}
+{"fn":"parseJsonc","args":["{\"a\":1e+}"]}
+{"fn":"parseJsonc","args":["[tru]"]}
+{"fn":"parseJsonc","args":["[\"a\" \"b\"]"]}
+{"fn":"parseJsonc","args":["{},"]}
+{"fn":"parseJsonc","args":["[],"]}
+{"fn":"parseJsonc","args":["[😀,]"]}
+{"fn":"parseJsonc","args":["{😀:1}"]}
+{"fn":"parseJsonc","args":["\"😀\""]}
+{"fn":"parseJsonc","args":["\"😀"]}
+{"fn":"parseJsonc","args":[" {}"]}
+{"fn":"parseJsonc","args":["{\"a\":1} "]}
+{"fn":"parseJsonc","args":["{\"a\":\" \"}"]}
+{"fn":"parseJsonc","args":["// 😀\n1"]}
+{"fn":"parseJsonc","args":["/* 😀 */1"]}
+{"fn":"parseJsonc","args":["﻿{}"]}
+{"fn":"parseJsonc","args":["{\"a\":1}\u0085"]}
+{"fn":"parseJsonc","args":["{\"a\b\":1}"]}
+{"fn":"parseJsonc","args":["{\"a\":\"\b\f\n\r\t\"}"]}
+{"fn":"parseJsonc","args":["{\"a\":\"\u0000\"}"]}
+{"fn":"parseJsonc","args":["{\"日本語雪\":é}"]}
+{"fn":"parseJsonc","args":["{\"a\":1}/* c */"]}
+{"fn":"parseJsonc","args":["{\"a\":1}// c"]}
+{"fn":"parseJsonc","args":["{\"a\":1}// c\n"]}
+{"fn":"parseJsonc","args":["{\"a\"/* c */:/* c */1}"]}
+{"fn":"parseJsonc","args":["{/* c */\"a\":1}"]}
+{"fn":"parseJsonc","args":["[/* c */1/* c */,/* c */2/* c */]"]}
+{"fn":"parseJsonc","args":["{\"a\":1,\n\"b\":2}"]}
+{"fn":"parseJsonc","args":["{\"a\":\n1}"]}
+{"fn":"parseJsonc","args":["\n\r\n\t [\r\n1\r\n] \t\r\n"]}
+{"fn":"parseJsonc","args":["{\"plugin\":[\"x\",{\"k\":\"v\"}]}"]}
+{"fn":"parseJsonc","args":["{\"a\":[1,2,3],\"b\":{},\"c\":[[[]]]}"]}
+{"fn":"parseJsonc","args":["{\"a\":1,\"a\":2,\"A\":3}"]}
+{"fn":"parseJsonc","args":["{\"\":1}"]}
+{"fn":"parseJsonc","args":["{\"a\":\"\\ud83d\\ud83d\\ude00\\ud83d\\ud83d\\ude00\"}"]}
+{"fn":"parseJsonc","args":["{\"a\":\"😀\"}"]}
+{"fn":"parseJsonc","args":["{\"a\":-}"]}
+{"fn":"parseJsonc","args":["{\"a\":1E}"]}
+{"fn":"parseJsonc","args":["{\"a\":1e2.5}"]}
+{"fn":"parseJsonc","args":["{\"a\":00}"]}
+{"fn":"parseJsonc","args":["{\"a\":0."]}
+{"fn":"parseJsonc","args":["{\"a\":0e}"]}
+{"fn":"parseJsonc","args":["{\"a\":[1}"]}
+{"fn":"parseJsonc","args":["[\"a\",1,tru,false,nulll]"]}
+{"fn":"parseJsonc","args":["{,\"a\":1}"]}
+{"fn":"parseJsonc","args":["[,1]"]}
+{"fn":"parseJsonc","args":["[1,,]"]}
+{"fn":"parseJsonc","args":["{\"a\":1,\"b\"}"]}
+{"fn":"parseJsonc","args":["{\"a\" \"b\"}"]}
+{"fn":"parseJsonc","args":["{\"a\":}}"]}
+{"fn":"parseJsonc","args":["{}}"]}
+{"fn":"parseJsonc","args":["[]]"]}
+{"fn":"parseJsonc","args":["\"\\uD83D\\uDE00\\uD83D\""]}

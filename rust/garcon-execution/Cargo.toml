@@ -26,6 +26,10 @@ sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 garcon-cases.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+url.workspace = true

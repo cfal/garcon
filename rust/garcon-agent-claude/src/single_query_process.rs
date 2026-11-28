@@ -51,7 +51,6 @@ pub async fn run_claude_single_query_process(
         Stdio::null(),
     )?;
     let exited = process.exited.shared();
-    let mut killed = false;
     let result = {
         let status = exited.clone();
         let output = async move {
@@ -69,19 +68,13 @@ pub async fn run_claude_single_query_process(
         tokio::select! {
             biased;
             result = &mut output => result,
-            () = options.signal.cancelled() => {
-                (process.kill)(ClaudeProcessSignal::Term)?;
-                killed = true;
-                output.await
-            }
+            () = options.signal.cancelled() => Err(abort_error().into()),
         }
     };
     let (stdout, stderr, exit_code) = match result {
         Ok(output) => output,
         Err(error) => {
-            if let Err(teardown) =
-                terminate_failed_process(exited, process.kill.as_ref(), killed).await
-            {
+            if let Err(teardown) = terminate_failed_process(exited, process.kill.as_ref()).await {
                 return Err(SingleQueryTeardownError {
                     source: error,
                     teardown: teardown.to_string(),
@@ -138,25 +131,25 @@ fn check_aborted(signal: &CancellationToken) -> ExecutorResult<()> {
     if !signal.is_cancelled() {
         return Ok(());
     }
-    Err(NamedError {
+    Err(abort_error().into())
+}
+
+fn abort_error() -> NamedError {
+    NamedError {
         name: "AbortError".to_owned(),
         message: "The operation was aborted.".to_owned(),
         code: None,
     }
-    .into())
 }
 
 async fn terminate_failed_process(
     exit: ClaudeExitStatus,
     kill: &KillProcess,
-    killed: bool,
 ) -> ExecutorResult<()> {
     if wait_for_exit(exit.clone(), Duration::ZERO).await {
         return Ok(());
     }
-    if !killed {
-        kill(ClaudeProcessSignal::Term)?;
-    }
+    kill(ClaudeProcessSignal::Term)?;
     if wait_for_exit(exit.clone(), SINGLE_QUERY_EXIT_GRACE).await {
         return Ok(());
     }
@@ -303,6 +296,62 @@ mod tests {
         let mut options = fixture(root.path(), "unknown", &token, &log);
         options.binary = root.path().join("does-not-exist").into_os_string();
         let error = run_claude_single_query_process(options).await.unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<NamedError>().unwrap().name,
+            "AbortError"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn abort_escalates_after_a_live_child_traps_sigterm() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::UnixListener;
+
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("control.sock");
+        let listener = UnixListener::bind(&path).unwrap();
+        let socket_path = serde_json::to_string(path.to_str().unwrap()).unwrap();
+        let script = format!(
+            r#"
+            const s = require('node:net').createConnection({socket_path});
+            process.on('SIGTERM', () => s.write('term\n'));
+            s.on('connect', () => s.write('ready\n'));
+            s.on('data', () => process.exit(0));
+        "#
+        );
+        let token = CancellationToken::new();
+        let log = Logger::default();
+        let observe_child = async {
+            let (stream, _) = tokio::time::timeout(Duration::from_secs(3), listener.accept())
+                .await
+                .unwrap()
+                .unwrap();
+            let mut stream = BufReader::new(stream);
+            let mut line = String::new();
+            stream.read_line(&mut line).await.unwrap();
+            assert_eq!(line, "ready\n");
+            token.cancel();
+            line.clear();
+            tokio::time::timeout(Duration::from_secs(3), stream.read_line(&mut line))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(line, "term\n");
+            line.clear();
+            let exit =
+                tokio::time::timeout(Duration::from_secs(3), stream.read_line(&mut line)).await;
+            if exit.is_err() {
+                stream.get_mut().write_all(b"cleanup").await.unwrap();
+                stream.read_line(&mut line).await.unwrap();
+            }
+            assert_eq!(exit.expect("child survived the TERM grace").unwrap(), 0);
+        };
+        let ((), result) = tokio::join!(
+            observe_child,
+            run_claude_single_query_process(fixture(root.path(), &script, &token, &log)),
+        );
+        let error = result.unwrap_err();
         assert_eq!(
             error.downcast_ref::<NamedError>().unwrap().name,
             "AbortError"

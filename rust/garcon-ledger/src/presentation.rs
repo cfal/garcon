@@ -20,9 +20,12 @@ use garcon_contract::{
 use garcon_js::Number;
 use serde_json::Value;
 
-use crate::contracts::{
-    LedgerNoticeDetail, LedgerPermissionLifecycle, LedgerPermissionTool, LedgerRow, LedgerRowData,
-    project_ledger_agent_command_outcome, project_ledger_ticket_command_outcome,
+use crate::{
+    contracts::{
+        LedgerNoticeDetail, LedgerPermissionLifecycle, LedgerPermissionTool, LedgerRow,
+        LedgerRowData, project_ledger_agent_command_outcome, project_ledger_ticket_command_outcome,
+    },
+    garcon_command_request::is_private_notice_detail,
 };
 
 static LOGGER: LazyLock<ScopedLogger> = LazyLock::new(|| create_logger("ledger:presentation"));
@@ -108,7 +111,7 @@ fn project(row: &LedgerRow, warn_omitted_request: impl FnOnce()) -> Option<ChatM
             }
             LedgerNoticeDetail::Other(detail) => {
                 let detail = detail.as_value();
-                if is_private_notice(detail) {
+                if is_private_notice_detail(detail) {
                     return None;
                 }
                 let title = detail["title"].as_str();
@@ -218,21 +221,6 @@ fn project(row: &LedgerRow, warn_omitted_request: impl FnOnce()) -> Option<ChatM
         | PermissionCancelled { .. }
         | PermissionExpired { .. } => return None,
     })
-}
-
-fn is_private_notice(detail: &Value) -> bool {
-    matches!(
-        detail["type"].as_str(),
-        Some(
-            "chat-id-request"
-                | "inter-agent-send-request"
-                | "agent-start-request"
-                | "agent-resume-request"
-                | "agent-stop-request"
-                | "agent-schedule-request"
-                | "ticket-command-request"
-        )
-    )
 }
 
 #[cfg(test)]

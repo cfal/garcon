@@ -99,7 +99,7 @@ impl ClaudeRunningSession {
 
 pub struct PendingPermission {
     pub permission_occurrence_id: String,
-    pub cli_request_id: String,
+    pub cli_request_id: Option<String>,
     pub agent_session_id: String,
     pub tool_name: String,
     pub tool_input: Opaque,

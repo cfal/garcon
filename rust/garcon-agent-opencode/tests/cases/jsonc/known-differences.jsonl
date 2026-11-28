@@ -1,0 +1,3 @@
+{"fn":"parseJsonc","args":["{\"a\":\"\\ud83d\\ud83d\\ude00\\ud83d\\ud83d\\ude00\"}"],"result":{"count":0,"first":null,"hasValue":true,"value":{"a":"�😀�😀"}},"reason":"unpaired surrogate in a result"}
+{"fn":"parseJsonc","args":["\"\\uD83D\\uDE00\\uD83D\""],"result":{"count":0,"first":null,"hasValue":true,"value":"😀�"},"reason":"unpaired surrogate in a result"}
+{"fn":"parseJsonc","args":["1e400"],"result":{"count":0,"first":null,"hasValue":true,"value":null},"reason":"non-finite JSONC number serialized as null at the JSON boundary","approval":"manager 2026-11-28"}

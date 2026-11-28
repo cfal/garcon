@@ -1,0 +1,15 @@
+{"fn":"assertCompatibleCodex","args":["garcon/0.170.999 (garcon; 9.0.0)"]}
+{"fn":"assertCompatibleCodex","args":["garcon/0.171.0 (linux) terminal (garcon; 0.1.0)"]}
+{"fn":"assertCompatibleCodex","args":["garcon/0.172.0 (linux) terminal (garcon; 0.1.0)"]}
+{"fn":"assertCompatibleCodex","args":["garcon/1.0.0 (linux) terminal (garcon; 0.1.0)"]}
+{"fn":"assertCompatibleCodex","args":["garcon/0.9.0 (garcon; 1.9.0)"]}
+{"fn":"assertCompatibleCodex","args":["unknown"]}
+{"fn":"assertCompatibleCodex","args":["codex/0.171.0-beta.1"]}
+{"fn":"assertCompatibleCodex","args":["codex/0.171.0+build"]}
+{"fn":"assertCompatibleCodex","args":["codex/0.171.0x"]}
+{"fn":"assertCompatibleCodex","args":["codex/0.171.0/system"]}
+{"fn":"assertCompatibleCodex","args":["codex/0.171.0\u00a0platform"]}
+{"fn":"assertCompatibleCodex","args":["codex\u00a0cli/0.171.0"]}
+{"fn":"assertCompatibleCodex","args":["codex/000.000171.0000"]}
+{"fn":"assertCompatibleCodex","args":["codex/0.171"]}
+{"fn":"assertCompatibleCodex","args":[" codex/0.171.0"]}

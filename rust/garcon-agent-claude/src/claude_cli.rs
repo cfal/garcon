@@ -2,17 +2,21 @@ use std::{
     cell::{Cell, RefCell},
     ffi::OsString,
     rc::Rc,
+    time::Duration,
 };
 
+use futures::FutureExt;
 use garcon_agents_common::execution::runtime_events::{AgentRuntimeEvent, AgentRuntimeOperation};
+use garcon_contract::chat_types::{AssistantMessage, ChatMessage, ErrorMessage};
 use garcon_interface::{
     host::AgentLogger,
+    native_message_source::NativeSourced,
     producer::{AgentProviderPermissionLifecycle, AgentTerminalPermission},
     resources::ExecutorResult,
 };
-use garcon_js::json::Opaque;
+use garcon_js::{Clock, SystemClock, json::Opaque, to_iso_string, trim};
 use indexmap::IndexMap;
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio::time::Instant;
 
 use crate::{
@@ -21,11 +25,14 @@ use crate::{
     cli_environment::build_claude_cli_environment,
     cli_invocation::{ClaudeCliArgOptions, build_claude_cli_args},
     cli_process_transport::{
-        ClaudeProcessOptions, ClaudeProcessSignal, ClaudeProcessTransport,
+        ClaudeProcessExit, ClaudeProcessOptions, ClaudeProcessSignal, ClaudeProcessTransport,
         ClaudeProcessTransportOptions, ClaudeTransportFailure, ClaudeTransportFailureKind,
         spawn_claude_subprocess,
     },
-    cli_protocol::ClaudeProviderSessionState,
+    cli_protocol::{
+        ClaudeProviderSessionState, ClaudeResultCorrelation, ClaudeTurnInputEvent,
+        ClaudeTurnTerminalState, claude_result_failure_message, is_claude_subagent_content, truthy,
+    },
     cli_session_state::{
         ClaudeProviderStateHandlers, flush_deferred_claude_provider_idle,
         handle_claude_provider_lifecycle_message,
@@ -35,8 +42,9 @@ use crate::{
     },
     process_retirements::ClaudeProcessRetirementTracker,
     runtime_state::{
-        ClaudeRunningSession, ClaudeSessionProcess, INTERRUPT_COMPLETION_TIMEOUT,
-        INTERRUPT_RECEIPT_TIMEOUT, InterruptFallbackStage, PendingPermission,
+        CONVERSATION_RESET_FAILURE, ClaudeRunningSession, ClaudeSessionProcess,
+        INTERRUPT_COMPLETION_TIMEOUT, INTERRUPT_RECEIPT_TIMEOUT, InterruptFallbackStage,
+        PendingPermission,
     },
     session_options::{ClaudeSessionOptions, normalize_claude_thinking_mode_for_state},
     steering::{
@@ -47,6 +55,7 @@ use crate::{
 };
 
 pub type ClaudeStreamHandler = dyn Fn(&Rc<ClaudeRunningSession>, Opaque);
+const CLAUDE_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct ClaudeCli {
     pub logger: Rc<dyn AgentLogger>,
@@ -211,6 +220,7 @@ impl ClaudeCli {
             .replace(options.env_overrides.clone());
         session.options.replace(options);
 
+        let pid = process.pid;
         let identity = Rc::new(());
         let current = {
             let runtime = Rc::downgrade(self);
@@ -234,6 +244,7 @@ impl ClaudeCli {
                         && runtime
                             .session(&session.id)
                             .is_some_and(|registered| Rc::ptr_eq(&registered, &session))
+                        && !is_claude_subagent_content(message.as_value())
                         && !runtime.on_control_or_lifecycle(&session, message.as_value())
                     {
                         on_message(&session, message);
@@ -256,18 +267,63 @@ impl ClaudeCli {
                     }
                 }
             }),
-            on_exit: Rc::new(move |exit| {
-                if let Some((runtime, session)) = current() {
-                    runtime.handle_process_exit(&session, exit.exit_code);
+            on_exit: Rc::new({
+                let runtime = Rc::downgrade(self);
+                let session = Rc::downgrade(session);
+                let identity = identity.clone();
+                move |exit| {
+                    if let Some((runtime, session)) = runtime.upgrade().zip(session.upgrade()) {
+                        let current = session.is_current_process(&identity);
+                        runtime.log_process_exit(&session, pid, &exit, current);
+                        if current {
+                            runtime.handle_process_exit(&session, exit.exit_code);
+                        }
+                    }
                 }
             }),
             max_stdout_frame_bytes: None,
         });
         session.process.replace(Some(ClaudeSessionProcess {
-            identity,
+            identity: identity.clone(),
             transport,
         }));
-        Ok(())
+        let started_at = Instant::now();
+        let initialize = self
+            .control
+            .request(
+                &session.id,
+                json!({"subtype":"initialize"}).into(),
+                ClaudeControlRequestOptions {
+                    timeout: Some(CLAUDE_INITIALIZE_TIMEOUT),
+                    ..Default::default()
+                },
+            )
+            .await;
+        match initialize {
+            Ok(response) => {
+                let details = cli_log_fields([
+                    ("chatId", json!(session.chat_id)),
+                    ("sessionId", json!(session_log_id(&session.id))),
+                    ("processId", json!(pid)),
+                    ("durationMs", json!(started_at.elapsed().as_millis())),
+                    (
+                        "commandCount",
+                        json!(response["commands"].as_array().map_or(0, Vec::len)),
+                    ),
+                ]);
+                self.logger
+                    .info("Claude CLI control protocol initialized", Some(&details));
+                Ok(())
+            }
+            Err(error) => {
+                if session.is_current_process(&identity)
+                    && let Some(retirement) = self.retire_session_process(session)?
+                {
+                    retirement.as_ref().clone().await?;
+                }
+                Err(error)
+            }
+        }
     }
 
     pub fn finish_turn(&self, session: &ClaudeRunningSession) {
@@ -277,25 +333,322 @@ impl ClaudeCli {
     fn on_control_or_lifecycle(
         self: &Rc<Self>,
         session: &Rc<ClaudeRunningSession>,
-        message: &serde_json::Value,
+        message: &Value,
     ) -> bool {
         let turn = session.active_turn.borrow().clone();
-        if let Some(turn) = turn
-            && let Some(observation) = turn.steering.observe(message)
-        {
-            self.steering
-                .handle_observation(session, &turn, observation);
+        if let Some(turn) = turn {
+            let input = turn.protocol.borrow_mut().observe_input(message);
+            match input {
+                Some(ClaudeTurnInputEvent::Started { source }) => {
+                    (turn.operation.publish)(AgentRuntimeEvent::Steerable);
+                    let details = cli_log_fields([
+                        ("chatId", json!(session.chat_id)),
+                        ("runId", json!(turn.operation.run_id)),
+                        ("sessionId", json!(session_log_id(&session.id))),
+                        ("processId", json!(session.process_id())),
+                        (
+                            "inputId",
+                            json!(session_log_id(&turn.protocol.borrow().input_uuid)),
+                        ),
+                        ("source", json!(source)),
+                        (
+                            "submitToStartMs",
+                            json!(turn.started_at.elapsed().as_millis()),
+                        ),
+                    ]);
+                    self.logger
+                        .debug("Claude CLI user input started", Some(&details));
+                }
+                Some(ClaudeTurnInputEvent::TerminalBeforeStart { state }) => {
+                    self.handle_input_terminal_before_start(session, &turn, state);
+                    return true;
+                }
+                None => {}
+            }
+            if let Some(observation) = turn.steering.observe(message) {
+                self.steering
+                    .handle_observation(session, &turn, observation);
+            }
         }
-        if message["type"] == "control_response" {
-            self.control.handle_response(&session.id, message);
+        match message["type"].as_str() {
+            Some("control_response") => {
+                self.control.handle_response(&session.id, message);
+            }
+            Some("control_request") => self.handle_permission_control_request(session, message),
+            Some("control_cancel_request") => {
+                self.handle_permission_control_cancel(session, message)
+            }
+            Some("system") => return self.handle_system_message(session, message),
+            Some("result") => self.handle_result_message(session, message),
+            Some("conversation_reset") => self.handle_conversation_reset(session, message),
+            Some(
+                "command_lifecycle" | "stream_event" | "tool_progress" | "tool_use_summary"
+                | "auth_status" | "keep_alive",
+            ) => {}
+            _ => return false,
+        }
+        true
+    }
+
+    fn handle_system_message(
+        self: &Rc<Self>,
+        session: &Rc<ClaudeRunningSession>,
+        message: &Value,
+    ) -> bool {
+        if handle_claude_provider_lifecycle_message(
+            message,
+            session,
+            &self.provider_state_handlers(),
+        ) {
             return true;
         }
-        message["type"] == "system"
-            && handle_claude_provider_lifecycle_message(
-                message,
-                session,
-                &self.provider_state_handlers(),
-            )
+        let turn = session.active_turn.borrow().clone();
+        let common = || {
+            [
+                ("chatId", json!(session.chat_id)),
+                (
+                    "runId",
+                    json!(turn.as_ref().map(|turn| turn.operation.run_id.as_str())),
+                ),
+                ("sessionId", json!(session_log_id(&session.id))),
+                ("processId", json!(session.process_id())),
+            ]
+        };
+        match message["subtype"].as_str() {
+            Some("init") => {
+                let provider_id = message["session_id"].as_str().unwrap_or_default();
+                let mut details = cli_log_fields(common());
+                details.insert("providerSessionId".into(), json!(provider_id).into());
+                details.insert(
+                    "model".into(),
+                    json!(message["model"].as_str().unwrap_or_default()).into(),
+                );
+                self.logger
+                    .info("Claude CLI session initialized", Some(&details));
+                if provider_id != session.id {
+                    let id = if provider_id.is_empty() {
+                        "missing"
+                    } else {
+                        provider_id
+                    };
+                    self.fail_session(session, format!("Unexpected Claude session ID: {id}"));
+                    self.retire_process_in_background(session);
+                }
+            }
+            Some("api_retry") => {
+                if let Some(turn) = &turn {
+                    let (retry, started) = {
+                        let mut protocol = turn.protocol.borrow_mut();
+                        (protocol.record_api_retry(message), protocol.input_started())
+                    };
+                    let mut details = cli_log_fields(common());
+                    details.insert("matchedUserInput".into(), json!(started).into());
+                    if let Value::Object(fields) = json!(retry) {
+                        details.extend(fields.into_iter().map(|(key, value)| (key, value.into())));
+                    }
+                    self.logger
+                        .warn("Claude API request is retrying", Some(&details));
+                }
+            }
+            Some("status") if message["compact_result"] == "failed" => {
+                if let Some(turn) = turn.filter(|turn| turn.protocol.borrow().input_started()) {
+                    turn.pending_compaction.take();
+                    let reason = message["compact_error"]
+                        .as_str()
+                        .filter(|text| !text.is_empty())
+                        .unwrap_or("Compaction failed");
+                    turn.protocol.borrow_mut().add_output_messages(1, false);
+                    self.publisher.messages(
+                        &session.id,
+                        &turn,
+                        vec![NativeSourced::new(ChatMessage::Error(ErrorMessage {
+                            timestamp: now_iso(),
+                            content: reason.to_owned(),
+                        }))],
+                    );
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    // A conversation reset does not change Garcon's native binding.
+    // https://github.com/anthropics/claude-agent-sdk-python/blob/a8b1e285/src/claude_agent_sdk/types.py#L1417-L1440
+    fn handle_conversation_reset(
+        self: &Rc<Self>,
+        session: &Rc<ClaudeRunningSession>,
+        message: &Value,
+    ) {
+        let turn = session.active_turn.borrow().clone();
+        let details = cli_log_fields([
+            ("chatId", json!(session.chat_id)),
+            (
+                "runId",
+                json!(turn.as_ref().map(|turn| turn.operation.run_id.as_str())),
+            ),
+            ("sessionId", json!(session_log_id(&session.id))),
+            ("processId", json!(session.process_id())),
+            ("newConversationId", message["new_conversation_id"].clone()),
+        ]);
+        self.logger
+            .warn("Claude CLI discarded the conversation", Some(&details));
+        if let Some(turn) = turn {
+            turn.protocol.borrow_mut().clear_recorded_result_failure();
+            self.fail_session(session, CONVERSATION_RESET_FAILURE.into());
+        }
+        self.retire_process_in_background(session);
+    }
+
+    fn handle_result_message(&self, session: &ClaudeRunningSession, message: &Value) {
+        let Some(turn) = session.active_turn.borrow().clone() else {
+            return;
+        };
+        let mut protocol = turn.protocol.borrow_mut();
+        let error = truthy(&message["is_error"]);
+        let text = message["result"].as_str().map(trim).unwrap_or_default();
+        let details = cli_log_fields([
+            ("chatId", json!(session.chat_id)),
+            ("runId", json!(turn.operation.run_id)),
+            ("sessionId", json!(session_log_id(&session.id))),
+            ("processId", json!(session.process_id())),
+            ("inputId", json!(session_log_id(&protocol.input_uuid))),
+            (
+                "resultInputId",
+                json!(message["user_message_uuid"].as_str().map(session_log_id)),
+            ),
+            (
+                "outcome",
+                json!(message["subtype"].as_str().unwrap_or(if error {
+                    "error"
+                } else {
+                    "unknown"
+                })),
+            ),
+            ("isError", json!(error)),
+            ("apiErrorStatus", message["api_error_status"].clone()),
+            ("terminalReason", message["terminal_reason"].clone()),
+            ("stopReason", message["stop_reason"].clone()),
+            ("durationMs", message["duration_ms"].clone()),
+            ("numTurns", message["num_turns"].clone()),
+            ("outputMessages", json!(protocol.output_message_count())),
+            ("hasResult", json!(!text.is_empty())),
+            (
+                "permissionDenials",
+                json!(message["permission_denials"].as_array().map_or(0, Vec::len)),
+            ),
+        ]);
+        let correlation = protocol.correlate_result(message);
+        if correlation == ClaudeResultCorrelation::BeforeStart {
+            protocol.record_result_before_start(message.clone().into());
+            drop(protocol);
+            let log = "Claude CLI emitted an uncorrelated result while user input was pending";
+            if error {
+                self.logger.warn(log, Some(&details));
+            } else {
+                self.logger.info(log, Some(&details));
+            }
+            return;
+        }
+        if correlation == ClaudeResultCorrelation::Mismatched {
+            drop(protocol);
+            self.logger.warn(
+                "Claude CLI emitted a result for another user input",
+                Some(&details),
+            );
+            return;
+        }
+        let fallback =
+            !error && !protocol.assistant_content_since_last_result() && !text.is_empty();
+        if fallback {
+            protocol.add_output_messages(1, true);
+        }
+        drop(protocol);
+        if fallback {
+            self.publisher.messages(
+                &session.id,
+                &turn,
+                vec![NativeSourced::new(ChatMessage::Assistant(
+                    AssistantMessage {
+                        timestamp: now_iso(),
+                        content: text.to_owned(),
+                        questions: None,
+                    },
+                ))],
+            );
+        }
+        let clean_abort = {
+            let mut protocol = turn.protocol.borrow_mut();
+            protocol.record_accepted_result(message);
+            protocol.clean_abort_result_seen()
+        };
+        let log = if correlation == ClaudeResultCorrelation::Input {
+            "Claude CLI input result received; awaiting provider idle"
+        } else {
+            "Claude CLI continuation result received; awaiting provider idle"
+        };
+        if error && !clean_abort {
+            self.logger.warn(log, Some(&details));
+        } else {
+            self.logger.info(log, Some(&details));
+        }
+    }
+
+    fn handle_input_terminal_before_start(
+        &self,
+        session: &ClaudeRunningSession,
+        turn: &ClaudeActiveTurn,
+        state: ClaudeTurnTerminalState,
+    ) {
+        let mut protocol = turn.protocol.borrow_mut();
+        let prior = protocol.take_result_before_start();
+        let aborted = protocol.abort_requested();
+        let state_name = match state {
+            ClaudeTurnTerminalState::Completed => "completed",
+            ClaudeTurnTerminalState::Cancelled => "cancelled",
+            ClaudeTurnTerminalState::Discarded => "discarded",
+        };
+        let details = cli_log_fields([
+            ("chatId", json!(session.chat_id)),
+            ("runId", json!(turn.operation.run_id)),
+            ("sessionId", json!(session_log_id(&session.id))),
+            ("processId", json!(session.process_id())),
+            ("inputId", json!(session_log_id(&protocol.input_uuid))),
+            ("state", json!(state_name)),
+            ("abortRequested", json!(aborted)),
+            (
+                "precedingResultOutcome",
+                prior
+                    .as_ref()
+                    .map_or(serde_json::Value::Null, |msg| msg["subtype"].clone()),
+            ),
+            (
+                "precedingResultWasError",
+                json!(prior.as_ref().is_some_and(|msg| truthy(&msg["is_error"]))),
+            ),
+        ]);
+        drop(protocol);
+        if state == ClaudeTurnTerminalState::Cancelled && aborted {
+            self.logger.info(
+                "Claude CLI cancelled queued user input after an interrupt",
+                Some(&details),
+            );
+            turn.confirm_pre_start_abort();
+            self.finish_turn(session);
+            return;
+        }
+        self.logger.warn(
+            "Claude CLI submitted input ended before starting",
+            Some(&details),
+        );
+        let failure = if let Some(prior) = prior.filter(|prior| truthy(&prior["is_error"])) {
+            claude_result_failure_message(prior.as_value())
+        } else if state == ClaudeTurnTerminalState::Completed {
+            "Claude CLI marked the submitted message complete without starting it or producing a response.".to_owned()
+        } else {
+            format!("Claude CLI {state_name} the submitted message before it started.")
+        };
+        self.fail_session(session, failure);
     }
 
     fn provider_state_handlers(self: &Rc<Self>) -> ClaudeProviderStateHandlers {
@@ -450,6 +803,41 @@ impl ClaudeCli {
         }
     }
 
+    fn log_process_exit(
+        &self,
+        session: &ClaudeRunningSession,
+        pid: Option<u32>,
+        exit: &ClaudeProcessExit,
+        current: bool,
+    ) {
+        let turn = session.active_turn.borrow().clone();
+        let during_turn = current && turn.is_some();
+        let fields = cli_log_fields([
+            ("chatId", json!(session.chat_id)),
+            (
+                "runId",
+                json!(turn.as_ref().map(|turn| turn.operation.run_id.as_str())),
+            ),
+            ("sessionId", json!(session_log_id(&session.id))),
+            ("processId", json!(pid)),
+            ("exitCode", json!(exit.exit_code)),
+            ("stderrBytes", json!(exit.stderr_bytes)),
+            ("stderrLines", json!(exit.stderr_lines)),
+            ("stderrRetainedBytes", json!(exit.stderr_retained_bytes)),
+            ("stderrTailDigest", json!(exit.stderr_tail_digest)),
+            ("stderrTruncated", json!(exit.stderr_truncated)),
+            ("duringTurn", json!(during_turn)),
+        ]);
+        if during_turn {
+            self.logger.error(
+                "Claude CLI process exited during an active turn",
+                Some(&fields),
+            );
+        } else {
+            self.logger.info("Claude CLI process exited", Some(&fields));
+        }
+    }
+
     pub fn retire_process_in_background(self: &Rc<Self>, session: &Rc<ClaudeRunningSession>) {
         match self.retire_session_process(session) {
             Ok(Some(retirement)) => {
@@ -462,7 +850,7 @@ impl ClaudeCli {
                             ("chatId".into(), Opaque::from_value(json!(chat_id))),
                             (
                                 "sessionId".into(),
-                                Opaque::from_value(json!(id.chars().take(8).collect::<String>())),
+                                Opaque::from_value(json!(session_log_id(&id))),
                             ),
                             ("error".into(), Opaque::from_value(json!(error))),
                         ]);
@@ -488,7 +876,19 @@ impl ClaudeCli {
             return Ok(session.retirement.borrow().clone());
         };
         let exited = Rc::new(process.transport.exited());
-        let retirement = Rc::new(process.transport.retire());
+        let prior = session.retirement.borrow().clone();
+        let retirement = Rc::new(if let Some(prior) = prior {
+            let retirement = async move {
+                prior.as_ref().clone().await?;
+                process.transport.retire().await
+            }
+            .boxed_local()
+            .shared();
+            tokio::task::spawn_local(retirement.clone());
+            retirement
+        } else {
+            process.transport.retire()
+        });
         session.retirement.replace(Some(retirement.clone()));
         self.retirements
             .track(&session.id, &session.chat_id, exited.clone())?;
@@ -647,3 +1047,17 @@ impl ClaudeCli {
 
 #[cfg(all(test, unix))]
 mod tests;
+
+fn session_log_id(id: &str) -> String {
+    String::from_utf16_lossy(&id.encode_utf16().take(8).collect::<Vec<_>>())
+}
+
+fn cli_log_fields<const N: usize>(
+    fields: [(&str, serde_json::Value); N],
+) -> IndexMap<String, Opaque> {
+    IndexMap::from_iter(fields.map(|(key, value)| (key.to_owned(), value.into())))
+}
+
+fn now_iso() -> String {
+    to_iso_string(SystemClock.now_ms()).expect("the current time is in range")
+}

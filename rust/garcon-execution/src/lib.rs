@@ -2,6 +2,7 @@
 
 pub mod accepted_input_handler;
 pub mod accepted_input_transcript;
+pub mod agent_registry;
 pub mod agent_turn_receipt_projector;
 pub mod catalog_service;
 pub mod chat_command_settlement;
@@ -22,6 +23,7 @@ pub mod execution_ownership;
 pub mod executor_manager_ports;
 pub mod listener_dispatch;
 pub mod model_catalog_cache;
+pub mod producer_bindings;
 pub mod queue_drainer;
 pub mod queue_steer_error;
 pub mod queued_steer_delivery;

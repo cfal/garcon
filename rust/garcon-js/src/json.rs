@@ -32,12 +32,19 @@ use serde_json::{Map, Number, Value};
 use crate::js::{Number as JsNumber, array_index, sort_object_keys};
 
 /// Reads JSON text that came from outside into `T`.
+pub fn from_str<T: DeserializeOwned>(text: &str) -> Result<T, serde_json::Error> {
+    from_str_with_surrogate_replacement(text, SurrogateReplacement::Escape(b"\\uFFFD"))
+}
+
 #[expect(
     clippy::disallowed_methods,
-    reason = "this is the entry point the lint points to"
+    reason = "the shared entry point normalizes surrogate escapes before deserializing"
 )]
-pub fn from_str<T: DeserializeOwned>(text: &str) -> Result<T, serde_json::Error> {
-    match replace_lone_surrogates(text.as_bytes()) {
+fn from_str_with_surrogate_replacement<T: DeserializeOwned>(
+    text: &str,
+    replacement: SurrogateReplacement,
+) -> Result<T, serde_json::Error> {
+    match replace_lone_surrogates(text.as_bytes(), replacement) {
         Cow::Borrowed(_) => serde_json::from_str(text),
         Cow::Owned(text) => serde_json::from_slice(&text),
     }
@@ -49,27 +56,58 @@ pub fn from_str<T: DeserializeOwned>(text: &str) -> Result<T, serde_json::Error>
     reason = "this is the entry point the lint points to"
 )]
 pub fn from_slice<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, serde_json::Error> {
-    serde_json::from_slice(&replace_lone_surrogates(bytes))
+    serde_json::from_slice(&replace_lone_surrogates(
+        bytes,
+        SurrogateReplacement::Escape(b"\\uFFFD"),
+    ))
 }
 
-/// Replaces a surrogate escape that has no partner with U+FFFD. A high
-/// surrogate followed by a low one is a valid pair and stays. The scan tracks
-/// string and backslash state, so a backslash that is itself escaped is not
-/// read as the start of an escape.
-fn replace_lone_surrogates(input: &[u8]) -> Cow<'_, [u8]> {
-    if !input.windows(2).any(|window| window == b"\\u") {
-        return Cow::Borrowed(input);
-    }
-    let mut escapes = unpaired_surrogate_escapes(input);
-    let Some(first) = escapes.next() else {
+#[derive(Clone, Copy)]
+enum SurrogateReplacement {
+    Escape(&'static [u8; 6]),
+    StringValue(bool),
+}
+
+fn replace_lone_surrogates(input: &[u8], replacement: SurrogateReplacement) -> Cow<'_, [u8]> {
+    let mut events = unpaired_surrogate_events(input);
+    let Some(first) = events.next() else {
         return Cow::Borrowed(input);
     };
     let mut output = Vec::with_capacity(input.len());
     let mut copied = 0;
-    for start in std::iter::once(first).chain(escapes) {
-        output.extend_from_slice(&input[copied..start]);
-        output.extend_from_slice(b"\\uFFFD");
-        copied = start + 6;
+    let mut opening_quote = None;
+    for event in std::iter::once(first).chain(events) {
+        match event {
+            SurrogateEvent::Escape {
+                start,
+                string_start,
+            } => {
+                if matches!(replacement, SurrogateReplacement::StringValue(_))
+                    && opening_quote.is_none()
+                {
+                    opening_quote = Some(output.len() + (string_start - copied));
+                }
+                output.extend_from_slice(&input[copied..start]);
+                let escaped = match replacement {
+                    SurrogateReplacement::Escape(bytes) => bytes,
+                    SurrogateReplacement::StringValue(_) => b"\\uFFFD",
+                };
+                output.extend_from_slice(escaped);
+                copied = start + 6;
+            }
+            SurrogateEvent::StringEnd { end, valid } => {
+                // Do not hide malformed string syntax from serde.
+                if let (Some(quote), SurrogateReplacement::StringValue(marker)) =
+                    (opening_quote.take(), replacement)
+                    && valid
+                    && !is_object_key(&input[end..])
+                {
+                    output.truncate(quote);
+                    output.extend_from_slice(if marker { b"true" } else { b"false" });
+                    copied = end;
+                }
+            }
+        }
     }
     output.extend_from_slice(&input[copied..]);
     Cow::Owned(output)
@@ -77,28 +115,57 @@ fn replace_lone_surrogates(input: &[u8]) -> Cow<'_, [u8]> {
 
 /// Checks valid JSON text for unpaired surrogate escapes in string keys or values.
 pub fn contains_unpaired_surrogate_escape(raw: &[u8]) -> bool {
-    raw.windows(2).any(|window| window == b"\\u")
-        && unpaired_surrogate_escapes(raw).next().is_some()
+    unpaired_surrogate_events(raw).next().is_some()
 }
 
-fn unpaired_surrogate_escapes(input: &[u8]) -> impl Iterator<Item = usize> + '_ {
-    let mut index = 0;
-    let mut in_string = false;
+enum SurrogateEvent {
+    Escape { start: usize, string_start: usize },
+    StringEnd { end: usize, valid: bool },
+}
+
+fn unpaired_surrogate_events(input: &[u8]) -> impl Iterator<Item = SurrogateEvent> + '_ {
+    let mut index = if input.windows(2).any(|window| window == b"\\u") {
+        0
+    } else {
+        input.len()
+    };
+    let mut string_start = None;
+    let mut has_unpaired = false;
+    let mut valid = true;
     std::iter::from_fn(move || {
         while let Some(&byte) = input.get(index) {
+            let Some(opening) = string_start else {
+                if byte == b'"' {
+                    string_start = Some(index);
+                    valid = true;
+                }
+                index += 1;
+                continue;
+            };
             if byte == b'"' {
-                in_string = !in_string;
+                string_start = None;
+                index += 1;
+                if std::mem::take(&mut has_unpaired) {
+                    return Some(SurrogateEvent::StringEnd { end: index, valid });
+                }
+                continue;
             }
-            if !in_string || byte != b'\\' {
+            if byte != b'\\' {
+                valid &= byte >= 0x20;
                 index += 1;
                 continue;
             }
             let start = index;
             index += 2;
             if input.get(start + 1) != Some(&b'u') {
+                valid &= matches!(
+                    input.get(start + 1),
+                    Some(b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't')
+                );
                 continue;
             }
             let Some(unit) = hex_escape(input, index) else {
+                valid = false;
                 continue;
             };
             index += 4;
@@ -111,11 +178,22 @@ fn unpaired_surrogate_escapes(input: &[u8]) -> impl Iterator<Item = usize> + '_ 
             if paired {
                 index += 6;
             } else {
-                return Some(start);
+                has_unpaired = true;
+                return Some(SurrogateEvent::Escape {
+                    start,
+                    string_start: opening,
+                });
             }
         }
         None
     })
+}
+
+fn is_object_key(after_string: &[u8]) -> bool {
+    after_string
+        .iter()
+        .find(|&&byte| !matches!(byte, b' ' | b'\t' | b'\n' | b'\r'))
+        == Some(&b':')
 }
 
 /// The code unit of the four hex digits of a `\\u` escape that starts at
@@ -249,6 +327,52 @@ fn as_number_of(number: &Number) -> f64 {
 /// Parses JSON text as `JSON.parse` does, for inspection.
 pub fn parse(text: &str) -> Result<Value, serde_json::Error> {
     from_str::<Opaque>(text).map(Opaque::into_value)
+}
+
+/// Like [`parse`], but replaces each string value containing an unpaired
+/// surrogate escape with a boolean so a string validator rejects it. Object
+/// keys keep the usual U+FFFD normalization. Duplicate keys keep their last
+/// value, as in `JSON.parse`.
+pub fn parse_replacing_unpaired_surrogate_values(
+    text: &str,
+    replacement: bool,
+) -> Result<Value, serde_json::Error> {
+    from_str_with_surrogate_replacement::<Opaque>(
+        text,
+        SurrogateReplacement::StringValue(replacement),
+    )
+    .map(Opaque::into_value)
+}
+
+/// Parses JSON and reports which named top-level string fields held an
+/// unpaired surrogate escape before normalization. Field names must not
+/// contain U+FFFD or NUL. Duplicate keys keep their last value.
+pub fn parse_with_unpaired_surrogate_fields<const N: usize>(
+    text: &str,
+    fields: [&str; N],
+) -> Result<(Value, [bool; N]), serde_json::Error> {
+    let value = parse(text)?;
+    let strings = fields.map(|name| {
+        value
+            .get(name)
+            .and_then(Value::as_str)
+            .filter(|text| text.contains('\u{fffd}'))
+    });
+    if strings.iter().all(Option::is_none) {
+        return Ok((value, [false; N]));
+    }
+    let Cow::Owned(alternate) =
+        replace_lone_surrogates(text.as_bytes(), SurrogateReplacement::Escape(b"\\u0000"))
+    else {
+        return Ok((value, [false; N]));
+    };
+    // The probe changes only unpaired escapes, not genuine U+FFFD or NUL.
+    let alternate: Value = from_slice(&alternate)?;
+    let unpaired = std::array::from_fn(|index| {
+        strings[index].is_some()
+            && strings[index] != alternate.get(fields[index]).and_then(Value::as_str)
+    });
+    Ok((value, unpaired))
 }
 
 /// `JSON.stringify(value)`.
@@ -447,8 +571,54 @@ mod tests {
         );
         // Outside a string nothing is replaced; the parser reports it.
         assert!(parse(r#"[\ud800]"#).is_err());
-        let untouched = replace_lone_surrogates(br#"{"a":"b","c":"\\"}"#);
+        let untouched = replace_lone_surrogates(
+            br#"{"a":"b","c":"\\"}"#,
+            SurrogateReplacement::Escape(b"\\uFFFD"),
+        );
         assert!(matches!(untouched, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn locates_unpaired_escapes_only_in_the_named_top_level_strings() {
+        for (input, expected) in [
+            (
+                r#"{"title":"bad \ud800","content":"genuine \ufffd","ignored":"\ud800"}"#,
+                [true, false],
+            ),
+            (
+                r#"{"title":"genuine \ufffd","content":"bad \udc00","\ud800":null}"#,
+                [false, true],
+            ),
+            (
+                r#"{"title":"\ud800\u0000","content":"\u0000\udc00"}"#,
+                [true, true],
+            ),
+            (
+                r#"{"title":"genuine \ufffd","content":"pair \ud83d\ude80","ignored":{"title":"\ud800"}}"#,
+                [false, false],
+            ),
+            (
+                r#"{"title":"\\ud800","content":{"text":"\ud800"}}"#,
+                [false, false],
+            ),
+            (r#"["\ud800"]"#, [false, false]),
+        ] {
+            let (value, fields) =
+                parse_with_unpaired_surrogate_fields(input, ["title", "content"]).unwrap();
+            assert_eq!(value, parse(input).unwrap());
+            assert_eq!(fields, expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn locates_unpaired_escapes_in_the_last_occurrence_of_a_duplicate_key() {
+        let input =
+            r#"{"title":"\ud800","\u0074itle":"\ufffd","content":"\ufffd","content":"\udc00"}"#;
+        let (value, fields) =
+            parse_with_unpaired_surrogate_fields(input, ["title", "content"]).unwrap();
+        assert_eq!(value, json!({ "title": "\u{fffd}", "content": "\u{fffd}" }));
+        assert_eq!(fields, [false, true]);
+        assert!(parse_with_unpaired_surrogate_fields(r#"{"title":"\ud800",}"#, ["title"]).is_err());
     }
 
     #[test]

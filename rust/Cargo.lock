@@ -943,6 +943,7 @@ dependencies = [
 name = "garcon-agent-claude"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "futures",
  "garcon-agents-common",
  "garcon-base",
@@ -970,19 +971,26 @@ dependencies = [
 name = "garcon-agent-codex"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "garcon-base",
  "garcon-cases",
  "garcon-contract",
+ "garcon-interface",
  "garcon-js",
  "indexmap",
+ "libc",
  "oxc_allocator",
  "oxc_ast",
  "oxc_parser",
  "oxc_semantic",
  "oxc_span",
+ "regress",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
  "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
@@ -1019,6 +1027,29 @@ dependencies = [
  "garcon-js",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "garcon-agent-opencode"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "garcon-agents-common",
+ "garcon-base",
+ "garcon-cases",
+ "garcon-contract",
+ "garcon-interface",
+ "garcon-js",
+ "indexmap",
+ "nix",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "uuid",
 ]
 
 [[package]]
@@ -1190,9 +1221,12 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -1274,6 +1308,7 @@ dependencies = [
  "indexmap",
  "serde",
  "serde_json",
+ "tokio",
  "tokio-util",
 ]
 

@@ -1,0 +1,13 @@
+{
+  "module": "server-agents/opencode/src/agents/opencode/prompt.ts",
+  "tests": [
+    "server-agents/opencode/src/agents/opencode/__tests__/prompt.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 113,
+  "sha256": "c6153ea8ce7c5d94b41832d1a33c2443c08a55bf83f3293123e3f23d6d8fce4b"
+}
