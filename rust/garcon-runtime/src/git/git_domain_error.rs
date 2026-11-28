@@ -26,3 +26,20 @@ impl DiagnosticError for GitDomainError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use garcon_base::errors::{ErrorInput, diagnostic_error_code};
+
+    use super::*;
+
+    #[test]
+    fn concrete_git_domain_error_keeps_its_diagnostic_metadata() {
+        let error = GitDomainError::new("MUTATION_OUTCOME_UNKNOWN", "synthetic failure");
+        assert_eq!(error.diagnostic_metadata().name, "GitDomainError");
+        assert_eq!(
+            diagnostic_error_code(ErrorInput::Diagnostic(&error)),
+            "MUTATION_OUTCOME_UNKNOWN"
+        );
+    }
+}

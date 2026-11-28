@@ -8,18 +8,20 @@ publish.workspace = true
 
 [dependencies]
 bytes = "1"
-flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+garcon-controller.workspace = true
+garcon-http.workspace = true
 http-body-util = "0.1"
 libc = "0.2"
 hyper = { version = "1", features = ["client", "http1", "server"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
-ruzstd = "0.8"
 socket2 = "0.6"
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 
 
 
 [dev-dependencies]
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+ruzstd = "0.8"
 serde_json.workspace = true
 tempfile = "3"
 tower-service = "0.3"

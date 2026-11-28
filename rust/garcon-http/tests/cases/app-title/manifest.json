@@ -1,0 +1,24 @@
+{
+  "module": "server/controller/app-title.ts",
+  "tests": [],
+  "inputs": "rust/garcon-http/tests/oracles/app-title-inputs.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "appTitleBootstrapScript",
+      "argument": 0
+    },
+    {
+      "fn": "injectAppTitleIntoShell",
+      "argument": 1
+    },
+    {
+      "fn": "applyManifestTitle",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 11,
+  "sha256": "cc46dcac18a7e34a1d5ce3f3668be7bc133ba57df35b7d4cf4c719f762dd5353"
+}

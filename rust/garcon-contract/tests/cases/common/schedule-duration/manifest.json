@@ -1,0 +1,13 @@
+{
+  "module": "common/schedule-duration.ts",
+  "tests": [
+    "common/__tests__/schedule-duration.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/schedule-duration.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 112,
+  "sha256": "04c9576c37d2d4e2f6bafe52f934b27acc38e4eb1e48c87d8eed917d28c173c8"
+}

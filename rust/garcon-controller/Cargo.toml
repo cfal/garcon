@@ -10,15 +10,21 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+async-trait.workspace = true
 garcon-base.workspace = true
 garcon-contract.workspace = true
 garcon-http.workspace = true
+garcon-interface.workspace = true
 garcon-js.workspace = true
 garcon-stores.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+subtle = "2"
 thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
 url.workspace = true
 
 [dev-dependencies]
 garcon-cases.workspace = true
-serde_json.workspace = true
+tempfile = "3"

@@ -82,7 +82,8 @@ export function normalizeCapture(capture: Capture, server: StartedServer, extra:
     const { body, rawHeaders: _rawHeaders, ...rest } = capture;
     return { ...normalizeValue(rest as unknown as Json, normalization) as Record<string, Json>, body: normalizeBody(body, normalization) };
   }
-  return normalizeValue(capture as unknown as Json, normalization);
+  const { rawHeaders: _rawHeaders, ...rest } = capture;
+  return normalizeValue(rest as unknown as Json, normalization);
 }
 
 export function normalizeBody(body: CapturedBody, extra: Normalization = {}): Json {

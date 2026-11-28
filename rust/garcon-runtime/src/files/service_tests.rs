@@ -3,6 +3,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use garcon_base::domain_error::DomainError;
+use garcon_base::errors::{ErrorInput, diagnostic_error_code};
 use garcon_contract::error_codes::ErrorCode;
 use garcon_contract::file_contracts::{
     FileSaveConflictResolution, MAX_FILE_REVISION_LENGTH, MAX_FILE_SAVE_BYTES, SaveTextRequest,
@@ -18,8 +19,8 @@ use tokio::task::LocalSet;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
-use super::errors::AbortError;
 use super::service::{FilesService, FilesServiceOptions};
+use crate::git::operation_context::is_git_cancellation;
 
 struct Fixture {
     _temp: TempDir,
@@ -371,13 +372,16 @@ async fn invalid_revision_oversized_content_and_preabort_leave_file_unchanged() 
                 signal: Some(cancel),
                 ..Default::default()
             };
-            assert!(
-                service
-                    .read(fixture.target.clone(), Some(options))
-                    .await
-                    .unwrap_err()
-                    .is::<AbortError>()
+            let error = service
+                .read(fixture.target.clone(), Some(options))
+                .await
+                .unwrap_err();
+            assert_eq!(
+                diagnostic_error_code(ErrorInput::Error(error.as_ref())),
+                "AbortError"
             );
+            assert!(is_git_cancellation(error.as_ref()));
+            assert_eq!(error.to_string(), "The operation was aborted.");
             let actual = service.read(fixture.target, None).await.unwrap();
             assert_eq!(actual.bytes, snapshot.bytes);
             assert_eq!(actual.revision, snapshot.revision);

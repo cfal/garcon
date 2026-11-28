@@ -1,0 +1,78 @@
+{
+  "module": "common/scheduled-prompts.ts",
+  "tests": [
+    "common/__tests__/scheduled-prompts.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/scheduled-prompts.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "normalizeScheduledPromptName",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeScheduledChatTitle",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeScheduledChatTitleTemplate",
+      "argument": 0
+    },
+    {
+      "fn": "renderScheduledChatTitle",
+      "argument": 1
+    },
+    {
+      "fn": "renderScheduledPrompt",
+      "argument": 1
+    },
+    {
+      "fn": "isScheduledPromptIntervalMinutes",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeScheduledPromptTarget",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeScheduledPromptSchedule",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeScheduledPrompt",
+      "argument": 0
+    },
+    {
+      "fn": "parseScheduledPromptExecutionSelection",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeScheduledPromptDefinitionInput",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeScheduledPromptsSnapshot",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeCreateScheduledPromptResponse",
+      "argument": 0
+    },
+    {
+      "fn": "isMinuteAlignedIso",
+      "argument": 0
+    },
+    {
+      "fn": "isScheduledPromptsInvalidationReason",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeScheduledPromptRunLogEntry",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 1066,
+  "sha256": "726aecab7c25a9c51c13af17409dd44915e1c957aa0d88add4fd12ea58108525"
+}

@@ -1,0 +1,6 @@
+{"fn":"parseScheduleInterval","args":["3650d"]}
+{"fn":"parseScheduleInterval","args":["3650d1m"]}
+{"fn":"parseScheduleInterval","args":["\ufeff0m\u00a0"]}
+{"fn":"parseScheduleInterval","args":["\u0661m"]}
+{"fn":"parseScheduleInterval","args":["\u017f"]}
+{"fn":"scheduleInRunAt","args":[{"$":"date","value":"1969-12-31T23:59:30.000Z"},0]}
