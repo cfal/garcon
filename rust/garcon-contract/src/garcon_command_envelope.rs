@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use garcon_js::trim;
+use garcon_js::{Number, trim};
 use indexmap::IndexMap;
 use serde::Serialize;
 
@@ -54,7 +54,7 @@ const _: () = assert!(GARCON_ENVELOPE_COMMANDS.len() == 5 + TICKET_ACTIONS.len()
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct GarconEnvelopeSpan {
     pub command: GarconEnvelopeCommand,
-    pub start: f64,
+    pub start: Number,
     pub end: Option<usize>,
 }
 
@@ -246,7 +246,7 @@ fn scan_boundary(content: &[u16], start: f64, end: f64) -> Option<Boundary> {
     let command = command_at(content, start)?;
     let mut span = GarconEnvelopeSpan {
         command,
-        start,
+        start: Number::from(start),
         end: None,
     };
     let end_ceil = end.ceil() as usize;
@@ -278,6 +278,7 @@ fn scan_boundary(content: &[u16], start: f64, end: f64) -> Option<Boundary> {
         if !literal_prompt && ascii_starts_at(content, next, "<!") {
             break;
         }
+        // INFALLIBLE: the scan starts with one command and stops when a pop empties the stack.
         if let Some(close_end) =
             closing_end(content, next, *nesting.last().expect("nonempty nesting"))
             && close_end <= end_floor

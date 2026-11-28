@@ -6,6 +6,8 @@ use std::ffi::OsString;
 use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 
+use crate::ChildEnvironment;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GitCommandResult {
     pub stdout: String,
@@ -20,6 +22,7 @@ pub struct GitCommandOptions {
     pub disable_optional_locks: bool,
     pub max_stdout_bytes: Option<usize>,
     pub max_stderr_bytes: Option<usize>,
+    pub base_environment: Option<ChildEnvironment>,
     pub env: Option<BTreeMap<OsString, Option<OsString>>>,
 }
 

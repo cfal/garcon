@@ -62,12 +62,12 @@ fn chat_messages_cases_match() {
             CaseError::new("TypeError", error.to_string())
         };
         let text = match function {
-            "parseChatMessageJson" => serde_json::to_string(
-                &chat_types::parse_non_notice_chat_message(&value).map_err(error)?,
-            ),
-            "parseChatMessagesJson" => serde_json::to_string(
-                &chat_types::parse_non_notice_chat_messages(&value).map_err(error)?,
-            ),
+            "parseChatMessageJson" => {
+                serde_json::to_string(&chat_types::parse_chat_message(&value).map_err(error)?)
+            }
+            "parseChatMessagesJson" => {
+                serde_json::to_string(&chat_types::parse_chat_messages(&value).map_err(error)?)
+            }
             _ => return Err(CaseError::unhandled(function)),
         }
         .unwrap();
