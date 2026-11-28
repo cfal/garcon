@@ -8,8 +8,8 @@ use crate::rows::HistoricalSearchMessageRow;
 use super::{
     MAX_SAFE_ORDINAL, SEARCH_DELETE_BATCH_MAX_ROWS, SEARCH_FTS_MERGE_PAGES_PER_TXN,
     SEARCH_INGEST_ROW_MAX_BYTES, SEARCH_INGEST_TXN_MAX_BYTES, SEARCH_INGEST_TXN_MAX_ROWS,
-    SEARCH_TIMESTAMP_MAX_BYTES, SearchSchemaError, SearchSchemaResult, require_identifier,
-    transaction,
+    SEARCH_TIMESTAMP_MAX_BYTES, SearchSchemaError, SearchSchemaResult, read_counter,
+    require_identifier, transaction,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,12 +92,6 @@ const READ_CHAT_STATE: &str = "
     SELECT chat_id, transcript_view_id, status, indexed_through,
       target_through, last_error_code FROM search_chat_state
 ";
-
-fn read_counter(row: &Row<'_>, index: usize) -> rusqlite::Result<u64> {
-    u64::try_from(row.get::<_, i64>(index)?).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(index, Type::Integer, Box::new(error))
-    })
-}
 
 fn decode_chat_state(row: &Row<'_>) -> rusqlite::Result<SearchChatState> {
     let status: String = row.get(2)?;
