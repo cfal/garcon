@@ -4,6 +4,8 @@
 use std::rc::Rc;
 
 use futures::FutureExt;
+use garcon_contract::error_codes::ErrorCode;
+use garcon_interface::producer::AgentRunFailureDetail;
 use garcon_ledger::{
     contracts::{LedgerRowData, RunOutcome},
     service::{TranscriptCommitEvent, TranscriptCommitWork, TranscriptLedgerService},
@@ -44,12 +46,17 @@ impl AgentRegistry {
         let off_abandoned = ledger.subscribe_run_abandoned(Rc::new({
             let owner = owner.clone();
             move |run| {
-                if let Some(registry) = owner.upgrade() {
-                    registry
-                        .sessions
-                        .abort_publication(&run.chat_id, &run.run_id);
-                }
-                TranscriptCommitWork::Complete(Ok(()))
+                let Some(registry) = owner.upgrade() else {
+                    return TranscriptCommitWork::Complete(Ok(()));
+                };
+                registry.sessions.abort_publication(&run.chat_id, &run.run_id);
+                TranscriptCommitWork::Pending(Box::pin(async move {
+                    registry.events.publish_run_failed(&run.chat_id, &run.run_id, &AgentRunFailureDetail {
+                        code: ErrorCode::TRANSCRIPT_UNAVAILABLE.as_str().into(),
+                        message: Some("Transcript storage failed. Check server storage and restart the server before continuing this chat.".into()),
+                    }, None).await;
+                    Ok(())
+                }))
             }
         }));
         let off_transcript = ledger.subscribe(Rc::new(move |event| {
