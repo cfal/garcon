@@ -1,9 +1,10 @@
 //! Bun's Date.parse, local Date fields, and Intl calendar days.
 //!
-//! Offsets come from bundled IANA tzdb, not Bun's ICU data. They may differ
-//! where the datasets have different historical or recent transitions.
-//! For example, 1900-01-01T00:00Z in Europe/Amsterdam has local time
-//! 00:19:32 in tzdb 2026b and 00:00:00 in Bun 1.4.3.
+//! Bundled IANA tzdb 2026b follows permanent UTC-7 in America/Vancouver and
+//! Canada/Pacific from 2026-11-01T09:00Z; Bun 1.4.3's ICU uses UTC-8 that
+//! winter. Asia/Gaza and Asia/Hebron also differ around 2025-03-29.
+//! Across the 597 compared zones, offsets differed in 164 zones in 1900 and
+//! 36 in 1950 (see rust/research/date-parse.md).
 //! An unset TZ uses the host's detected IANA name, or UTC when no name can be
 //! found. Like Bun, this does not interpret TZ as a POSIX rule string or as a
 //! path to a zoneinfo file. An unrecognized process TZ falls back to UTC;
@@ -17,6 +18,7 @@ mod parser;
 mod tests;
 
 use std::fmt;
+use std::sync::OnceLock;
 
 use tz::TimeZoneRef;
 use tz::datetime::{DateTime, FoundDateTimeKind};
@@ -135,8 +137,9 @@ fn named_zone(name: &str) -> Option<TimeZoneRef<'static>> {
 }
 
 fn process_time_zone() -> TimeZoneRef<'static> {
+    static HOST_ZONE: OnceLock<TimeZoneRef<'static>> = OnceLock::new();
     let Some(name) = std::env::var_os("TZ") else {
-        return tzdb::local_tz().unwrap_or_else(TimeZoneRef::utc);
+        return *HOST_ZONE.get_or_init(|| tzdb::local_tz().unwrap_or_else(TimeZoneRef::utc));
     };
     let Some(name) = name.to_str() else {
         return TimeZoneRef::utc();
@@ -147,7 +150,7 @@ fn process_time_zone() -> TimeZoneRef<'static> {
     }
     // ICU's three-letter compatibility names apply to the process default,
     // but Intl rejects them as explicitly supplied zone names.
-    let alias = match name.to_ascii_uppercase().as_str() {
+    let alias = match name {
         "ACT" => "Australia/Darwin",
         "AET" => "Australia/Sydney",
         "AGT" => "America/Argentina/Buenos_Aires",
