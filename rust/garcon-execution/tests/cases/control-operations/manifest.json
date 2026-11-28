@@ -1,0 +1,16 @@
+{
+  "module": "rust/garcon-execution/tests/support/control-operations-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-execution/tests/inputs/control-operations.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "controlOperationsTrace",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 4,
+  "sha256": "f75ea1b2cf6dfcb3c74ac7dcb606d22b1f940f5ad11f665713ca9cb54f61a4c0"
+}

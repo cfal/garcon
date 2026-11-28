@@ -160,12 +160,12 @@ impl AgentSettings for TestAgent {
     fn describe(&self) -> &[AgentSettingDescriptor] {
         &self.settings_descriptors
     }
-    fn defaults(&self) -> AgentSettingsEnvelope {
-        AgentSettingsEnvelope {
+    fn defaults(&self) -> ExecutorResult<AgentSettingsEnvelope> {
+        Ok(AgentSettingsEnvelope {
             owner_id: self.scope.integration_id.clone(),
             schema_version: 1,
             values: self.settings_values.clone(),
-        }
+        })
     }
     fn parse(&self, input: AgentSettingsEnvelope) -> ExecutorResult<AgentSettingsEnvelope> {
         Ok(input)

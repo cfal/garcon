@@ -2,7 +2,11 @@
 
 use garcon_js::{Number, OptionalNullable};
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
+use serde::{
+    Deserialize, Deserializer, Serialize, Serializer,
+    de::{DeserializeSeed, IntoDeserializer, MapAccess, Visitor, value::MapAccessDeserializer},
+    ser::{SerializeMap, SerializeStruct},
+};
 
 pub use crate::git_refs::{
     GIT_REF_RESULT_LIMITS, GitRefKind, GitRefOption, GitRefSort, GitRefsResponse,
@@ -234,32 +238,296 @@ pub enum TreeNodeKind {
     Directory,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TreeNode {
+pub struct TreeNodeFields {
     pub path: String,
     pub name: String,
     pub kind: TreeNodeKind,
     pub index_status: String,
     pub work_tree_status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub staged_facet: Option<ChangeFacet>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub unstaged_facet: Option<ChangeFacet>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub children: Option<Vec<TreeNode>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<GitFileReviewCategory>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub staged: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub has_unstaged: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub change_kind: Option<GitChangeKind>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub additions: Option<Number>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub deletions: Option<Number>,
+}
+
+/// A Bun 1.4.3 workbench probe with staged-first and unstaged-first directories
+/// gives opposite facet orders around changeKind. Directory field order
+/// follows first assignment while visiting descendants, not a fixed schema.
+#[derive(Clone)]
+pub struct TreeNode {
+    fields: TreeNodeFields,
+    order: Vec<&'static str>,
+}
+
+impl std::fmt::Debug for TreeNode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.fields.fmt(formatter)
+    }
+}
+
+const TREE_NODE_KEYS: &[&str] = &[
+    "path",
+    "name",
+    "kind",
+    "indexStatus",
+    "workTreeStatus",
+    "stagedFacet",
+    "unstagedFacet",
+    "children",
+    "category",
+    "staged",
+    "hasUnstaged",
+    "changeKind",
+    "additions",
+    "deletions",
+];
+
+impl std::ops::Deref for TreeNode {
+    type Target = TreeNodeFields;
+
+    fn deref(&self) -> &Self::Target {
+        &self.fields
+    }
+}
+
+impl PartialEq for TreeNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.fields == other.fields
+    }
+}
+
+impl TreeNode {
+    pub fn file(
+        path: String,
+        name: String,
+        index_status: String,
+        work_tree_status: String,
+        staged_facet: Option<ChangeFacet>,
+        unstaged_facet: Option<ChangeFacet>,
+    ) -> Self {
+        let primary = unstaged_facet.as_ref().or(staged_facet.as_ref());
+        let fields = TreeNodeFields {
+            path,
+            name,
+            kind: TreeNodeKind::File,
+            index_status,
+            work_tree_status,
+            category: primary.and_then(|facet| facet.category),
+            staged: Some(staged_facet.is_some()),
+            has_unstaged: Some(unstaged_facet.is_some()),
+            change_kind: primary.map(|facet| facet.change_kind),
+            additions: Some(Number(primary.map_or(0.0, |facet| facet.stats.additions.0))),
+            deletions: Some(Number(primary.map_or(0.0, |facet| facet.stats.deletions.0))),
+            staged_facet,
+            unstaged_facet,
+            children: None,
+        };
+        Self {
+            fields,
+            order: vec![
+                "path",
+                "name",
+                "kind",
+                "indexStatus",
+                "workTreeStatus",
+                "stagedFacet",
+                "unstagedFacet",
+                "staged",
+                "hasUnstaged",
+                "changeKind",
+                "additions",
+                "deletions",
+                "category",
+            ],
+        }
+    }
+
+    pub fn directory(path: String, name: String) -> Self {
+        Self {
+            fields: TreeNodeFields {
+                path,
+                name,
+                kind: TreeNodeKind::Directory,
+                index_status: " ".into(),
+                work_tree_status: " ".into(),
+                staged_facet: None,
+                unstaged_facet: None,
+                children: Some(Vec::new()),
+                category: None,
+                staged: Some(false),
+                has_unstaged: Some(false),
+                change_kind: None,
+                additions: Some(Number(0.0)),
+                deletions: Some(Number(0.0)),
+            },
+            order: vec![
+                "path",
+                "name",
+                "kind",
+                "indexStatus",
+                "workTreeStatus",
+                "staged",
+                "hasUnstaged",
+                "additions",
+                "deletions",
+                "children",
+            ],
+        }
+    }
+
+    pub fn set_children(&mut self, children: Vec<TreeNode>) {
+        self.remember_field("children");
+        self.fields.children = Some(children);
+    }
+
+    pub fn add_descendant_facets(
+        &mut self,
+        staged: Option<&ChangeFacet>,
+        unstaged: Option<&ChangeFacet>,
+    ) {
+        if let Some(facet) = staged {
+            self.remember_field("staged");
+            self.fields.staged = Some(true);
+            self.remember_field("stagedFacet");
+            self.fields
+                .staged_facet
+                .get_or_insert_with(|| facet.clone());
+            self.fields.index_status = "M".into();
+        }
+        if let Some(facet) = unstaged {
+            self.remember_field("hasUnstaged");
+            self.fields.has_unstaged = Some(true);
+            self.remember_field("unstagedFacet");
+            self.fields
+                .unstaged_facet
+                .get_or_insert_with(|| facet.clone());
+            self.fields.work_tree_status = "M".into();
+        }
+        self.remember_field("changeKind");
+        self.fields.change_kind = self
+            .unstaged_facet
+            .as_ref()
+            .or(self.staged_facet.as_ref())
+            .map(|facet| facet.change_kind);
+        let primary = unstaged.or(staged);
+        let add_stats = |total: Option<Number>, count: f64| {
+            Number(
+                total
+                    .filter(|total| !total.0.is_nan())
+                    .map_or(0.0, |total| total.0)
+                    + count,
+            )
+        };
+        self.remember_field("additions");
+        self.fields.additions = Some(add_stats(
+            self.additions,
+            primary.map_or(0.0, |facet| facet.stats.additions.0),
+        ));
+        self.remember_field("deletions");
+        self.fields.deletions = Some(add_stats(
+            self.deletions,
+            primary.map_or(0.0, |facet| facet.stats.deletions.0),
+        ));
+    }
+
+    fn remember_field(&mut self, field: &'static str) {
+        if !self.order.contains(&field) {
+            self.order.push(field);
+        }
+    }
+}
+
+impl Serialize for TreeNode {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(None)?;
+        for &key in &self.order {
+            macro_rules! optional {
+                ($field:ident) => {
+                    if let Some(value) = &self.fields.$field {
+                        map.serialize_entry(key, value)?;
+                    }
+                };
+            }
+            match key {
+                "path" => map.serialize_entry(key, &self.path)?,
+                "name" => map.serialize_entry(key, &self.name)?,
+                "kind" => map.serialize_entry(key, &self.kind)?,
+                "indexStatus" => map.serialize_entry(key, &self.index_status)?,
+                "workTreeStatus" => map.serialize_entry(key, &self.work_tree_status)?,
+                "stagedFacet" => optional!(staged_facet),
+                "unstagedFacet" => optional!(unstaged_facet),
+                "children" => optional!(children),
+                "category" => optional!(category),
+                "staged" => optional!(staged),
+                "hasUnstaged" => optional!(has_unstaged),
+                "changeKind" => optional!(change_kind),
+                "additions" => optional!(additions),
+                "deletions" => optional!(deletions),
+                _ => (),
+            }
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for TreeNode {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct OrderedNode;
+        impl<'de> Visitor<'de> for OrderedNode {
+            type Value = TreeNode;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a Git workbench tree node")
+            }
+
+            fn visit_map<M: MapAccess<'de>>(self, map: M) -> Result<TreeNode, M::Error> {
+                struct CaptureOrder<'a, M> {
+                    source: M,
+                    order: &'a mut Vec<&'static str>,
+                }
+                impl<'de, M: MapAccess<'de>> MapAccess<'de> for CaptureOrder<'_, M> {
+                    type Error = M::Error;
+
+                    fn next_key_seed<K: DeserializeSeed<'de>>(
+                        &mut self,
+                        seed: K,
+                    ) -> Result<Option<K::Value>, Self::Error> {
+                        let Some(key) = self.source.next_key::<String>()? else {
+                            return Ok(None);
+                        };
+                        if let Some(&field) = TREE_NODE_KEYS.iter().find(|&&field| field == key) {
+                            self.order.push(field);
+                        }
+                        seed.deserialize(key.into_deserializer()).map(Some)
+                    }
+
+                    fn next_value_seed<V: DeserializeSeed<'de>>(
+                        &mut self,
+                        seed: V,
+                    ) -> Result<V::Value, Self::Error> {
+                        self.source.next_value_seed(seed)
+                    }
+                }
+
+                let mut order = Vec::new();
+                let fields =
+                    TreeNodeFields::deserialize(MapAccessDeserializer::new(CaptureOrder {
+                        source: map,
+                        order: &mut order,
+                    }))?;
+                Ok(TreeNode { fields, order })
+            }
+        }
+        deserializer.deserialize_map(OrderedNode)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

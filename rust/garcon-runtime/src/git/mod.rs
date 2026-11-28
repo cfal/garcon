@@ -1,6 +1,7 @@
 pub mod commit_history;
 pub mod comparison_errors;
 pub mod conflicts;
+pub mod diff_engine;
 pub mod diff_file_list;
 pub mod discard;
 pub mod file_history;
@@ -36,6 +37,8 @@ pub mod worktree_porcelain;
 pub mod worktree_record;
 pub mod worktrees;
 
+#[cfg(test)]
+mod diff_engine_tests;
 #[cfg(test)]
 #[path = "../../tests/support/git_fixture.rs"]
 mod git_fixture;
