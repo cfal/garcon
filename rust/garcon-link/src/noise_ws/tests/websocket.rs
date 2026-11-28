@@ -319,10 +319,7 @@ fn verifies_environment_ca(variable: &str, test: &str) {
             options: echo(),
         })
         .await;
-        let temporary =
-            std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join("tmp/link");
-        std::fs::create_dir_all(&temporary).unwrap();
-        let directory = tempfile::tempdir_in(temporary).unwrap();
+        let directory = tempfile::tempdir().unwrap();
         let certificate = directory.path().join("ca.pem");
         std::fs::write(&certificate, ca).unwrap();
         let mut child = tokio::process::Command::new(std::env::current_exe().unwrap());
