@@ -235,6 +235,10 @@ struct Client {
 pub struct CodexAppServerClient(Rc<Client>);
 
 impl CodexAppServerClient {
+    pub(super) fn identity(&self) -> usize {
+        Rc::as_ptr(&self.0).addr()
+    }
+
     pub fn new(mut options: CodexAppServerClientOptions) -> Self {
         let mut env: IndexMap<_, _> = std::env::vars_os()
             .filter_map(|(key, value)| {
