@@ -1,0 +1,32 @@
+{
+  "module": "common/ws-value-parsing.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/ws-value-parsing.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "str",
+      "argument": 0
+    },
+    {
+      "fn": "requiredStr",
+      "argument": 0
+    },
+    {
+      "fn": "requiredPath",
+      "argument": 0
+    },
+    {
+      "fn": "nonNegativeInt",
+      "argument": 0
+    },
+    {
+      "fn": "canonicalChatId",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 23,
+  "sha256": "bfa93e031ac2e1b8bf5a95cd3f46e4471c585891dd91871ac504e9b8ea6eb23c"
+}
