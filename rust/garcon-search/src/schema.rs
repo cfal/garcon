@@ -6,7 +6,7 @@ mod sync;
 use std::path::PathBuf;
 
 use garcon_js::clock::InvalidTimeValue;
-use rusqlite::Connection;
+use rusqlite::{Connection, Row, types::Type};
 use thiserror::Error;
 
 pub use database::*;
@@ -24,7 +24,13 @@ pub const SEARCH_FTS_AUTOMERGE: i64 = 4;
 pub const SEARCH_FTS_MERGE_PAGES_PER_TXN: i64 = 16;
 pub const SEARCH_FTS_RANK: &str = "bm25(1.0)";
 
-const MAX_SAFE_ORDINAL: u64 = 9_007_199_254_740_991;
+pub(crate) const MAX_SAFE_ORDINAL: u64 = 9_007_199_254_740_991;
+
+pub(crate) fn read_counter(row: &Row<'_>, index: usize) -> rusqlite::Result<u64> {
+    u64::try_from(row.get::<_, i64>(index)?).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(index, Type::Integer, Box::new(error))
+    })
+}
 
 #[derive(Debug)]
 pub struct SearchDatabase {

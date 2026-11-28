@@ -1,6 +1,9 @@
 use std::{path::Path, process::Command, rc::Rc, time::Instant};
 
-use garcon_contract::chat_types::{AssistantMessage, ChatMessage, UserMessage};
+use garcon_contract::{
+    chat_types::{AssistantMessage, ChatMessage, UserMessage},
+    preambles::{PREAMBLE_COMBINED_MAX_LENGTH, PendingPreambleBoundary, Preamble},
+};
 use garcon_js::json::from_slice;
 use garcon_ledger::{
     contracts::{
@@ -11,7 +14,7 @@ use garcon_ledger::{
     input_submission::input_detail,
     store::{InitializeViewInput, TranscriptLedgerStore, TranscriptLedgerStoreOptions},
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 
 const AT: &str = "2026-11-28T09:00:00.000Z";
 
@@ -86,6 +89,52 @@ fn request<'a>(
         preamble_boundary: None,
         preambles: &[],
     }
+}
+
+#[test]
+fn preamble_expansion_and_combination_keep_their_original_fence_cause_names() {
+    let names = [
+        "{{chat_id}}".repeat(PREAMBLE_COMBINED_MAX_LENGTH / 16 + 1),
+        "x".repeat(PREAMBLE_COMBINED_MAX_LENGTH / 2),
+    ]
+    .map(|content| {
+        let temp = tempfile::tempdir().unwrap();
+        let store = store(temp.path());
+        let chat_id = "1234567890123456";
+        let view = initialize(&store, chat_id, &[]);
+        let mut preamble: Preamble = serde_json::from_value(json!({
+            "id": "01234567-0123-4123-8123-012345678901",
+            "enabled": true, "title": "Synthetic", "content": content,
+            "scope": {"type": "global"}, "agentIds": [],
+            "tagFilter": {"mode": "any", "tags": []},
+            "createdAt": AT, "updatedAt": AT,
+        }))
+        .unwrap();
+        let first = preamble.clone();
+        preamble.id =
+            serde_json::from_value(json!("01234567-0123-4123-8123-012345678902")).unwrap();
+        let error = store
+            .append_input_and_compose(
+                chat_id,
+                AppendInputRequest {
+                    preamble_boundary: Some(&PendingPreambleBoundary::NewChat {
+                        ownership_epoch: "synthetic-epoch".into(),
+                    }),
+                    preambles: &[first, preamble],
+                    ..request(&view, &input("synthetic-input", "synthetic content"))
+                },
+            )
+            .unwrap_err();
+        assert!(
+            store
+                .page(chat_id, &view.view_id, 10, None)
+                .unwrap()
+                .rows
+                .is_empty()
+        );
+        safe_fence_diagnostic(error.as_ref()).cause_name
+    });
+    assert_eq!(names, ["TemplateExpansionTooLongError", "RangeError"]);
 }
 
 // TLV5-L02.01-STORE-UNIT-01

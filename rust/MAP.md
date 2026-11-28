@@ -147,7 +147,7 @@ Parallel. Each needs only wave 0.
 | stores | Settings and its sub-stores, snippets, preambles, chat boards, canvases, saved searches, folders, tickets, API providers and assignments, Telegram settings, executor configuration | New parity scenarios per route group on an empty and a seeded workspace; ported unit tests; files written by one implementation read by the other | claimed by scenarios 2026-11-28; plan approved, one route group per commit: settings store and title (the settings snapshot routes stay unported until the agent registry exists), Telegram, tickets, executor configuration, API providers, preambles, snippets, canvases, boards, saved searches, folders, tags; forecast ceiling 9,698 native matches |
 | ledger | Store, codec, service, views, staging, paging, anchors, native activity, clear and reload | `docs/transcript-ledger-v5-cts.md`; ported unit tests; ledgers written by one implementation read by the other | claimed by foundation 2026-11-28. Merged: row codec and contracts (247 recorded; rows written by each implementation read by the other), connection, schema, migrations, fences. Open: the store, append and idempotency, staging, paging, anchors, folds, services |
 | search | FTS5 schema, indexer, query, worker pair as threads | Ported unit tests; the search corpus fixtures; same index readable by both | claimed by interface 2026-11-28. Merged: row projection, latency statistics, query validation, and the literal boundary matcher (8,281 of 8,281 spans against Bun). Open: schema and sync, ranking, paging, snippets, the worker threads, the service |
-| execution-state | The pure state machines of `chat-execution/` (control transitions, operations, ownership) and `commands/command-ledger.ts` | Golden cases from the TypeScript transition tests | claimed by research 2026-11-28. Merged: control state and projection, transitions (166 recorded), the in-memory repository, turn identity, attempts, the finalization tracker, ownership, and the API contract test for its part. Open: control operations, the command ledger |
+| execution-state | The pure state machines of `chat-execution/` (control transitions, operations, ownership) and `commands/command-ledger.ts` | Golden cases from the TypeScript transition tests | done: 76f5bb47c (research, in the gate). Control state and projection, transitions, the in-memory repository, turn identity, attempts, the finalization tracker, ownership, control operations, and the command ledger in `garcon-execution`: 42 Rust tests and 214 recorded cases; concrete error types reach callers; no cancellation point between commit and `input_accepted`; the API contract test pins the ownership booleans, and its coordinator half waits for wave 2 |
 
 ### Wave 2: assembly
 
@@ -164,7 +164,7 @@ Parallel. Each needs only wave 0.
 | agents-best-effort | worker | cursor, amp, factory | Ported unit tests and golden converter cases only; no scripted tier exists | open |
 | chats | stores, ledger | Registry, metadata index, list projector, ownership journal, identifiers, tags, parents, order | Ported unit tests; registry files read by both | open |
 | agents-registry | chats, agents-direct | `AgentRegistry`, runtime router, directory, catalog, session settings, producer bindings, `ExecutorManager` with the in-process Local runtime | Ported unit tests | open |
-| execution | execution-state, agents-registry | Coordinator, queue drainer, steering, accepted input, start, session, steer, queue, and fork commands | Ported unit tests | open |
+| execution | execution-state, agents-registry | Coordinator, queue drainer, steering, accepted input, start, session, steer, queue, and fork commands | Ported unit tests | claimed by research 2026-11-28 for the parts the original tests against fakes: accepted input and terminal helpers, receipt projection, command settlement; steer, queued steer, and control input delivery and the queue drainer; the coordinator. The command modules that need the chats registry and the agent registry wait for those units |
 | chat-surface | execution, edge | Chat routes, command routes, snapshots, rows, browser chat handler, `server-event-wiring` | **Core milestone:** generic server suites pass in-process on the native controller with direct providers | open |
 | remote-client | link, agents-registry | `RemoteExecutorClient`, remote integration and service proxies, CLI dispatcher | Remote lanes, Rust controller with TypeScript worker | open |
 
@@ -393,6 +393,17 @@ runs.
   main CJK block (about half of such pairs) and almost none inside it
   (0.18%). Listed provisionally on 2026-11-28. Exact agreement means
   generating and committing custom ICU4X collation data.
+- How the port presents itself to model providers. The original's requests
+  carry `User-Agent: Bun/1.4.3` (Bun's fetch default); the port sends the
+  same for now, since a provider or a proxy may key on it. Header names go
+  out in lowercase and in the HTTP client's order where Bun sends mixed case;
+  values and the set of fields match. A choice for the lift.
+- A security observation about the original, kept as is in the port: on a
+  redirect to another origin its provider requests drop `Authorization` but
+  forward `x-api-key` like any other header (the behavior of fetch), so a
+  provider endpoint that redirects elsewhere receives that key at the new
+  origin. Whether the port should refuse to follow such a redirect is the
+  user's decision.
 
 ## Out of scope
 

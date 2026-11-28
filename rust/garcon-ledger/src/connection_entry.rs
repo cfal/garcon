@@ -2,7 +2,7 @@ use std::error::Error;
 
 use rusqlite::Connection;
 
-use crate::contracts::TranscriptView;
+use crate::{contracts::TranscriptView, sqlite_operations::SqliteError};
 
 #[derive(Debug)]
 pub struct ViewRecord {
@@ -19,7 +19,7 @@ pub enum ConnectionCloseAttempt {
     },
     Failed {
         entry: Box<ConnectionEntry>,
-        failure: Box<dyn Error>,
+        failure: SqliteError,
     },
 }
 

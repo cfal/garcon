@@ -76,20 +76,16 @@ pub(crate) fn get_web_socket_auth_token<B>(request: &Request<B>) -> Option<Strin
 }
 
 pub(crate) fn select_web_socket_protocol(headers: &HeaderMap) -> Option<HeaderValue> {
-    let offered = fetch_header_value(headers, &SEC_WEBSOCKET_PROTOCOL);
-    let offered = parse_web_socket_protocol_header(offered.as_deref());
-    if offered.contains(&GARCON_WS_PROTOCOL) {
+    let offered = fetch_header_value(headers, &SEC_WEBSOCKET_PROTOCOL)?;
+    if parse_web_socket_protocol_header(Some(&offered)).contains(&GARCON_WS_PROTOCOL) {
         return Some(HeaderValue::from_static(GARCON_WS_PROTOCOL));
     }
-    // Without the application's explicit choice, Bun selects the first offer.
-    HeaderValue::from_bytes(
-        &offered
-            .first()?
-            .chars()
-            .map(|c| c as u8)
-            .collect::<Vec<_>>(),
-    )
-    .ok()
+    if offered.is_empty() {
+        return None;
+    }
+    // Bun echoes the first field up to the comma, including its trailing whitespace.
+    let first = offered.split(',').next()?;
+    HeaderValue::from_bytes(&first.chars().map(|c| c as u8).collect::<Vec<_>>()).ok()
 }
 
 #[cfg(test)]
@@ -149,6 +145,19 @@ mod tests {
                 selected.as_ref().and_then(|value| value.to_str().ok()),
                 expected
             );
+        }
+    }
+
+    #[test]
+    fn edge_review_preserves_buns_raw_first_protocol_offer() {
+        for (header, expected) in [
+            (", second", b"".as_slice()),
+            ("\tfirst\t, second", b"first\t".as_slice()),
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static(header));
+            let selected = select_web_socket_protocol(&headers).unwrap();
+            assert_eq!(selected.as_bytes(), expected, "{header:?}");
         }
     }
 }
