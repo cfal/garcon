@@ -1,8 +1,15 @@
-use std::{cell::RefCell, error::Error, future, rc::Rc, time::Duration};
+use std::{
+    cell::RefCell,
+    error::Error,
+    future::{self, Future},
+    rc::Rc,
+    task::{Context, Waker},
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use garcon_base::{
-    domain_error::DomainError,
+    domain_error::{DomainError, as_domain_error},
     errors::{ErrorInput, diagnostic_error_code},
     keyed_lock::KeyedLock,
 };
@@ -13,8 +20,8 @@ use garcon_execution::{
         ChatExecutionControlRepository, InMemoryChatExecutionControlRepository,
     },
     types::{
-        ControlTransitionError, ExecutionOperationResult, ProjectAdmissionPort,
-        QueuedAttachmentAdmissionPort, execution_error_input,
+        ExecutionOperationResult, ProjectAdmissionPort, QueueEntryMutationError,
+        QueuePauseChangedError, QueuedAttachmentAdmissionPort, execution_error_input,
     },
 };
 use garcon_js::clock::ManualClock;
@@ -158,28 +165,24 @@ fn operation_result(value: ExecutionOperationResult<impl Serialize>) -> Value {
 }
 
 fn operation_error(error: &(dyn Error + 'static)) -> Value {
-    if let Some(error) = error.downcast_ref::<ControlTransitionError>() {
-        let control = match error {
-            ControlTransitionError::Mutation(error) => Some(error.control.as_ref()),
-            ControlTransitionError::Pause(error) => Some(error.control.as_ref()),
-            ControlTransitionError::Domain(_) => None,
-        };
-        let domain = error.domain_error();
-        let ErrorInput::Diagnostic(diagnostic) = execution_error_input(error) else {
-            panic!("execution error metadata was erased")
+    let concrete = if let Some(error) = error.downcast_ref::<QueueEntryMutationError>() {
+        Some((&error.domain, Some(error.control.as_ref())))
+    } else if let Some(error) = error.downcast_ref::<QueuePauseChangedError>() {
+        Some((&error.domain, Some(error.control.as_ref())))
+    } else {
+        as_domain_error(error).map(|error| (error, None))
+    };
+    if let Some((domain, control)) = concrete {
+        let name = match execution_error_input(error) {
+            ErrorInput::Diagnostic(diagnostic) => diagnostic.diagnostic_metadata().name,
+            _ => domain.kind.name(),
         };
         return json!({"error":{
-            "name":diagnostic.diagnostic_metadata().name,
+            "name":name,
             "message":domain.message,
             "code":domain.code.as_str(),
             "status":domain.status,
             "control": control.map(serialized),
-        }});
-    }
-    if let Some(domain) = error.downcast_ref::<DomainError>() {
-        return json!({"error":{
-            "name":domain.kind.name(),"message":domain.message,"code":domain.code.as_str(),
-            "status":domain.status,"control":null,
         }});
     }
     json!({"error":{"name":"Error","message":error.to_string(),"code":null,"status":null,"control":null}})
@@ -573,7 +576,7 @@ async fn control_operations_commit_before_publish_and_keep_the_reserved_entry_on
 }
 
 #[tokio::test]
-async fn control_operations_rejection_keeps_the_concrete_error_in_the_erased_path() {
+async fn control_operations_rejections_keep_concrete_error_types_after_erasure() {
     let harness = Harness::new();
     let input = create_input("entry", Vec::new());
     harness
@@ -588,6 +591,24 @@ async fn control_operations_rejection_keeps_the_concrete_error_in_the_erased_pat
             "chat",
             &ReplaceQueueEntryInput {
                 entry_id: "entry".into(),
+                content: String::new(),
+                expected_revision: 1,
+                command: None,
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        as_domain_error(error.as_ref()).unwrap().code,
+        ErrorCode::VALIDATION_FAILED
+    );
+
+    let error = harness
+        .operations
+        .replace(
+            "chat",
+            &ReplaceQueueEntryInput {
+                entry_id: "entry".into(),
                 content: "stale".into(),
                 expected_revision: 9,
                 command: None,
@@ -595,10 +616,49 @@ async fn control_operations_rejection_keeps_the_concrete_error_in_the_erased_pat
         )
         .await
         .unwrap_err();
+    let typed = error.downcast_ref::<QueueEntryMutationError>().unwrap();
+    assert_eq!(typed.control.version, 1);
     assert_eq!(
         diagnostic_error_code(execution_error_input(&*error)),
         "QUEUE_ENTRY_REVISION_CONFLICT"
     );
     assert_eq!(harness.ports.repository.load("chat").version, 1);
     assert!(harness.ports.effects.borrow().is_empty());
+
+    let pause = harness.operations.pause("chat").await.unwrap();
+    let error = harness
+        .operations
+        .resume("chat", "stale")
+        .await
+        .unwrap_err();
+    let typed = error.downcast_ref::<QueuePauseChangedError>().unwrap();
+    assert_eq!(*typed.control, pause.control);
+    assert_eq!(
+        diagnostic_error_code(execution_error_input(error.as_ref())),
+        "QUEUE_PAUSE_CHANGED"
+    );
+}
+
+#[tokio::test]
+async fn control_operations_announce_the_entry_even_if_the_caller_drops_after_commit() {
+    let harness = Harness::new();
+    let input = create_input("entry", Vec::new());
+    let mut operation = Box::pin(harness.operations.create("chat", &input, None));
+    let mut cx = Context::from_waker(Waker::noop());
+    loop {
+        let poll = operation.as_mut().poll(&mut cx);
+        if harness.ports.repository.load("chat").version == 1 {
+            drop(operation);
+            break;
+        }
+        assert!(poll.is_pending(), "create returned without committing");
+    }
+    let effects = harness.ports.effects.borrow();
+    assert!(
+        effects.ends_with(&[
+            json!(["publish", "chat", 1, 1]),
+            json!(["accepted", "chat"])
+        ]),
+        "{effects:?}",
+    );
 }

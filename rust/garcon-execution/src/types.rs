@@ -157,6 +157,8 @@ pub fn execution_error_input<'a>(error: &'a (dyn Error + 'static)) -> ErrorInput
         ErrorInput::Diagnostic(error)
     } else if let Some(error) = error.downcast_ref::<crate::steering_errors::SteerDeliveryError>() {
         ErrorInput::Diagnostic(error)
+    } else if let Some(error) = error.downcast_ref::<crate::command_ledger::CommandLedgerError>() {
+        ErrorInput::Diagnostic(error)
     } else {
         ErrorInput::Error(error)
     }
