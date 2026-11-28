@@ -1,4 +1,4 @@
-use std::{error::Error, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, error::Error, rc::Rc};
 
 use garcon_contract::{
     cli_presentation::{CliBodyDisclosure, CliPresentation, CliRowFormat},
@@ -9,16 +9,30 @@ use garcon_js::clock::{Clock, SystemClock, to_iso_string};
 
 use crate::{
     contracts::{
-        AppendChatRowRequest, AppendChatRowResult, LedgerCliRowNoticeDetail, LedgerRow,
-        TranscriptView, TranscriptViewId,
+        AppendChatRowRequest, AppendChatRowResult, InputComposition, LedgerCliRowNoticeDetail,
+        LedgerRow, TranscriptView, TranscriptViewId,
     },
     sqlite_operations::LedgerResult,
     store::TranscriptLedgerStore,
 };
 
 mod commit_notifications;
+mod input;
+mod listeners;
+mod permissions;
+mod producer;
 use commit_notifications::CommitNotifications;
 pub use commit_notifications::{TranscriptCommitListener, TranscriptCommitWork};
+pub use input::AppendInput;
+pub use permissions::{
+    PermissionActionability, PermissionActionabilityChange, PermissionResolutionClaim,
+    RetiredPermissionControl,
+};
+use producer::ProducerState;
+pub use producer::{
+    GarconCommandSink, LedgerSyncListener, RunAbandonedListener, SessionCommitListener,
+    TranscriptRunRef, TranscriptSessionCommitEvent,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TranscriptCommitEvent {
@@ -69,6 +83,10 @@ pub type LedgerListenerErrorHandler = dyn Fn(Box<dyn Error>);
 pub struct TranscriptLedgerServiceOptions {
     pub clock: Option<Rc<dyn Clock>>,
     pub on_listener_error: Option<Rc<LedgerListenerErrorHandler>>,
+    pub create_run_id: Option<Rc<dyn Fn() -> String>>,
+    pub create_claim_id: Option<Rc<dyn Fn() -> String>>,
+    pub server_instance_id: Option<String>,
+    pub command_sink: Option<Rc<GarconCommandSink>>,
 }
 
 /// Commits synchronously on the controller's LocalSet and defers listener delivery.
@@ -76,16 +94,24 @@ pub struct TranscriptLedgerService {
     store: Rc<TranscriptLedgerStore>,
     clock: Rc<dyn Clock>,
     notifications: Rc<CommitNotifications>,
+    producers: ProducerState,
+    prepared_inputs: RefCell<HashMap<(String, String), Rc<InputComposition>>>,
 }
 
 impl TranscriptLedgerService {
-    pub fn new(store: Rc<TranscriptLedgerStore>, options: TranscriptLedgerServiceOptions) -> Self {
+    pub fn new(
+        store: Rc<TranscriptLedgerStore>,
+        mut options: TranscriptLedgerServiceOptions,
+    ) -> Self {
+        let producers = ProducerState::new(&mut options);
         Self {
             store,
             clock: options.clock.unwrap_or_else(|| Rc::new(SystemClock)),
             notifications: Rc::new(CommitNotifications::new(
                 options.on_listener_error.unwrap_or_else(|| Rc::new(|_| {})),
             )),
+            producers,
+            prepared_inputs: RefCell::default(),
         }
     }
 
@@ -133,6 +159,7 @@ impl TranscriptLedgerService {
         expected_view_id: &TranscriptViewId,
         staging_view_id: &TranscriptViewId,
     ) -> LedgerResult<TranscriptView> {
+        self.close_producer(chat_id)?;
         let view = match self
             .store
             .replace_current_view(chat_id, expected_view_id, staging_view_id)
@@ -143,6 +170,8 @@ impl TranscriptLedgerService {
                 _ => return Err(failure),
             },
         };
+        self.producers.permissions.borrow_mut().clear_chat(chat_id);
+        self.clear_prepared_inputs(chat_id);
         self.notifications
             .notify(TranscriptCommitEvent::ViewReplaced {
                 chat_id: chat_id.into(),
@@ -150,5 +179,39 @@ impl TranscriptLedgerService {
                 view: view.clone(),
             });
         Ok(view)
+    }
+
+    pub fn close_chat(&self, chat_id: &str) -> LedgerResult<()> {
+        self.close_producer(chat_id)?;
+        self.producers
+            .active_runs
+            .borrow_mut()
+            .shift_remove(chat_id);
+        self.producers.permissions.borrow_mut().clear_chat(chat_id);
+        self.clear_prepared_inputs(chat_id);
+        self.store.close_chat(chat_id)
+    }
+
+    pub fn close(&self) -> LedgerResult<()> {
+        loop {
+            let next = self.producers.leases.borrow().values().next().cloned();
+            let Some(lease) = next else { break };
+            lease.close()?;
+        }
+        self.producers.active_runs.borrow_mut().clear();
+        drop(self.producers.permissions.replace(Default::default()));
+        self.prepared_inputs.borrow_mut().clear();
+        self.producers.session_listeners.clear();
+        self.producers.run_ended.clear();
+        self.producers.run_abandoned.clear();
+        self.producers.retired.clear();
+        self.producers.actionability.clear();
+        self.store.close()
+    }
+
+    fn clear_prepared_inputs(&self, chat_id: &str) {
+        self.prepared_inputs
+            .borrow_mut()
+            .retain(|(id, _), _| id != chat_id);
     }
 }
