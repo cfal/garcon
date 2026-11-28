@@ -824,6 +824,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "garcon-agents-common"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "garcon-base",
+ "garcon-cases",
+ "garcon-contract",
+ "garcon-interface",
+ "garcon-js",
+ "indexmap",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "garcon-base"
 version = "0.0.0"
 dependencies = [
