@@ -1,3 +1,4 @@
+mod adoption;
 mod anchor_cases;
 mod anchor_views;
 mod bulk_views;
