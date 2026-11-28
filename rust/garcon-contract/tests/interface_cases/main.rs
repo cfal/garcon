@@ -8,6 +8,7 @@ mod agent_cli_update;
 mod bun;
 mod chat_activity;
 mod chat_boards;
+mod chat_command_contracts;
 mod chat_parentage;
 mod chat_preamble_selection_contracts;
 mod chat_tag_mutations;
