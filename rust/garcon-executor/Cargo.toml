@@ -17,6 +17,7 @@ futures.workspace = true
 garcon-agent-direct-anthropic-compatible = { path = "../garcon-agent-direct-anthropic-compatible" }
 garcon-agent-direct-openai-compatible = { path = "../garcon-agent-direct-openai-compatible" }
 garcon-agent-direct-openai-responses-compatible = { path = "../garcon-agent-direct-openai-responses-compatible" }
+garcon-agent-opencode = { path = "../garcon-agent-opencode" }
 garcon-base.workspace = true
 garcon-contract.workspace = true
 garcon-interface.workspace = true

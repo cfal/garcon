@@ -1301,6 +1301,7 @@ dependencies = [
  "garcon-agent-direct-anthropic-compatible",
  "garcon-agent-direct-openai-compatible",
  "garcon-agent-direct-openai-responses-compatible",
+ "garcon-agent-opencode",
  "garcon-base",
  "garcon-cases",
  "garcon-contract",

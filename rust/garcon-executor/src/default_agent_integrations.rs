@@ -3,6 +3,7 @@
 use garcon_agent_direct_anthropic_compatible::DirectAnthropicCompatibleIntegration;
 use garcon_agent_direct_openai_compatible::DirectOpenAiCompatibleIntegration;
 use garcon_agent_direct_openai_responses_compatible::DirectOpenAiResponsesCompatibleIntegration;
+use garcon_agent_opencode::OpenCodeAgentIntegration;
 use garcon_interface::integration::AgentIntegrationClass;
 
 pub(crate) fn default_agent_integrations() -> Vec<&'static dyn AgentIntegrationClass> {
@@ -14,7 +15,7 @@ pub(crate) fn default_agent_integrations() -> Vec<&'static dyn AgentIntegrationC
         &DirectOpenAiResponsesCompatibleIntegration,
         &DirectOpenAiCompatibleIntegration,
         &DirectAnthropicCompatibleIntegration,
-        // OpenCode
+        &OpenCodeAgentIntegration,
         // Amp
         // Cursor
         // Antigravity
