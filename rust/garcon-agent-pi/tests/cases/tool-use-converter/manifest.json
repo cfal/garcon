@@ -1,0 +1,19 @@
+{
+  "module": "server-agents/pi/src/agents/pi/tool-use-converter.ts",
+  "tests": [
+    "server-agents/pi/src/agents/pi/__tests__/tool-use-converter.test.js"
+  ],
+  "inputs": "rust/garcon-agent-pi/tests/inputs/tool-use-converter.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "convertPiToolUse",
+      "argument": 3
+    }
+  ],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 135,
+  "sha256": "2e68a41c3adb2c7fad4b1a8e6f8c397334cac93a4dbb3ea2f4c17f474f9d1db0"
+}
