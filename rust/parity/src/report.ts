@@ -4,12 +4,14 @@ import { compareWithKnown, missingKnownCase, type KnownDifference } from './know
 import type { CaseRun, UnavailableCase } from './runner.js';
 import type { Difference } from './wildcard.js';
 
+type CaseUnavailable = UnavailableCase | { kind: 'after-unported-write'; write: string; difference: Difference };
+
 export interface CaseResult {
   scenario: string;
   name: string;
   difference: Difference | null;
   native: boolean;
-  unavailable?: UnavailableCase;
+  unavailable?: CaseUnavailable;
   fallbacks: string[];
 }
 
@@ -23,11 +25,12 @@ export function compareScenario(golden: Golden | null, runs: CaseRun[], scenario
   if (!golden) {
     return { scenario, missingGolden: true, cases: [] };
   }
-  const result = (name: string, difference: Difference | null, run?: CaseRun): CaseResult => ({
+  const result = (name: string, difference: Difference | null, run?: CaseRun, unavailable?: CaseUnavailable): CaseResult => ({
     scenario,
     name,
     difference,
-    native: difference === null && run !== undefined && !run.unavailable && run.fallbacks.length === 0,
+    native: difference === null && run !== undefined && !unavailable && run.fallbacks.length === 0,
+    ...(unavailable ? { unavailable } : {}),
     fallbacks: run?.fallbacks ?? [],
   });
   const byName = new Map(runs.map((run) => [run.name, run]));
@@ -36,11 +39,16 @@ export function compareScenario(golden: Golden | null, runs: CaseRun[], scenario
   const cases = golden.cases.map((expected) => {
     const run = byName.get(expected.name);
     if (!run) return result(expected.name, { path: '$', kind: 'missing', expected: 'a recorded case', actual: '(case no longer generated)' });
-    if (run.unavailable) return { ...result(expected.name, null, run), unavailable: run.unavailable };
-    if (run.unresolvedPlaceholder !== undefined) {
-      return result(expected.name, { path: '$.request', kind: 'missing', expected: 'all response placeholders resolved', actual: run.unresolvedPlaceholder }, run);
+    if (run.unavailable) return result(expected.name, null, run, run.unavailable);
+    const { afterUnportedWrite: write, unresolvedPlaceholder } = run;
+    const caseApprovals = write === undefined ? approvals.filter((entry) => entry.case === expected.name) : [];
+    const difference: Difference | null = unresolvedPlaceholder !== undefined
+      ? { path: '$.request', kind: 'missing', expected: 'all response placeholders resolved', actual: unresolvedPlaceholder }
+      : compareWithKnown(expected.expected, run.capture, caseApprovals);
+    if (difference && write !== undefined) {
+      return result(expected.name, null, run, { kind: 'after-unported-write', write, difference });
     }
-    return result(expected.name, compareWithKnown(expected.expected, run.capture, approvals.filter((entry) => entry.case === expected.name)), run);
+    return result(expected.name, difference, run);
   });
   // A step added without recording again would otherwise never be checked.
   const unrecorded = runs.filter((run) => !recorded.has(run.name)).map((run) =>
@@ -60,6 +68,7 @@ function counts(cases: CaseResult[]) {
     native: cases.filter((entry) => entry.native).length,
     unported: cases.filter((entry) => entry.unavailable?.kind === 'unported').length,
     blocked: cases.filter((entry) => entry.unavailable?.kind === 'blocked').length,
+    afterWrite: cases.filter((entry) => entry.unavailable?.kind === 'after-unported-write').length,
     mismatching: cases.filter((entry) => entry.difference).length,
   };
 }
@@ -91,6 +100,9 @@ export function replaySummary(results: ScenarioResult[], report: string): string
       if (entry.unavailable?.kind === 'blocked') {
         shown.push(`BLOCKED ${scenario}/${entry.name} by ${entry.unavailable.supplier}`);
       }
+      if (entry.unavailable?.kind === 'after-unported-write') {
+        shown.push(`AFTER UNPORTED WRITE ${scenario}/${entry.name} after ${entry.unavailable.write} at ${entry.unavailable.difference.path}`);
+      }
     }
   }
   for (const result of failing.slice(0, 20)) {
@@ -115,6 +127,7 @@ export function renderReport(label: string, results: ScenarioResult[], measuresF
       `Matched via fallback: ${total.passed - total.native}/${cases.length} cases`,
       `Unported: ${total.unported}/${cases.length} cases`,
       `Blocked by an unported step: ${total.blocked}/${cases.length} cases`,
+      `After an unported write: ${total.afterWrite}/${cases.length} cases`,
       `Mismatching: ${total.mismatching}/${cases.length} cases`,
     );
   }
@@ -140,23 +153,27 @@ export function renderReport(label: string, results: ScenarioResult[], measuresF
 
   lines.push('', '## Scenarios', '');
   if (measuresFallback) {
-    lines.push('| scenario | passed | matched natively | unported | blocked | mismatching |', '| --- | ---: | ---: | ---: | ---: | ---: |');
+    lines.push('| scenario | passed | matched natively | unported | blocked | after an unported write | mismatching |', '| --- | ---: | ---: | ---: | ---: | ---: | ---: |');
   } else {
     lines.push('| scenario | passed | native |', '| --- | ---: | ---: |');
   }
   for (const result of results) {
-    const { passed, native, unported, blocked, mismatching } = counts(result.cases);
+    const { passed, native, unported, blocked, afterWrite, mismatching } = counts(result.cases);
     const runCount = result.cases.length;
-    const classifications = measuresFallback ? `${native}/${runCount} | ${unported} | ${blocked} | ${mismatching}` : 'n/a';
+    const classifications = measuresFallback ? `${native}/${runCount} | ${unported} | ${blocked} | ${afterWrite} | ${mismatching}` : 'n/a';
     lines.push(`| ${result.scenario} | ${passed}/${runCount} | ${classifications} |`);
   }
 
-  if (total.unported + total.blocked > 0) {
-    lines.push('', '## Unported and blocked cases', '');
+  if (total.unported + total.blocked + total.afterWrite > 0) {
+    lines.push('', '## Unported and dependent cases', '');
     for (const entry of cases) {
       if (entry.unavailable?.kind === 'unported') lines.push(`- ${entry.scenario}/${entry.name}: unported`);
       if (entry.unavailable?.kind === 'blocked') {
         lines.push(`- ${entry.scenario}/${entry.name}: blocked by ${entry.unavailable.supplier}`);
+      }
+      if (entry.unavailable?.kind === 'after-unported-write') {
+        const { write, difference } = entry.unavailable;
+        lines.push(`- ${entry.scenario}/${entry.name}: after unported write ${write}, at \`${difference.path}\` (${difference.kind}): expected \`${cell(difference.expected)}\`, got \`${cell(difference.actual)}\``);
       }
     }
   }
