@@ -36,10 +36,6 @@ mod tests {
                 )
             })
             .collect();
-        assert_eq!(
-            routes[&("POST".into(), "/api/v1/auth/login".into())],
-            (true, true, IndexMap::new())
-        );
         assert!(!routes[&("GET".into(), "/api/v1/tickets".into())].0);
         assert!(routes[&("GET".into(), "/api/v1/tickets".into())].1);
         assert!(

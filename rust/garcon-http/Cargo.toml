@@ -26,9 +26,10 @@ regex = "1"
 ruzstd = "0.8"
 serde.workspace = true
 serde_json.workspace = true
+subtle = "2"
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
-tokio-util.workspace = true
+tokio-util = { workspace = true, features = ["rt"] }
 url.workspace = true
 
 [dev-dependencies]
