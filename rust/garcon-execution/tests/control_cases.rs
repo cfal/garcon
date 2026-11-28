@@ -16,6 +16,9 @@ use garcon_js::Number;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
+#[path = "support/control_operations.rs"]
+mod control_operations;
+
 fn directory(name: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/cases")
