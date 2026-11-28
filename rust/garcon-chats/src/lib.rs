@@ -24,3 +24,5 @@ pub mod preambles;
 pub mod registry_contracts;
 pub mod registry_entry_codec;
 pub mod store;
+pub mod task_worker;
+pub mod token_fitting;

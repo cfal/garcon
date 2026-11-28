@@ -1,0 +1,34 @@
+{
+  "module": "server/controller/chats/carryover/segment-types.ts",
+  "tests": [
+    "rust/garcon-chats/tests/oracles/carryover-segment-types.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "parseCarryOverSegmentIndex",
+      "argument": 1,
+      "guard": "rust/garcon-chats/tests/oracles/carryover-segment-types.guards.ts#expectedSegmentId",
+      "dropped": 0,
+      "kept": 3
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "isCarryOverSegmentId",
+      "argument": 0
+    },
+    {
+      "fn": "parseCarryOverSegmentIndex",
+      "argument": 0
+    },
+    {
+      "fn": "parseCarryOverSegmentIndex",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 144,
+  "sha256": "6f335bb76a681328938311378cbdc3fd857b04eaba9adf582a2a7e1ad1c12af0"
+}

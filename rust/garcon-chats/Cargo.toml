@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
+brotli = "9.1.3"
 futures.workspace = true
 garcon-base.workspace = true
 garcon-contract.workspace = true

@@ -1,2 +1,9 @@
+pub mod compaction;
+pub mod context;
+pub mod garbage_collector;
+pub mod outcome;
+pub mod page_codec;
+pub mod prepared_store;
 pub mod segment_types;
 pub mod segments;
+pub mod transcript_store;
