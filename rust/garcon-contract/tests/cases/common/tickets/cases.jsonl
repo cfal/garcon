@@ -1,0 +1,49 @@
+{"id":"ticketAssigneeQuery#0","fn":"ticketAssigneeQuery","args":["unassigned"],"result":"unassigned","origin":"test"}
+{"id":"ticketAssigneeQuery#1","fn":"ticketAssigneeQuery","args":[{"kind":"chat","chatId":"1000000000000001"}],"result":"chat:1000000000000001","origin":"test"}
+{"id":"ticketAssigneeQuery#2","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"user:λ"}],"result":"user:user:λ","origin":"test"}
+{"id":"ticketAssigneeQuery#3","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"Ünïcödé"}],"result":"user:Ünïcödé","origin":"trap:accented@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#4","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"日本語雪"}],"result":"user:日本語雪","origin":"trap:cjk@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#5","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"😀"}],"result":"user:😀","origin":"trap:astral@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#6","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"é"}],"result":"user:é","origin":"trap:combining@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#7","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"ı"}],"result":"user:ı","origin":"trap:dotless-i@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#8","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"K"}],"result":"user:K","origin":"trap:kelvin@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#9","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":" "}],"result":"user: ","origin":"trap:nbsp@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#10","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"uÜnïcödéser:λ"}],"result":"user:uÜnïcödéser:λ","origin":"trap:accented+after-first@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#11","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"user:λÜnïcödé"}],"result":"user:user:λÜnïcödé","origin":"trap:accented+append@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#12","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"u日本語雪ser:λ"}],"result":"user:u日本語雪ser:λ","origin":"trap:cjk+after-first@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#13","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"user:λ日本語雪"}],"result":"user:user:λ日本語雪","origin":"trap:cjk+append@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#14","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"u😀ser:λ"}],"result":"user:u😀ser:λ","origin":"trap:astral+after-first@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#15","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"user:λ😀"}],"result":"user:user:λ😀","origin":"trap:astral+append@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#16","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"uéser:λ"}],"result":"user:uéser:λ","origin":"trap:combining+after-first@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#17","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"user:λé"}],"result":"user:user:λé","origin":"trap:combining+append@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#18","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"uıser:λ"}],"result":"user:uıser:λ","origin":"trap:dotless-i+after-first@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#19","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"user:λı"}],"result":"user:user:λı","origin":"trap:dotless-i+append@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#20","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"uKser:λ"}],"result":"user:uKser:λ","origin":"trap:kelvin+after-first@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#21","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"user:λK"}],"result":"user:user:λK","origin":"trap:kelvin+append@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#22","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"u ser:λ"}],"result":"user:u ser:λ","origin":"trap:nbsp+after-first@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#23","fn":"ticketAssigneeQuery","args":[{"kind":"user","ownerKey":"user:λ "}],"result":"user:user:λ ","origin":"trap:nbsp+append@$.args[0].ownerKey"}
+{"id":"ticketAssigneeQuery#24","fn":"ticketAssigneeQuery","args":[{"kind":"executor","executorId":"remote-1"}],"result":"executor:remote-1","origin":"rust/garcon-contract/tests/inputs/common/tickets.jsonl:4"}
+{"id":"ticketOwnerKey#0","fn":"ticketOwnerKey","args":[{"kind":"chat","chatId":"1000000000000001"}],"result":"chat:1000000000000001","origin":"test"}
+{"id":"ticketOwnerKey#1","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"user:λ"}],"result":"user:user:λ","origin":"test"}
+{"id":"ticketOwnerKey#2","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"Ünïcödé"}],"result":"user:Ünïcödé","origin":"trap:accented@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#3","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"日本語雪"}],"result":"user:日本語雪","origin":"trap:cjk@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#4","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"😀"}],"result":"user:😀","origin":"trap:astral@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#5","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"é"}],"result":"user:é","origin":"trap:combining@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#6","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"ı"}],"result":"user:ı","origin":"trap:dotless-i@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#7","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"K"}],"result":"user:K","origin":"trap:kelvin@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#8","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":" "}],"result":"user: ","origin":"trap:nbsp@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#9","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"uÜnïcödéser:λ"}],"result":"user:uÜnïcödéser:λ","origin":"trap:accented+after-first@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#10","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"user:λÜnïcödé"}],"result":"user:user:λÜnïcödé","origin":"trap:accented+append@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#11","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"u日本語雪ser:λ"}],"result":"user:u日本語雪ser:λ","origin":"trap:cjk+after-first@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#12","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"user:λ日本語雪"}],"result":"user:user:λ日本語雪","origin":"trap:cjk+append@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#13","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"u😀ser:λ"}],"result":"user:u😀ser:λ","origin":"trap:astral+after-first@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#14","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"user:λ😀"}],"result":"user:user:λ😀","origin":"trap:astral+append@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#15","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"uéser:λ"}],"result":"user:uéser:λ","origin":"trap:combining+after-first@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#16","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"user:λé"}],"result":"user:user:λé","origin":"trap:combining+append@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#17","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"uıser:λ"}],"result":"user:uıser:λ","origin":"trap:dotless-i+after-first@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#18","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"user:λı"}],"result":"user:user:λı","origin":"trap:dotless-i+append@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#19","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"uKser:λ"}],"result":"user:uKser:λ","origin":"trap:kelvin+after-first@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#20","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"user:λK"}],"result":"user:user:λK","origin":"trap:kelvin+append@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#21","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"u ser:λ"}],"result":"user:u ser:λ","origin":"trap:nbsp+after-first@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#22","fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"user:λ "}],"result":"user:user:λ ","origin":"trap:nbsp+append@$.args[0].ownerKey"}
+{"id":"ticketOwnerKey#23","fn":"ticketOwnerKey","args":[{"kind":"executor","executorId":"local"}],"result":"executor:local","origin":"rust/garcon-contract/tests/inputs/common/tickets.jsonl:1"}

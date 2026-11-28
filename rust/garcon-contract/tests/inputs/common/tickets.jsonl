@@ -1,0 +1,4 @@
+{"fn":"ticketOwnerKey","args":[{"kind":"executor","executorId":"local"}]}
+{"fn":"ticketOwnerKey","args":[{"kind":"chat","chatId":"1000000000000001"}]}
+{"fn":"ticketOwnerKey","args":[{"kind":"user","ownerKey":"user:\u03bb"}]}
+{"fn":"ticketAssigneeQuery","args":[{"kind":"executor","executorId":"remote-1"}]}
