@@ -1,4 +1,5 @@
 pub mod active_turn;
+pub mod claude_auth;
 pub mod claude_auth_login;
 pub mod claude_cli;
 pub mod cli_control;
