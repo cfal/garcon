@@ -103,3 +103,7 @@
 {"fn":"configFor","args":[[],{"GARCON_HTTP_COMPRESSION":" "}]}
 {"fn":"configFor","args":[[],{"GARCON_TRUST_PROXY":"maybe"}]}
 {"fn":"configFor","args":[[],{"GARCON_DISABLE_AUTH":"maybe"}]}
+{"fn":"configFor","args":[[],{"GARCON_TERMINAL_SHELL":"/bin/zsh"}]}
+{"fn":"configFor","args":[[],{"SHELL":"/bin/sh"}]}
+{"fn":"configFor","args":[[],{"GARCON_TERMINAL_SHELL":"","SHELL":"/bin/sh"}]}
+{"fn":"configFor","args":[[],{"HOME":""}]}

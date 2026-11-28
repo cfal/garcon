@@ -615,6 +615,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "garcon-runtime"
+version = "0.0.0"
+dependencies = [
+ "futures",
+ "garcon-base",
+ "garcon-cases",
+ "garcon-contract",
+ "garcon-interface",
+ "garcon-js",
+ "rustix",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "garcon-server"
 version = "0.0.0"
 dependencies = [
