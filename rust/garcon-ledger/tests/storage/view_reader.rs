@@ -7,7 +7,11 @@ use std::{
 };
 
 use futures::{future::LocalBoxFuture, poll};
-use garcon_base::{domain_error::as_domain_error, errors::DiagnosticError};
+use garcon_base::{
+    domain_error::as_domain_error,
+    errors::{DiagnosticError, ErrorInput},
+    http_error::json_error_from_unknown,
+};
 use garcon_contract::{
     chat_view::ChatHistoryState, error_codes::ErrorCode,
     ticket_source_navigation::TicketSourceResolution, tickets::TicketSource,
@@ -208,6 +212,22 @@ async fn tlv5_l11_01_view_reader_unit_01_presents_fenced_reads_as_non_retryable_
         .page(CHAT_ID, Number(1.0), None, Some(VIEW), None)
         .await
         .unwrap_err();
+    let response =
+        json_error_from_unknown(ErrorInput::Error(error.as_ref()), None, None, None).unwrap();
+    assert_eq!(response.status().as_u16(), 422);
+    assert_eq!(
+        garcon_js::json::from_slice::<serde_json::Value>(response.body()).unwrap(),
+        json!({
+            "success": false,
+            "error": "The transcript ledger is unavailable",
+            "errorCode": "TRANSCRIPT_UNAVAILABLE",
+            "retryable": false,
+        }),
+    );
+    let domain = as_domain_error(error.as_ref()).expect("erased transcript error is a DomainError");
+    assert_eq!(domain.code, ErrorCode::TRANSCRIPT_UNAVAILABLE);
+    assert_eq!(domain.status, 422);
+    assert!(!domain.retryable);
     let error = error
         .downcast::<TranscriptHistoryUnavailableError>()
         .unwrap();

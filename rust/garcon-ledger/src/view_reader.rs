@@ -1,14 +1,12 @@
-use std::{cell::Cell, error::Error, fmt, future::Future, rc::Rc};
+use std::{cell::Cell, error::Error, future::Future, rc::Rc};
 
 use futures::future::LocalBoxFuture;
-use garcon_base::{
-    domain_error::DomainError,
-    errors::{DiagnosticError, ErrorMetadata, NamedError},
-};
+pub use garcon_base::domain_error::TranscriptHistoryUnavailableError;
+use garcon_base::{domain_error::DomainError, errors::NamedError};
 use garcon_contract::{
     chat_view::{
-        CHAT_MESSAGES_MAX_LIMIT, ChatHistoryState, TranscriptAppend, TranscriptMessage,
-        TranscriptPage, TranscriptReplayResult,
+        CHAT_MESSAGES_MAX_LIMIT, TranscriptAppend, TranscriptMessage, TranscriptPage,
+        TranscriptReplayResult,
     },
     error_codes::ErrorCode,
     ticket_source_navigation::TicketSourceResolution,
@@ -384,57 +382,11 @@ impl Drop for SnapshotSlot<'_> {
     }
 }
 
-#[derive(Debug)]
-pub struct TranscriptHistoryUnavailableError {
-    domain: DomainError,
-    pub history_state: ChatHistoryState,
-}
-
-impl TranscriptHistoryUnavailableError {
-    pub fn domain_error(&self) -> &DomainError {
-        &self.domain
-    }
-}
-
-impl DiagnosticError for TranscriptHistoryUnavailableError {
-    fn diagnostic_metadata(&self) -> ErrorMetadata<'_> {
-        ErrorMetadata {
-            name: self.domain.kind.name(),
-            code: Some(self.domain.code.as_str()),
-        }
-    }
-}
-
-impl fmt::Display for TranscriptHistoryUnavailableError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.domain, formatter)
-    }
-}
-
-impl Error for TranscriptHistoryUnavailableError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        self.domain.source()
-    }
-}
-
 fn translate_read_fence(error: Box<dyn Error>) -> Box<dyn Error> {
     if !matches!(error.downcast_ref(), Some(LedgerError::Fenced { .. })) {
         return error;
     }
-    TranscriptHistoryUnavailableError {
-        domain: DomainError::new(
-            ErrorCode::TRANSCRIPT_UNAVAILABLE,
-            "The transcript ledger is unavailable",
-            422,
-            false,
-        )
-        .with_cause(error),
-        history_state: ChatHistoryState::Degraded {
-            error_code: "LEDGER_FENCED".into(),
-            retryable: false,
-        },
-    }
-    .into()
+    TranscriptHistoryUnavailableError::new("LEDGER_FENCED", false, Some(error)).into()
 }
 
 fn assert_expected_view(
