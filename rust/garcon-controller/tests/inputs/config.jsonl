@@ -1,0 +1,105 @@
+{"fn":"configFor","args":[[],{}]}
+{"fn":"configFor","args":[["--workspace-dir","/explicit/workspace"],{"GARCON_CONFIG_DIR":"/inherited","GARCON_WORKSPACE_DIR":"/inherited/workspace","GARCON_WORKSPACE":"inherited"}]}
+{"fn":"configFor","args":[[],{"GARCON_CONFIG_DIR":"relative/config/../garcon","GARCON_WORKSPACE":"env name","HOME":"relative-home","GARCON_WEB_BUILD_DIR":"rel/web/build","GARCON_PROJECT_BASE_DIR":"relative/project","NODE_ENV":"test","GARCON_JWT_TOKEN_EXPIRY":"2h"}]}
+{"fn":"configFor","args":[[],{"GARCON_CONFIG_DIR":"","GARCON_WORKSPACE_DIR":"","GARCON_WORKSPACE":"","GARCON_PORT":"","GARCON_JWT_TOKEN_EXPIRY":"","GARCON_WEB_BUILD_DIR":""}]}
+{"fn":"configFor","args":[[],{"HOME":"relative-home"}]}
+{"fn":"configFor","args":[[],{"GARCON_WORKSPACE_DIR":"relative/../chosen","GARCON_WORKSPACE":"ignored","GARCON_BIND_ADDRESS":" host ","GARCON_DISABLE_AUTH":" \t "}]}
+{"fn":"configFor","args":[["--workspace","name","--workspace-dir","/conflict"],{}]}
+{"fn":"configFor","args":[["--workspace",".."],{}]}
+{"fn":"configFor","args":[["--workspace","a/b"],{}]}
+{"fn":"configFor","args":[["--workspace","a\\b"],{}]}
+{"fn":"configFor","args":[["--workspace","a\u0000b"],{}]}
+{"fn":"configFor","args":[["--workspace="],{}]}
+{"fn":"configFor","args":[["--workspace-dir= "],{}]}
+{"fn":"configFor","args":[[],{"GARCON_CONFIG_DIR":" ﻿ "}]}
+{"fn":"configFor","args":[["--config-dir",""],{}]}
+{"fn":"configFor","args":[["--bind-address= "],{}]}
+{"fn":"configFor","args":[["--project-base-dir"," "],{}]}
+{"fn":"configFor","args":[["--config-dir","/first","--config-dir=/second","--workspace"],{}]}
+{"fn":"configFor","args":[["--workspace","--port"],{}]}
+{"fn":"configFor","args":[["--config-dir"],{}]}
+{"fn":"configFor","args":[["--config-dir=one","--config-dir=two"],{}]}
+{"fn":"configFor","args":[["--workspace-dir"],{}]}
+{"fn":"configFor","args":[["--workspace-dir=one","--workspace-dir=two"],{}]}
+{"fn":"configFor","args":[["--workspace"],{}]}
+{"fn":"configFor","args":[["--workspace=one","--workspace=two"],{}]}
+{"fn":"configFor","args":[["--port"],{}]}
+{"fn":"configFor","args":[["--port=one","--port=two"],{}]}
+{"fn":"configFor","args":[["--bind-address"],{}]}
+{"fn":"configFor","args":[["--bind-address=one","--bind-address=two"],{}]}
+{"fn":"configFor","args":[["--project-base-dir"],{}]}
+{"fn":"configFor","args":[["--project-base-dir=one","--project-base-dir=two"],{}]}
+{"fn":"configFor","args":[["--public-url"],{}]}
+{"fn":"configFor","args":[["--public-url=one","--public-url=two"],{}]}
+{"fn":"configFor","args":[["--base-path"],{}]}
+{"fn":"configFor","args":[["--base-path=one","--base-path=two"],{}]}
+{"fn":"configFor","args":[["--runtime-origin"],{}]}
+{"fn":"configFor","args":[["--runtime-origin=one","--runtime-origin=two"],{}]}
+{"fn":"configFor","args":[["--port"," -0 "],{}]}
+{"fn":"configFor","args":[["--port"," 0x1F90 "],{}]}
+{"fn":"configFor","args":[["--port=0b1011"],{}]}
+{"fn":"configFor","args":[["--port=0O17"],{}]}
+{"fn":"configFor","args":[["--port","8e3"],{}]}
+{"fn":"configFor","args":[["--port=+80.0"],{}]}
+{"fn":"configFor","args":[["--port","65535"],{}]}
+{"fn":"configFor","args":[["--port","65536"],{}]}
+{"fn":"configFor","args":[["--port","-1"],{}]}
+{"fn":"configFor","args":[["--port",""],{}]}
+{"fn":"configFor","args":[["--port"," ﻿ "],{}]}
+{"fn":"configFor","args":[["--port","0b102"],{}]}
+{"fn":"configFor","args":[["--port","80port"],{}]}
+{"fn":"configFor","args":[[],{"GARCON_PORT":"0"}]}
+{"fn":"configFor","args":[[],{"GARCON_PORT":"3000.5"}]}
+{"fn":"configFor","args":[[],{"GARCON_PORT":"Infinity"}]}
+{"fn":"configFor","args":[[],{"GARCON_PORT":"80abc"}]}
+{"fn":"configFor","args":[["--base-path=/"],{}]}
+{"fn":"configFor","args":[["--base-path=/prefix/","--public-url","https://override.test/prefix/"],{"GARCON_PUBLIC_URL":"https://public.test/base","GARCON_BASE_PATH":"/base"}]}
+{"fn":"configFor","args":[[],{"GARCON_PUBLIC_URL":"https://public.test/base","GARCON_BASE_PATH":"/base"}]}
+{"fn":"configFor","args":[["--base-path=/tools/garcon/"],{"GARCON_BASE_PATH":"/inherited"}]}
+{"fn":"configFor","args":[["--base-path=/bad//path"],{"GARCON_PUBLIC_URL":"bad url"}]}
+{"fn":"configFor","args":[["--base-path=/x","--public-url=https://public.test/other"],{}]}
+{"fn":"configFor","args":[["--public-url",""],{}]}
+{"fn":"configFor","args":[["--public-url=not a url"],{}]}
+{"fn":"configFor","args":[["--public-url=https://user:secret@host/"],{}]}
+{"fn":"configFor","args":[["--public-url=ftp://host.test/"],{}]}
+{"fn":"configFor","args":[["--public-url=http://example.com"],{}]}
+{"fn":"configFor","args":[["--public-url=http://0.0.0.0"],{}]}
+{"fn":"configFor","args":[["--public-url=http://[::]"],{}]}
+{"fn":"configFor","args":[["--public-url=https://host.test/?value=1"],{}]}
+{"fn":"configFor","args":[["--public-url=https://host.test/#fragment"],{}]}
+{"fn":"configFor","args":[["--public-url=https://host.test\\"],{}]}
+{"fn":"configFor","args":[["--public-url= https://host.test "],{}]}
+{"fn":"configFor","args":[["--public-url=https://BÜCHER.test:443"],{}]}
+{"fn":"configFor","args":[["--public-url=https://[2001:0DB8::1]:443"],{}]}
+{"fn":"configFor","args":[["--public-url=https://host.test/?#"],{}]}
+{"fn":"configFor","args":[["--runtime-origin","http://127.0.0.1:8080"],{}]}
+{"fn":"configFor","args":[["--runtime-origin","http://127.0.0.1:8080/base"],{}]}
+{"fn":"configFor","args":[["--runtime-origin","https://garcon.test"],{}]}
+{"fn":"configFor","args":[["--runtime-origin","not a url"],{}]}
+{"fn":"configFor","args":[["--runtime-origin=http://example.test/?#"],{}]}
+{"fn":"configFor","args":[["--runtime-origin=http://example.test/?query"],{}]}
+{"fn":"configFor","args":[["--runtime-origin=http://user:secret@host.test"],{}]}
+{"fn":"configFor","args":[["--runtime-origin=http://[::1]:8080"],{}]}
+{"fn":"configFor","args":[[],{"GARCON_RUNTIME_ORIGIN":"ignored"}]}
+{"fn":"configFor","args":[[],{"GARCON_PORT":"bad","GARCON_MAX_WS_CLIENTS":"bad"}]}
+{"fn":"configFor","args":[["--base-path=bad"],{"GARCON_MAX_WS_CLIENTS":"0"}]}
+{"fn":"configFor","args":[[],{"GARCON_MAX_WS_CLIENTS":"0"}]}
+{"fn":"configFor","args":[[],{"GARCON_MAX_WS_CLIENTS":"many"}]}
+{"fn":"configFor","args":[[],{"GARCON_MAX_WS_CLIENTS":"0001","GARCON_MAX_REQUEST_BODY_SIZE":" \t0 ","GARCON_MAX_CONNECTIONS":" \t0 ","GARCON_WS_IDLE_TIMEOUT_SECONDS":" \t0 ","GARCON_WS_BACKPRESSURE_LIMIT":" \t0 ","GARCON_WS_MAX_PAYLOAD_LENGTH":" \t0 ","GARCON_HTTP_IDLE_TIMEOUT_SECONDS":" \t0 ","GARCON_MAX_SESSIONS":" \t0 "}]}
+{"fn":"configFor","args":[[],{"GARCON_MAX_REQUEST_BODY_SIZE":"0x10"}]}
+{"fn":"configFor","args":[[],{"GARCON_MAX_CONNECTIONS":"0x10"}]}
+{"fn":"configFor","args":[[],{"GARCON_WS_IDLE_TIMEOUT_SECONDS":"0x10"}]}
+{"fn":"configFor","args":[[],{"GARCON_WS_BACKPRESSURE_LIMIT":"0x10"}]}
+{"fn":"configFor","args":[[],{"GARCON_WS_MAX_PAYLOAD_LENGTH":"0x10"}]}
+{"fn":"configFor","args":[[],{"GARCON_HTTP_IDLE_TIMEOUT_SECONDS":"0x10"}]}
+{"fn":"configFor","args":[[],{"GARCON_MAX_SESSIONS":"0x10"}]}
+{"fn":"configFor","args":[[],{"GARCON_MAX_CONNECTIONS":"9007199254740993","GARCON_MAX_REQUEST_BODY_SIZE":"9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999"}]}
+{"fn":"configFor","args":[["--trust-proxy","--disable-auth","--rollback-carryover-migration"],{"GARCON_TRUST_PROXY":"junk","GARCON_DISABLE_AUTH":"junk"}]}
+{"fn":"configFor","args":[["--disable-auth"],{"GARCON_DISABLE_AUTH":""}]}
+{"fn":"configFor","args":[["--disable-auth=true","--trust-proxy=true"],{}]}
+{"fn":"configFor","args":[[],{"GARCON_TRUST_PROXY":"On","GARCON_DISABLE_AUTH":"﻿ YES ","GARCON_HTTP_COMPRESSION":"false"}]}
+{"fn":"configFor","args":[[],{"GARCON_TRUST_PROXY":"OFF","GARCON_DISABLE_AUTH":"no","GARCON_HTTP_COMPRESSION":"YES"}]}
+{"fn":"configFor","args":[[],{"GARCON_HTTP_COMPRESSION":"maybe"}]}
+{"fn":"configFor","args":[[],{"GARCON_HTTP_COMPRESSION":" "}]}
+{"fn":"configFor","args":[[],{"GARCON_TRUST_PROXY":"maybe"}]}
+{"fn":"configFor","args":[[],{"GARCON_DISABLE_AUTH":"maybe"}]}
