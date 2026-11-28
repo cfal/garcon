@@ -9,5 +9,7 @@
 {"fn":"rejectedGitRpc","args":["git.commit",{"input":{"projectPath":"/fixture"},"budgetMs":42}]}
 {"fn":"rejectedGitRpc","args":["git.future",{"input":{},"budgetMs":42}]}
 {"fn":"rejectedGitRpc","args":["gh.future",{"input":{},"budgetMs":42}]}
+{"fn":"rejectedGitRpc","args":["gh.getStatus",{"input":{"extra":true},"budgetMs":30000}]}
+{"fn":"rejectedGitRpc","args":["gh.getPullRequest",{"input":{},"budgetMs":60000}]}
 {"fn":"rejectedGitRpc","args":["gh.getPullRequest",{"input":{},"budgetMs":60001}]}
 {"fn":"rejectedGitRpc","args":["gh.getPullRequest",{"input":{},"budgetMs":9007199254740992}]}

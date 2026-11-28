@@ -1,0 +1,71 @@
+{
+  "module": "server-agents/codex/src/agents/codex/user-input.ts",
+  "tests": [
+    "rust/garcon-agent-codex/tests/oracles/user-input.suite.ts"
+  ],
+  "inputs": "rust/garcon-agent-codex/tests/inputs/user-input.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "server-agents/codex/src/agents/codex/__tests__/user-input.test.ts:58:7",
+      "fn": "codexUserInputResponse",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "server-agents/codex/src/agents/codex/__tests__/user-input.test.ts:70:7",
+      "fn": "codexUserInputResponse",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "server-agents/codex/src/agents/codex/__tests__/user-input.test.ts:79:12",
+      "fn": "codexUserInputResponse",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "server-agents/codex/src/agents/codex/__tests__/user-input.test.ts:81:65",
+      "fn": "codexUserInputResponse",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "server-agents/codex/src/agents/codex/__tests__/user-input.test.ts:91:7",
+      "fn": "codexUserInputResponse",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "server-agents/codex/src/agents/codex/__tests__/user-input.test.ts:134:12",
+      "fn": "codexUserInputResponse",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a AskUserQuestionToolUseMessage instance",
+      "where": "args",
+      "at": "server-agents/codex/src/agents/codex/__tests__/user-input.test.ts:143:9",
+      "fn": "codexUserInputResponse",
+      "count": 1
+    }
+  ],
+  "cases": 225,
+  "sha256": "f6a5eb7cb0d05ac6c5604aae7138374f3c06e75c95cf99f616ffadaabf2a4d45"
+}

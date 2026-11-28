@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-base/tests/ownership_transfer_error_oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-base/tests/inputs/ownership-transfer-error.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 3,
+  "sha256": "c50bd030cb77fd6456e08f0d87de930db36667b3a9d4814108d24c6cd8363c12"
+}

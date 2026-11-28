@@ -13,6 +13,7 @@ pub mod chat_processing_activity;
 pub mod chat_snapshot;
 pub mod chat_tag_mutation_service;
 pub mod chat_title;
+pub mod chat_transient_feed;
 pub mod last_selected_chat_state;
 pub mod metadata_store;
 pub mod preambles;
