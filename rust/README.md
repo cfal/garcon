@@ -446,54 +446,80 @@ occurrence counts still fail, and the report names each unpaired occurrence.
 
 ## SACS on a Rust worker
 
-Use one scripted driver per JUnit report, since `compare-junit.ts` compares
-the same registered tests across runs. `GARCON_SACS_DRIVERS` accepts one name
-or a comma-separated list; unset means all available drivers. An unknown or
-unavailable driver name is an error.
+Run one SACS driver and its scripted server suites at a time. Compare the
+original and Rust workers on the same build machine with the original
+controller in both dial directions. The Local (`in-process`) lane starts no
+worker; it cannot verify a Rust integration under the original controller.
 
-The worker lane needs `GARCON_TEST_EXECUTION_BACKEND=remote-controller-dials`
-(controller dials worker) or `remote-executor-dials` (worker dials controller).
-`in-process` does not start a worker binary. On the executor-dials lane the
-fixture sets `GARCON_CONTROLLER_URL`; do not set it yourself. Keep
-`GARCON_TEST_CONTROLLER=original` to test only the worker. With
-`GARCON_TEST_WORKER=rust` the fixture starts `GARCON_TEST_RUST_EXECUTOR_BINARY`
-and uses the same binary for `connection-url` on the controller-dials lane.
-Without the override it uses `rust/target/release/garcon-executor` relative to
-the repository root.
-
-From the repository root, with the pinned Bun on `PATH`, choose a driver and a
-directory for the reports. On the porting VM, fetch the release binary from
-the build machine using your worktree's `WORKTREE_LABEL` (for example `link`):
+OpenCode is the worked example. Use the pinned `opencode-ai` package from
+`integration-tests/bun.lock`, not a system install. The Linux scripted tier
+checks the real binary version, isolates configuration and storage, and
+serves model responses from a fake Chat Completions server. Run the sequence
+through the build wrapper using your worktree label (here, `link`):
 
 ```bash
-driver=direct-openai-compatible
-out="$HOME/tmp/garcon-sacs"
-"$HOME/bin/garcon-rs-remote" "$WORKTREE_LABEL" \
-  --fetch release/garcon-executor "$out/garcon-executor" -- \
-  env CARGO_BUILD_JOBS=1 cargo build -p garcon-executor --release
+"$HOME/bin/garcon-rs-remote" link -- bash -c '
+  set -e
+  export CARGO_BUILD_JOBS=1
+  cargo test -p garcon-executor -- --test-threads=1
+  cargo clippy --locked -p garcon-executor --all-targets -- -D warnings
+  cargo build --locked -p garcon-executor --release
+  export GARCON_TEST_RUST_EXECUTOR_BINARY="$CARGO_TARGET_DIR/release/garcon-executor"
+
+  cd ../integration-tests
+  test -x node_modules/.bin/opencode || bun install --frozen-lockfile
+  node_modules/.bin/opencode --version
+  out="$HOME/tmp/link-opencode-parity"
+  mkdir -p "$out"
+  export GARCON_TEST_CONTROLLER=original GARCON_SACS_DRIVERS=opencode
+  for worker in original rust; do
+    export GARCON_TEST_WORKER="$worker"
+    for lane in remote-controller-dials remote-executor-dials; do
+      export GARCON_TEST_EXECUTION_BACKEND="$lane"
+      status=0
+      bun test --max-concurrency=1 --timeout=30000 --reporter=junit \
+        --reporter-outfile="$out/server.$lane.$worker.xml" tests/server/opencode-*.test.ts \
+        > "$out/server.$lane.$worker.log" 2>&1 || status=$?
+      printf "%s server %s (%s)\n" "$lane" "$worker" "$status"
+      tail -n 6 "$out/server.$lane.$worker.log"
+      status=0
+      bun run test:sacs --reporter=junit --reporter-outfile="$out/sacs.$lane.$worker.xml" \
+        > "$out/sacs.$lane.$worker.log" 2>&1 || status=$?
+      printf "%s SACS %s (%s)\n" "$lane" "$worker" "$status"
+      tail -n 6 "$out/sacs.$lane.$worker.log"
+    done
+  done
+  cd ..
+  compare_status=0
+  for lane in remote-controller-dials remote-executor-dials; do
+    for suite in server sacs; do
+      bun rust/parity/compare-junit.ts "$out/$suite.$lane.original.xml" "$out/$suite.$lane.rust.xml" \
+        > "$out/$suite.$lane.compare.txt" || compare_status=$?
+      printf "%s %s comparison\n" "$lane" "$suite"
+      head -n 2 "$out/$suite.$lane.compare.txt"
+      tail -n 1 "$out/$suite.$lane.compare.txt"
+    done
+  done
+  exit "$compare_status"
+'
 ```
 
-Run the selected driver's full SACS suite on the Rust worker:
+`remote-controller-dials` means the controller dials the worker; the fixture
+uses the Rust binary for `connection-url` in that lane. For
+`remote-executor-dials` the fixture sets `GARCON_CONTROLLER_URL`; do not set it
+yourself. Set `GARCON_SACS_DRIVERS` and the server suite paths for the provider
+being registered. Install its pinned CLI using that provider's fixture
+instructions. Report the counts from the top-level JUnit suites (one per
+file), and use the `DIFFERS` lines and corresponding test logs to explain
+each mismatch. A case that fails on both workers is not positive parity
+evidence.
 
-```bash
-(cd integration-tests && \
-  GARCON_SACS_DRIVERS="$driver" GARCON_TEST_CONTROLLER=original \
-  GARCON_TEST_EXECUTION_BACKEND=remote-controller-dials GARCON_TEST_WORKER=rust \
-  GARCON_TEST_RUST_EXECUTOR_BINARY="$out/garcon-executor" \
-  bun run test:sacs --reporter=junit --reporter-outfile="$out/$driver.rust-worker.xml")
-```
-
-Until the worker is ported, the command exits nonzero with the executor's
-`The native executor is not ported yet` diagnostic and still writes JUnit.
-Run the same driver and lane with the original worker for comparison:
-
-```bash
-(cd integration-tests && \
-  GARCON_SACS_DRIVERS="$driver" GARCON_TEST_CONTROLLER=original \
-  GARCON_TEST_EXECUTION_BACKEND=remote-controller-dials GARCON_TEST_WORKER=original \
-  bun run test:sacs --reporter=junit --reporter-outfile="$out/$driver.original.xml")
-bun rust/parity/compare-junit.ts "$out/$driver.original.xml" "$out/$driver.rust-worker.xml"
-```
+For a preflight before the full matrix, run
+`tests/server/opencode-scripted-model.test.ts` in both dial directions with
+`--test-name-pattern "creates native session identity before the first turn terminal"`.
+The worker awaits every integration's `lifecycle.stop()` before its
+`LocalSet` exits, so a provider's stop must wait for its own child processes
+to settle.
 
 ## Suite traces
 
