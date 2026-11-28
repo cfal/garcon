@@ -147,6 +147,11 @@ the user corrects how a port behaves, the correction is added under
   environment, working directory, process group, and termination sequence
   (signal, grace period, kill).
 - Timers use `tokio::time`, so tests run with paused time.
+- Rust has no process-wide unhandled-rejection event. A task that nothing
+  awaits reports its terminal error to
+  `garcon_base::unhandled_rejection_policy`; dropping its `JoinHandle`
+  reports nothing and never turns a failure into process termination. A task
+  whose owner awaits the result propagates as usual and is not reported twice.
 
 ## Files and SQLite
 
@@ -235,6 +240,11 @@ the user corrects how a port behaves, the correction is added under
   `bun:sqlite` behaviors in `research/sqlite.md`).
 - Use the versions in `[workspace.dependencies]`. A dependency that is not
   there goes in your crate's `Cargo.toml` and in your report.
+- Merge `origin/rust-server`, never the local `rust-server` branch: the
+  manager gates before pushing, so the local branch can be ahead of what has
+  passed.
+- Before porting a module another lane owns, or asking for it, look for it in
+  `origin/rust-server`; it may already be there.
 
 ## Corrections
 
