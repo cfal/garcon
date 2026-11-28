@@ -3,6 +3,7 @@ mod adoption;
 mod anchor_cases;
 mod anchor_views;
 mod bulk_views;
+mod clear;
 mod connection;
 mod error_diagnostics;
 mod failure_fences;
