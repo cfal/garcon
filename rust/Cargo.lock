@@ -1122,6 +1122,7 @@ dependencies = [
  "garcon-contract",
  "garcon-js",
  "icu_normalizer",
+ "indexmap",
  "regress",
  "rusqlite",
  "serde",
