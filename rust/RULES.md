@@ -51,6 +51,12 @@ the user corrects how a port behaves, the correction is added under
   module and a test through the erased path. Test with the concrete error a
   real failing call produces (`std::io::Error` from the file system), never
   only with a stand-in built for the test.
+- A subclass in the original is a struct of its own in the port, so
+  `downcast_ref::<Base>()` does not see it. Wherever the original tests
+  `instanceof` a base class (`DomainError`, `AgentCallError`), use the
+  helper that accepts every subclass (`garcon_base::domain_error::as_domain_error`,
+  `garcon_base::executor_disconnect::as_agent_call_error`), and test the
+  site with each subclass through the erased path.
 - The erased error type stays `Box<dyn Error>`; there is no registry and no
   workspace-wide diagnostic trait object. The original has 72
   `hasNodeErrorCode` checks, all but one on OS error codes, which

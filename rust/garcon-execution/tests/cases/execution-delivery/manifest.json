@@ -1,0 +1,28 @@
+{
+  "module": "rust/garcon-execution/tests/support/execution-delivery-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-execution/tests/inputs/execution-delivery.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "steerDeliveryTrace",
+      "argument": 0
+    },
+    {
+      "fn": "controlDeliveryTrace",
+      "argument": 0
+    },
+    {
+      "fn": "queuedDeliveryTrace",
+      "argument": 0
+    },
+    {
+      "fn": "queueDrainerTrace",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 61,
+  "sha256": "00c10f0f276945c6c61674c1848c0a594a357cbe9867bae66c81cdf845becb91"
+}

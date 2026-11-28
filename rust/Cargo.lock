@@ -894,12 +894,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "garcon-agent-codex"
-version = "0.1.0"
+name = "garcon-agent-direct-openai-compatible"
+version = "0.0.0"
 dependencies = [
- "garcon-cases",
+ "async-trait",
+ "garcon-agents-common",
+ "garcon-base",
+ "garcon-contract",
+ "garcon-interface",
  "garcon-js",
+ "indexmap",
  "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "uuid",
 ]
 
 [[package]]
@@ -1054,6 +1063,7 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "futures",
+ "garcon-agent-direct-openai-compatible",
  "garcon-base",
  "garcon-contract",
  "garcon-interface",
