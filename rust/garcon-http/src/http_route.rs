@@ -27,6 +27,7 @@ use super::http_route_types::{
 use super::listener::{HttpRequest, HttpResponse};
 use super::route_table::RouteTable;
 use super::unported_routes::unported_routes;
+use super::ws::{BrowserSockets, upgrade_target};
 
 pub struct HttpRouteOptions {
     pub base_path: String,
@@ -55,6 +56,7 @@ pub struct HttpRouter {
     table: RouteTable<Route>,
     options: HttpRouteOptions,
     auth: Rc<dyn AuthenticateHttpRequest>,
+    browser_sockets: Option<Rc<BrowserSockets>>,
     logger: ScopedLogger,
 }
 
@@ -85,8 +87,14 @@ impl HttpRouter {
             table: RouteTable::new(mounted),
             options,
             auth,
+            browser_sockets: None,
             logger: create_logger("lib:http-route"),
         }
+    }
+
+    pub fn with_browser_sockets(mut self, sockets: Rc<BrowserSockets>) -> Self {
+        self.browser_sockets = Some(sockets);
+        self
     }
 
     pub async fn handle(&self, request: HttpRequest, peer: SocketAddr) -> HttpResponse {
@@ -110,8 +118,20 @@ impl HttpRouter {
             if self.options.shutting_down.get() {
                 return shutting_down();
             }
-            return request_url(&request)
-                .map_or_else(|error| self.unhandled(&error), |_| not_found(method));
+            let url = match request_url(&request) {
+                Ok(url) => url,
+                Err(error) => return self.unhandled(&error),
+            };
+            if let Some(sockets) = &self.browser_sockets
+                && let Some(path) = strip_base_path(url.path(), &self.options.base_path)
+                && let Some(target) = upgrade_target(&request, path)
+            {
+                return sockets
+                    .upgrade(request, target)
+                    .await
+                    .unwrap_or_else(|error| self.unhandled(&*error));
+            }
+            return not_found(method);
         };
         let metadata = match route {
             Route::Ported { metadata, .. } | Route::Unported(metadata) => metadata,
@@ -213,7 +233,8 @@ impl HttpRouter {
             }
             Route::Unported(_) => {
                 if let Some(log) = &self.options.unported_log
-                    && let Err(error) = log_unported(log, &method, request.uri().path()).await
+                    && let Err(error) =
+                        log_unported(log, method.as_str(), request.uri().path()).await
                 {
                     self.logger
                         .error(&format!("Could not write the unported route log: {error}"));
@@ -279,10 +300,15 @@ fn response(status: StatusCode, body: Option<Bytes>) -> RouteResponse {
 }
 
 fn not_found(method: &Method) -> RouteResponse {
-    let mut reply = response(
-        StatusCode::NOT_FOUND,
-        Some(Bytes::from_static(b"Not found")),
-    );
+    text_response(method, StatusCode::NOT_FOUND, "Not found")
+}
+
+pub(crate) fn text_response(
+    method: &Method,
+    status: StatusCode,
+    text: &'static str,
+) -> RouteResponse {
+    let mut reply = response(status, Some(Bytes::from_static(text.as_bytes())));
     // Bun omits the implicit string-body media type on a HEAD response.
     if *method != Method::HEAD {
         reply.headers_mut().insert(
@@ -308,7 +334,11 @@ fn unported_response() -> RouteResponse {
     reply
 }
 
-async fn log_unported(path: &Path, method: &Method, request_path: &str) -> std::io::Result<()> {
+pub(crate) async fn log_unported(
+    path: &Path,
+    method: &str,
+    request_path: &str,
+) -> std::io::Result<()> {
     let entry = format!("{method} {request_path}\n");
     let mut log = tokio::fs::OpenOptions::new()
         .append(true)

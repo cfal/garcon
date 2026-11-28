@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-ledger/tests/codec_oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-ledger/tests/inputs/codec.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 247,
+  "sha256": "c42eda3351040c6643948100a5496dee0884022f497220b22d69a6420947461d"
+}

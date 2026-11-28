@@ -1,0 +1,24 @@
+[package]
+name = "garcon-ledger"
+version = "0.0.0"
+description = "Controller-owned per-chat transcript ledger."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+garcon-base.workspace = true
+garcon-contract.workspace = true
+garcon-interface.workspace = true
+garcon-js.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+garcon-cases.workspace = true
+tempfile.workspace = true
