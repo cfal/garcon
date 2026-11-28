@@ -1,0 +1,31 @@
+[package]
+name = "garcon-chats"
+version = "0.0.0"
+description = "The controller's chat registry and chat projections."
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait.workspace = true
+futures.workspace = true
+garcon-base.workspace = true
+garcon-contract.workspace = true
+garcon-interface.workspace = true
+garcon-js.workspace = true
+indexmap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+garcon-cases.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

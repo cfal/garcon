@@ -9,6 +9,7 @@ members = [
   "garcon-base",
   "garcon-bench",
   "garcon-cases",
+  "garcon-chats",
   "garcon-contract",
   "garcon-controller",
   "garcon-execution",
