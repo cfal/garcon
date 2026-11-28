@@ -49,6 +49,7 @@ fn model_option(
         value: value.to_owned(),
         label: label.to_owned(),
         supports_images,
+        thinking_modes: None,
         is_local,
         api_provider_id: None,
         endpoint_id: None,

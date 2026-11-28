@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-contract/tests/oracles/agent-model-option.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/agent-model-option.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 3,
+  "sha256": "ada4def6063963e1d2b7ccc2b3e459263d79b59b56251c6af10e039544ac9432"
+}
