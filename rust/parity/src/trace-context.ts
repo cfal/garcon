@@ -23,7 +23,7 @@ export function currentTraceTest(): TraceTest | undefined {
 }
 
 function registrationFile(): string {
-  const path = new Error().stack?.match(/(?:\(|\bat )([^()\n]+\.test\.[cm]?[jt]sx?):\d+(?::\d+)?/)?.[1];
+  const path = new Error().stack?.match(/(?:\(|\bat )([^()\n]+\.(?:test|suite)\.[cm]?[jt]sx?):\d+(?::\d+)?/)?.[1];
   if (!path) {
     // Bun can invoke a conditional or parameterized describe from a native frame.
     const parent = describePath.at(-1);

@@ -164,6 +164,20 @@ export function childPath(path: string, key: string | number): string {
   return /^[A-Za-z_$][\w$]*$/.test(key) ? `${path}.${key}` : `${path}[${JSON.stringify(key)}]`;
 }
 
+export function parseJsonPath(path: string): Array<string | number> {
+  const parts: Array<string | number> = [];
+  const part = /(?:\.([A-Za-z_$][\w$]*)|\[(?:(0|[1-9]\d*)|("(?:[^"\\]|\\.)*"))\])/y;
+  for (let at = 1; at < path.length;) {
+    part.lastIndex = at;
+    const match = part.exec(path);
+    if (!match) throw new Error(`Invalid JSON path: ${path}`);
+    parts.push(match[1] ?? (match[2] === undefined ? JSON.parse(match[3]!) as string : Number(match[2])));
+    at = part.lastIndex;
+  }
+  if (path !== parts.reduce<string>(childPath, '$')) throw new Error(`Invalid JSON path: ${path}`);
+  return parts;
+}
+
 // Returns the first position where `actual` departs from `expected`, walking
 // object keys in sorted order so reports are stable across runs.
 export function firstDifference(

@@ -26,7 +26,7 @@ export function groupTrace(records: TraceRecord[]): Tests {
 
 export async function readTraces(directory: string, ext: 'json' | 'jsonl'): Promise<Traces> {
   const traces: Traces = new Map();
-  const files = (await Array.fromAsync(new Bun.Glob(`**/*.test.*.${ext}`).scan(directory))).sort();
+  const files = (await Array.fromAsync(new Bun.Glob(`**/*.{test,suite}.*.${ext}`).scan(directory))).sort();
   for (const file of files) {
     const text = await readFile(join(directory, file), 'utf8');
     const tests = ext === 'json' ? JSON.parse(text) as Tests : groupTrace(text.trimEnd().split('\n').map((line) => JSON.parse(line) as TraceRecord));
@@ -101,15 +101,33 @@ function withoutGroups(sample: Json | undefined, groups: ReadonlySet<string>): J
   return { ...sample, broadcasts: Object.fromEntries(Object.entries(sample.broadcasts).filter(([key]) => !groups.has(key))) };
 }
 
+function withoutPaths(sample: Json | undefined, paths: ReadonlySet<string> | undefined, path = '$'): Json | undefined {
+  if (!paths?.size) return sample;
+  if (paths.has(path)) return undefined;
+  if (Array.isArray(sample)) {
+    return sample.map((item, index) => withoutPaths(item, paths, childPath(path, index)) ?? null);
+  }
+  if (!isObject(sample)) return sample;
+  return Object.fromEntries(Object.entries(sample).flatMap(([key, item]) => {
+    const value = withoutPaths(item, paths, childPath(path, key));
+    return value === undefined ? [] : [[key, value]];
+  }));
+}
+
 function suiteExclusions(exclusions: readonly TraceExclusion[], suite: string) {
   const tests = new Map<string, string>();
   const groups = new Map<string, string>();
+  const paths = new Map<string, Set<string>>();
   for (const entry of exclusions) {
     if (entry.suite !== suite) continue;
-    if ('test' in entry) tests.set(entry.test, entry.reason);
+    if ('test' in entry && entry.path !== undefined) {
+      const omitted = paths.get(entry.test) ?? new Set<string>();
+      omitted.add(entry.path);
+      paths.set(entry.test, omitted);
+    } else if ('test' in entry) tests.set(entry.test, entry.reason);
     else groups.set(traceGroup(entry.chat, entry.type), entry.reason);
   }
-  return { tests, groups };
+  return { tests, groups, paths };
 }
 
 function stableStreams(
@@ -158,7 +176,8 @@ export function mergeTraces(runs: [Traces, Traces, ...Traces[]], exclusions: rea
     const tests = new Map<string, Json>();
     for (const test of [...new Set(sampleTests.flatMap((sample) => Object.keys(sample)))].sort()) {
       if (declarations.tests.has(test)) continue;
-      const samples = sampleTests.map((sample) => Object.hasOwn(sample, test) ? sample[test] : undefined);
+      const paths = declarations.paths.get(test);
+      const samples = sampleTests.map((sample) => withoutPaths(Object.hasOwn(sample, test) ? sample[test] : undefined, paths));
       const streams = stableStreams(samples, declarations.groups, (difference) => unstableBroadcasts.push({ suite, test, difference }));
       const difference = differing(streams.values);
       if (difference) {
@@ -190,11 +209,13 @@ export function compareTraces(expected: Traces, actual: Traces, known: readonly 
   problems: TraceDifference[];
   excludedBroadcasts: number;
   excludedTests: number;
+  excludedPaths: number;
 } {
   const problems: TraceDifference[] = [];
   let total = 0;
   let excludedBroadcasts = 0;
   let excludedTests = 0;
+  let excludedPaths = 0;
   for (const suite of suites(expected, actual)) {
     const before = expected.get(suite) ?? {};
     const after = actual.get(suite) ?? {};
@@ -202,6 +223,7 @@ export function compareTraces(expected: Traces, actual: Traces, known: readonly 
     const declarations = suiteExclusions(exclusions, suite);
     excludedTests += declarations.tests.size;
     excludedBroadcasts += declarations.groups.size;
+    for (const paths of declarations.paths.values()) excludedPaths += paths.size;
     const names = new Set(keys(before, after));
     for (const test of names) {
       if (declarations.tests.has(test)) continue;
@@ -218,7 +240,12 @@ export function compareTraces(expected: Traces, actual: Traces, known: readonly 
         }
       }
       const actualTest = Object.hasOwn(after, test) ? after[test] : undefined;
-      const difference = compareWithKnown(withoutGroups(expectedTest, groups), withoutGroups(actualTest, groups), approvals.filter((entry) => entry.case === test));
+      const paths = declarations.paths.get(test);
+      const difference = compareWithKnown(
+        withoutPaths(withoutGroups(expectedTest, groups), paths),
+        withoutPaths(withoutGroups(actualTest, groups), paths),
+        approvals.filter((entry) => entry.case === test),
+      );
       if (difference) problems.push({ suite, test, difference });
     }
     for (const entry of approvals) {
@@ -228,7 +255,7 @@ export function compareTraces(expected: Traces, actual: Traces, known: readonly 
       problems.push({ suite, test: entry.case, difference: missingKnownCase(entry) });
     }
   }
-  return { total, problems, excludedBroadcasts, excludedTests };
+  return { total, problems, excludedBroadcasts, excludedTests, excludedPaths };
 }
 
 export function formatTraceDifferences(problems: TraceDifference[], label = 'FAIL'): string {
