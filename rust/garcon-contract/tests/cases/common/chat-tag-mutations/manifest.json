@@ -1,0 +1,30 @@
+{
+  "module": "common/chat-tag-mutations.ts",
+  "tests": [
+    "common/__tests__/chat-tag-mutations.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "normalizeChatTagsMutationResponse",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeRecoverChatTagsResponse",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeChatTagConflictResponse",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeCommandTagMutationOutcome",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 252,
+  "sha256": "6b23bade54a12187c65736047a272f120405cbf6bed482a7e997e582dc1b6b5d"
+}
