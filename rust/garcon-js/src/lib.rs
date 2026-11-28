@@ -4,6 +4,7 @@
 //! clock. Depends on no other workspace crate.
 
 pub mod clock;
+pub mod date_parse;
 pub mod js;
 pub mod json;
 pub mod optional_nullable;
