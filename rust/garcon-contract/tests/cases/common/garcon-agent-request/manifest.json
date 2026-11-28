@@ -1,0 +1,16 @@
+{
+  "module": "common/garcon-agent-request.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/garcon-agent-request.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseGarconAgentRequestOptions",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 20,
+  "sha256": "8229b6ae6d1a815073ffdf91ca75b8c77043e33107ff2cdd4c40ea8f9b5df655"
+}
