@@ -19,6 +19,7 @@ garcon-chats = { path = "../garcon-chats" }
 garcon-contract.workspace = true
 garcon-interface.workspace = true
 garcon-js.workspace = true
+garcon-ledger.workspace = true
 garcon-link.workspace = true
 indexmap.workspace = true
 serde.workspace = true

@@ -99,6 +99,18 @@ for await (const line of input) {
     case 'stall':
       setTimeout(() => write({ id, result: {} }), 80);
       break;
+    case 'turn/interrupt':
+      if (mode === 'interrupt-terminal-reject') {
+        write({ method: 'turn/completed', params: {
+          threadId: params.threadId, turn: { id: params.turnId, status: 'completed', items: [] },
+        } });
+      }
+      if (mode === 'interrupt-reject' || mode === 'interrupt-terminal-reject') {
+        write({ id, error: { code: -32603, message: 'Synthetic interruption failure' } });
+      } else {
+        write({ id, result: {} });
+      }
+      break;
     case 'turn/steer':
       if (mode === 'exit') process.exit(7);
       if (mode === 'steer-mismatch') {

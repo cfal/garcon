@@ -1,3 +1,5 @@
+pub mod client_events;
+pub mod interrupt;
 pub mod thread_settings;
 pub mod utility;
 

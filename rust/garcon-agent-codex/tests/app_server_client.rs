@@ -22,7 +22,10 @@ use garcon_agent_codex::app_server::{
     request_builders::{
         CodexThreadConfiguration, CodexThreadSettings, thread_settings_target_from_snapshot,
     },
-    runtime::{thread_settings::CodexSourceThreadSettings, utility::CodexAppServerUtility},
+    runtime::{
+        interrupt::CodexInterrupt, thread_settings::CodexSourceThreadSettings,
+        utility::CodexAppServerUtility,
+    },
     steering::classify_codex_steer_rejection,
 };
 use garcon_agent_codex::slash_command_discovery::CodexSkillDiscovery;
@@ -113,6 +116,52 @@ fn steer_options() -> CodexSteerRequestOptions<'static> {
         prepare_delivery: async { Ok(()) }.boxed_local(),
         acknowledgement_timeout: Some(Duration::from_secs(1)),
     }
+}
+
+#[tokio::test]
+async fn interrupt_acknowledgements_coalesce_and_cannot_reopen_a_finished_turn() {
+    LocalSet::new()
+        .run_until(async {
+            for (mode, accepted, reopen) in [
+                ("", true, false),
+                ("interrupt-reject", false, true),
+                ("interrupt-terminal-reject", false, false),
+            ] {
+                let fixture = Fixture::new(FIXTURE);
+                let client = CodexAppServerClient::new(fixture.options(mode));
+                let interrupt = Rc::new(CodexInterrupt::default());
+                let detach = client.on_event(Rc::new({
+                    let interrupt = interrupt.clone();
+                    move |event| {
+                        if matches!(event, CodexAppServerEvent::Notification(note) if note.method == "turn/completed") {
+                            interrupt.clear();
+                        }
+                        Ok(())
+                    }
+                }));
+                let logger = Rc::new(DiscoveryLogger::default());
+                let reopened = Rc::new(Cell::new(false));
+                let first = interrupt.begin(client.clone(), "thread".into(), "turn".into(), logger.clone(), {
+                    let reopened = reopened.clone();
+                    move || reopened.set(true)
+                });
+                let second = interrupt.begin(
+                    client.clone(), "thread".into(), "turn".into(), logger.clone(),
+                    || panic!("coalesced acknowledgement replaced the original"),
+                );
+                assert_eq!(tokio::join!(first, second), (accepted, accepted));
+                assert_eq!(interrupt.current().is_some(), accepted);
+                client.shutdown().await.unwrap();
+                detach();
+                assert_eq!(reopened.get(), reopen);
+                let frames: Vec<_> = fixture.frames().into_iter()
+                    .filter(|frame| frame["method"] == "turn/interrupt").collect();
+                assert_eq!(frames.len(), 1);
+                assert_eq!(frames[0]["params"], json!({"threadId":"thread","turnId":"turn"}));
+                assert_eq!(logger.0.borrow().len(), usize::from(!accepted));
+            }
+        })
+        .await;
 }
 
 fn settings_source(client: CodexAppServerClient, timeout: Duration) -> CodexSourceThreadSettings {
