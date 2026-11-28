@@ -272,7 +272,7 @@ impl ServerEventWiring {
             self.queue
                 .schedule(chat_id, "processing broadcast", async move {
                     if wiring.deps.registry.has_chat(&id) {
-                    wiring.publish_processing(&id, phase)?;
+                        wiring.publish_processing(&id, phase)?;
                     }
                     Ok(())
                 }),
