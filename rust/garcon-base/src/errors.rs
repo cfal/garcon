@@ -7,7 +7,7 @@ use garcon_interface::errors::{AgentCallError, AgentIntegrationError};
 use garcon_js::{json::as_number, number_to_string};
 use serde_json::Value;
 
-use crate::{domain_error::DomainError, executor_disconnect::ExecutorSessionLostError};
+use crate::{domain_error::as_domain_error, executor_disconnect::ExecutorSessionLostError};
 
 #[derive(Clone, Copy)]
 pub enum ErrorInput<'a> {
@@ -67,9 +67,7 @@ fn structured_error_code(error: ErrorInput<'_>) -> Option<&str> {
             if let Some(error) = error.downcast_ref::<AgentIntegrationError>() {
                 return Some(error.code.as_str());
             }
-            error
-                .downcast_ref::<DomainError>()
-                .map(|error| error.code.as_str())
+            as_domain_error(error).map(|error| error.code.as_str())
         }
         ErrorInput::Undefined => None,
     }
