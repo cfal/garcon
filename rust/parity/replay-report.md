@@ -2,8 +2,8 @@
 
 Build: `garcon-server`
 
-Passed: 12216/12216 cases
-Served without falling back to the original: 120/12216 (fallback rate 99.0%)
+Passed: 12231/12231 cases
+Served without falling back to the original: 120/12231 (fallback rate 99.0%)
 
 ## Scenarios
 
@@ -58,6 +58,7 @@ Served without falling back to the original: 120/12216 (fallback rate 99.0%)
 | static-assets-base-path | 77/77 | 9/77 |
 | static-assets | 367/367 | 111/367 |
 | telegram-seeded | 62/62 | 0/62 |
+| telegram-token-test | 15/15 | 0/15 |
 | telegram | 87/87 | 0/87 |
 | terminals | 243/243 | 0/243 |
 | tickets-mutations | 857/857 | 0/857 |

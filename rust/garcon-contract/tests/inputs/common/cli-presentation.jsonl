@@ -1,0 +1,17 @@
+{"fn":"isCliPresentationStyle","args":["info"]}
+{"fn":"isCliPresentationStyle","args":["custom"]}
+{"fn":"isCliPresentationStyle","args":[true]}
+{"fn":"isCliPresetPresentationStyle","args":["notice"]}
+{"fn":"isCliPresetPresentationStyle","args":["custom"]}
+{"fn":"isHexColor","args":["#abcdef"]}
+{"fn":"isHexColor","args":["#ABCDEF"]}
+{"fn":"isHexColor","args":["#ff0000\n"]}
+{"fn":"isCliCustomStyle","args":[{"lightAccent":"#abcdef","darkAccent":"#234567"}]}
+{"fn":"isCliCustomStyle","args":[{"lightAccent":"#abcdef","darkAccent":"#234567","extra":true}]}
+{"fn":"isCliRowFormat","args":["plain"]}
+{"fn":"isCliRowFormat","args":["markdown"]}
+{"fn":"isCliRowFormat","args":[null]}
+{"fn":"normalizeCliHexColor","args":["#ff0000\n"]}
+{"fn":"coerceDurableCliPresentation","args":[{"style":"error","ignored":true}]}
+{"fn":"coerceDurableCliPresentation","args":[{"style":"error","customStyle":null}]}
+{"fn":"coerceDurableCliPresentation","args":[{"style":"custom","customStyle":{"lightAccent":"#abcdef","darkAccent":"#234567"},"ignored":true}]}
