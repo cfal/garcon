@@ -1159,12 +1159,15 @@ dependencies = [
  "garcon-interface",
  "garcon-js",
  "indexmap",
+ "libc",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+ "tokio",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1239,8 +1242,10 @@ dependencies = [
 name = "garcon-search"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "garcon-cases",
  "garcon-contract",
+ "garcon-interface",
  "garcon-js",
  "icu_normalizer",
  "indexmap",

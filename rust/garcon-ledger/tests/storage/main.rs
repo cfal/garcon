@@ -1,3 +1,4 @@
+mod bulk_views;
 mod connection;
 mod error_diagnostics;
 mod failure_fences;

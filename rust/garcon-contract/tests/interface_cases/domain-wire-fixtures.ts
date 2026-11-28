@@ -4,11 +4,11 @@ import type { SlashCommandsResponse } from '../../../../common/slash-commands.ts
 
 const diagnostics: GitOperationDiagnostics = {
   phases: [{ name: 'summary-git', durationMs: 1.25 }, { name: 'body-cache', durationMs: 0 }],
-  fileCount: 7,
-  rowCount: 0,
   cacheHits: 2,
   batchCount: 1,
   bisectionCount: undefined,
+  fileCount: 7,
+  rowCount: 0,
   commands: [{ command: 'status', durationMs: 1e-7, stdoutBytes: 30, stderrBytes: 0 }],
 };
 const refs: GitRefsResponse = {

@@ -1,7 +1,7 @@
 //! Ports `common/git-diagnostics.ts`.
 
 use garcon_js::Number;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer, ser::SerializeStruct};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -50,9 +50,33 @@ pub struct GitCommandDiagnostics {
     pub stderr_bytes: Number,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct GitOperationDiagnostics {
     #[serde(flatten)]
     pub metrics: GitReviewRouteMetrics,
     pub commands: Vec<GitCommandDiagnostics>,
+}
+
+impl Serialize for GitOperationDiagnostics {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // The runtime assigns cache and batch counts before final file and row totals.
+        let metrics = &self.metrics;
+        let optional = [
+            ("cacheHits", metrics.cache_hits),
+            ("batchCount", metrics.batch_count),
+            ("bisectionCount", metrics.bisection_count),
+            ("fileCount", metrics.file_count),
+            ("rowCount", metrics.row_count),
+        ];
+        let present = optional.iter().filter(|(_, value)| value.is_some()).count();
+        let mut state = serializer.serialize_struct("GitOperationDiagnostics", 2 + present)?;
+        state.serialize_field("phases", &metrics.phases)?;
+        for (key, value) in optional {
+            if let Some(value) = value {
+                state.serialize_field(key, &value)?;
+            }
+        }
+        state.serialize_field("commands", &self.commands)?;
+        state.end()
+    }
 }

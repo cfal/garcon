@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-ledger/tests/staging_oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-ledger/tests/inputs/staging.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 9,
+  "sha256": "247cb7e0873b0d2abdd7a501f0e8d80f38912baeaf2d6b08ae183f1fe8fe2494"
+}
