@@ -1,13 +1,14 @@
 //! Ports `common/transcript-seed.ts`.
 //!
-//! The wire types and receipt helpers are independent of transcript messages.
-//! The projection and sanitation slice waits for the full `ChatMessage` contract,
-//! including notices. That slice will add:
-//! `createCarryoverTranscript`, `createCarryoverTranscriptWithinCost`,
-//! `renderCarriedContext`, `retargetNativeSeedReceiptIfPreserved`,
-//! `sanitizeRecordedCarriedContext`, `renderTranscriptSeed`, `isProjectableMessage`,
-//! `isPublicationGapMessage`, `boundProjectedMessage`, and `projectToolUseSummary`,
-//! with `ProjectionCostBudget`, `SanitizeCarriedContextResult`, and `ProjectedToolUseSummary`.
+
+mod projection;
+mod sanitize;
+mod summary;
+mod units;
+
+pub use projection::*;
+pub use sanitize::*;
+pub use summary::{ProjectedToolUseSummary, ToolSummaryRedactor, project_tool_use_summary};
 
 use garcon_js::{is_safe_integer, json::as_number, utf16};
 use serde::{Deserialize, Serialize};
