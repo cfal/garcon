@@ -245,10 +245,10 @@ the user corrects how a port behaves, the correction is added under
   array matches `null`, and `-0` matches an integer zero. A dispatcher does not
   rebuild such values from the recorded arguments to make a case match.
 - Before reporting a unit done, plant a bug in it and confirm its oracle fails
-  on the expected field. Cargo can keep a build when a source file is
-  rewritten within the same clock tick as the write before it, so a quick
-  plant-and-restore can test a stale binary: touch the file a second later, or
-  check that the test binary was rebuilt.
+  on the expected field. The build wrapper syncs sources to the build machine
+  by content and gives every changed file the time of the transfer, so a
+  restored file is always rebuilt there; a run that seems to have used an old
+  artifact is reported to the manager, not worked around by touching files.
 - A replay dispatcher reads a recorded argument as the JSON it round-trips to:
   a property that is `undefined` is absent, and `undefined` in an array is
   `null`. A function that takes a JavaScript number gets the exact recorded
