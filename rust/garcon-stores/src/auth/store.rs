@@ -291,15 +291,19 @@ impl AuthAccountStore {
             })
     }
 
-    pub fn on_change(&self, listener: AuthListener) -> impl FnOnce() + '_ {
+    pub fn on_change(self: &Rc<Self>, listener: AuthListener) -> impl FnOnce() + use<> {
         let mut listeners = self.listeners.borrow_mut();
         if !listeners.iter().any(|other| Rc::ptr_eq(other, &listener)) {
             listeners.push(Rc::clone(&listener));
         }
+        let store = Rc::downgrade(self);
         move || {
-            self.listeners
-                .borrow_mut()
-                .retain(|other| !Rc::ptr_eq(other, &listener))
+            if let Some(store) = store.upgrade() {
+                store
+                    .listeners
+                    .borrow_mut()
+                    .retain(|other| !Rc::ptr_eq(other, &listener));
+            }
         }
     }
 
