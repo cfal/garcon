@@ -947,6 +947,7 @@ dependencies = [
  "garcon-cases",
  "garcon-contract",
  "garcon-js",
+ "indexmap",
  "serde",
  "serde_json",
 ]
