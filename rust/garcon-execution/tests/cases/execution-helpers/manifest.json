@@ -1,0 +1,32 @@
+{
+  "module": "rust/garcon-execution/tests/support/execution-helpers-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-execution/tests/inputs/execution-helpers.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "acceptedInputTranscriptTrace",
+      "argument": 0
+    },
+    {
+      "fn": "commandSettlementTrace",
+      "argument": 1
+    },
+    {
+      "fn": "runtimeFailureTrace",
+      "argument": 0
+    },
+    {
+      "fn": "terminalSettlementTrace",
+      "argument": 0
+    },
+    {
+      "fn": "acceptedInputHandlerTrace",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 54,
+  "sha256": "4f7364d74e848b38f4ff41d99f2d15ddf1ec643b6aae1d4d954a5bfb8703861e"
+}
