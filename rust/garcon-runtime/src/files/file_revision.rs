@@ -240,7 +240,7 @@ fn stat_from_metadata(metadata: std::fs::Metadata) -> FileStat {
 }
 
 #[cfg(unix)]
-pub(super) async fn close_file(file: File) -> io::Result<()> {
+pub(crate) async fn close_file(file: File) -> io::Result<()> {
     use std::os::fd::IntoRawFd;
     let file = file.into_std().await;
     tokio::task::spawn_blocking(move || {
@@ -252,7 +252,7 @@ pub(super) async fn close_file(file: File) -> io::Result<()> {
 }
 
 #[cfg(windows)]
-async fn close_file(file: File) -> io::Result<()> {
+pub(crate) async fn close_file(file: File) -> io::Result<()> {
     use std::os::windows::io::IntoRawHandle;
     use windows_sys::Win32::Foundation::CloseHandle;
     let file = file.into_std().await;
