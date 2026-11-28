@@ -1,0 +1,2 @@
+{"id":"transcriptUnavailableMessage#0","fn":"transcriptUnavailableMessage","args":[true],"result":"Chat transcript is temporarily unavailable. Retry the request.","origin":"rust/garcon-base/tests/inputs/server-common/domain-error.jsonl:1"}
+{"id":"transcriptUnavailableMessage#1","fn":"transcriptUnavailableMessage","args":[false],"result":"Chat transcript is unavailable.","origin":"rust/garcon-base/tests/inputs/server-common/domain-error.jsonl:2"}
