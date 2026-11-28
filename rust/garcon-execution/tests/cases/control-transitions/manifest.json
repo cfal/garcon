@@ -1,0 +1,16 @@
+{
+  "module": "rust/garcon-execution/tests/support/control-transition-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-execution/tests/inputs/control-transitions.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "replayControlTransition",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 166,
+  "sha256": "cf6ce274005771998b1516ab017313c0a5d9fc6c668cd07ab895b1c9f31b48b9"
+}
