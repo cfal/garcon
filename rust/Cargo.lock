@@ -480,6 +480,7 @@ dependencies = [
  "async-trait",
  "garcon-cases",
  "garcon-js",
+ "icu_normalizer",
  "indexmap",
  "regex",
  "serde",
@@ -518,9 +519,14 @@ dependencies = [
 name = "garcon-interface"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
+ "garcon-cases",
  "garcon-contract",
  "garcon-js",
+ "indexmap",
+ "serde",
  "serde_json",
+ "tokio-util",
 ]
 
 [[package]]
