@@ -1,7 +1,9 @@
 // Calls a module's exports with explicit inputs in a fresh process and writes
 // each outcome, encoded, to the record stream on fd 3. The inputs arrive on
-// stdin as JSON lines of `{ id, fn, args, guard? }` and the outcomes leave in
-// the same order, so a stalled run can be resumed after the call that stalled.
+// stdin as JSON lines of `{ id, fn, args, guard?, guardOnly? }` and the
+// outcomes leave in the same order, so a stalled run can be resumed after the
+// call that stalled. An input with `guardOnly` is not called: the record says
+// whether its guard rejects the argument.
 import { writeSync } from 'node:fs';
 import { decode, encodeCall } from './encode.js';
 import type { Json } from '../wildcard.js';
@@ -28,9 +30,12 @@ interface Input {
   id: string;
   fn: string;
   args: Json[];
-  // The guard of a trap variant. The original is not called when the guard
-  // rejects the argument.
+  // The guard of a trap variant, which decides whether the recorder makes the
+  // call at all.
   guard?: { argument: number; spec: string };
+  // Only the guard is asked, and the answer is whether it rejects the
+  // argument; the original is not called.
+  guardOnly?: true;
 }
 
 // `fn` is an export name, `Class.method` for a static method, or
@@ -114,8 +119,8 @@ async function run(): Promise<void> {
   const lines = (await Bun.stdin.text()).split('\n').filter(Boolean);
   for (const line of lines) {
     const input = JSON.parse(line) as Input;
+    if (input.guardOnly) write({ id: input.id, guarded: await rejected(namespace, input) });
     // A circular or otherwise unencodable input cannot be decoded.
-    if (await rejected(namespace, input)) write({ id: input.id, guarded: true });
     else write({ id: input.id, ...await evaluateOne(namespace, input.fn, input.args) });
   }
 }
