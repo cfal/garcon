@@ -2,6 +2,8 @@
 
 #[path = "app_server_client/resume.rs"]
 mod resume;
+#[path = "app_server_client/transcript.rs"]
+mod transcript;
 
 use std::{
     cell::{Cell, RefCell},

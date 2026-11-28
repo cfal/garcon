@@ -9,6 +9,8 @@ pub mod endpoint_runtime;
 pub mod model_catalog;
 pub mod native_path_discovery_refresh;
 pub mod operation_routes;
+pub mod paginated_history_source;
+mod paginated_user_message_evidence;
 pub mod protocol;
 pub mod request_builders;
 pub mod runtime;

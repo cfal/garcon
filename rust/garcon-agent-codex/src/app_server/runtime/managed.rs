@@ -958,6 +958,12 @@ impl CodexAppServerRuntime {
         self.0.utility.resolve_native_path(thread_id).await
     }
 
+    pub fn request_native_path_discovery_refresh(&self, thread_id: &str) {
+        self.0
+            .utility
+            .request_native_path_discovery_refresh(thread_id);
+    }
+
     pub fn is_running(&self, thread_id: &str) -> bool {
         self.0
             .sources

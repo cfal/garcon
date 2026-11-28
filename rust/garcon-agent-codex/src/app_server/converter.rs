@@ -18,7 +18,7 @@ use indexmap::IndexMap;
 use serde_json::{Value, json};
 
 use crate::{
-    async_questions::codex_async_questions,
+    async_questions::{codex_async_questions, codex_historical_user_message},
     code_mode_command_projection::{
         codex_code_mode_result_tool_id, create_codex_code_mode_bash_messages,
         project_codex_code_mode_commands, remember_codex_code_mode_result,
@@ -38,8 +38,40 @@ pub fn convert_codex_app_server_live_item(
     timestamp: &str,
     compaction_trigger: Option<CompactionTrigger>,
 ) -> Vec<ChatMessage> {
+    convert_codex_app_server_item_impl(item, timestamp, compaction_trigger, false)
+}
+
+pub fn convert_codex_app_server_item(item: &Value, timestamp: &str) -> Vec<ChatMessage> {
+    convert_codex_app_server_item_impl(item, timestamp, None, true)
+}
+
+fn convert_codex_app_server_item_impl(
+    item: &Value,
+    timestamp: &str,
+    compaction_trigger: Option<CompactionTrigger>,
+    include_user: bool,
+) -> Vec<ChatMessage> {
     let id = string(item, "id").unwrap_or_default();
     match string(item, "type").unwrap_or_default() {
+        "userMessage" if include_user => {
+            let text = item["content"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|part| part["type"] == "text")
+                .filter_map(|part| part["text"].as_str())
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if trim(&text).is_empty() {
+                return Vec::new();
+            }
+            vec![ChatMessage::User(codex_historical_user_message(
+                timestamp,
+                &text,
+                string(item, "clientId"),
+            ))]
+        }
         "agentMessage" | "plan" => {
             let Some(text) = nonempty_trimmed(&item["text"]) else {
                 return Vec::new();

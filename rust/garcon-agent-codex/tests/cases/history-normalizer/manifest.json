@@ -1,0 +1,14 @@
+{
+  "module": "server-agents/codex/src/agents/codex/history-normalizer.ts",
+  "tests": [
+    "server-agents/codex/src/agents/codex/__tests__/history-normalizer.test.js"
+  ],
+  "inputs": "rust/garcon-agent-codex/tests/inputs/history-normalizer.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 263,
+  "sha256": "847ccbfacb6f5aa306f1c6cab8081b3614de5c9f0cbe880b2027a05359d0cb69"
+}
