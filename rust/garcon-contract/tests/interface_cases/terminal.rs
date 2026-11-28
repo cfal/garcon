@@ -196,7 +196,7 @@ fn dispatch_terminal(function: &str, args: &[Value]) -> Result<Value, CaseError>
             let value = argument(function)?;
             Ok(optional(parse_terminal_list_response(&value), |response| {
                 let mut recorded = json!({
-                    "success": true,
+                    "success": response.success,
                     "terminals": response
                         .terminals
                         .iter()
@@ -222,7 +222,7 @@ fn dispatch_terminal(function: &str, args: &[Value]) -> Result<Value, CaseError>
             let value = argument(function)?;
             Ok(optional(
                 parse_terminal_create_response(&value),
-                |response| json!({ "success": true, "terminal": terminal_metadata(&response.terminal) }),
+                |response| json!({ "success": response.success, "terminal": terminal_metadata(&response.terminal) }),
             ))
         }
         "parseTerminalTerminateResponse" => {
@@ -231,7 +231,7 @@ fn dispatch_terminal(function: &str, args: &[Value]) -> Result<Value, CaseError>
                 parse_terminal_terminate_response(&value),
                 |response| {
                     let mut recorded =
-                        json!({ "success": true, "terminalId": response.terminal_id });
+                        json!({ "success": response.success, "terminalId": response.terminal_id });
                     match &response.terminal {
                         None => recorded["terminal"] = Value::Null,
                         Some(terminal) => recorded["terminal"] = terminal_metadata(terminal),
@@ -244,7 +244,7 @@ fn dispatch_terminal(function: &str, args: &[Value]) -> Result<Value, CaseError>
             let value = argument(function)?;
             Ok(optional(
                 parse_terminal_rename_response(&value),
-                |response| json!({ "success": true, "terminalId": response.terminal_id, "title": response.title }),
+                |response| json!({ "success": response.success, "terminalId": response.terminal_id, "title": response.title }),
             ))
         }
         "parseTerminalStreamClientMessage" => {

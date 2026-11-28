@@ -2,6 +2,14 @@
   "module": "common/terminal-error.ts",
   "tests": [],
   "inputs": "rust/garcon-contract/tests/inputs/common/terminal-error.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "new TerminalError",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
   "notCaptured": [],
   "cases": 24,
   "sha256": "8fc49d8fff211f8e4ee3248ec207924617481be63f3a5c90aea8b113b5d133c3"
