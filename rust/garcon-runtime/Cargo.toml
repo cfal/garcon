@@ -40,3 +40,4 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage
 garcon-cases.workspace = true
 tempfile.workspace = true
 time = { version = "0.3", features = ["parsing"] }
+tokio = { workspace = true, features = ["test-util"] }
