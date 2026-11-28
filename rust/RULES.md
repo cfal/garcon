@@ -51,6 +51,14 @@ the user corrects how a port behaves, the correction is added under
   module and a test through the erased path. Test with the concrete error a
   real failing call produces (`std::io::Error` from the file system), never
   only with a stand-in built for the test.
+- The erased error type stays `Box<dyn Error>`; there is no registry and no
+  workspace-wide diagnostic trait object. The original has 72
+  `hasNodeErrorCode` checks, all but one on OS error codes, which
+  `garcon_base::errors` recognizes through any erasure, and six
+  `diagnosticErrorCode` calls, each filling an `errorCode` field. A typed
+  error of a crate above `garcon-base` that must reach one of those is
+  downcast by its own crate first, as the original does with `instanceof`,
+  and that path has a test.
 - Lone surrogates (standing decision, 2026-11-28, ADR-028). The JSON boundary
   replaces an unpaired surrogate with U+FFFD. A recorded case in which the
   original rejects or treats specially a string only because of an unpaired

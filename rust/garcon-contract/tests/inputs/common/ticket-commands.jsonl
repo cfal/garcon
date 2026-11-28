@@ -1,0 +1,11 @@
+{"fn":"parseTicketPatch","args":[{"title":" Patched ","description":"Line\nline","project":" New project ","priority":1,"labels":["z","a"],"assignee":null,"parentId":null,"status":"in-progress"}]}
+{"fn":"parseTicketPatch","args":[{"assignee":{"kind":"user","ownerKey":"person"},"parentId":"G-2"}]}
+{"fn":"parseTicketPatch","args":[{"title":null,"status":"closed"}]}
+{"fn":"parseTicketPatch","args":[{"status":"closed"}]}
+{"fn":"parseTicketPatch","args":[{}]}
+{"fn":"parseTicketPatch","args":[null]}
+{"fn":"parseMarkupTicketMutationPayload","args":[{"action":"not-an-action","ticketId":"G-1","expectedRevision":1}]}
+{"fn":"parseMarkupTicketMutationPayload","args":[{"action":"link","ticketId":"G-1","expectedRevision":1,"targetId":"G-2","targetRevision":2,"kind":"blocks"}]}
+{"fn":"parseMarkupTicketMutationPayload","args":[{"action":"close","ticketId":"G-1","expectedRevision":1,"resolution":"canceled","comment":"Reason."}]}
+{"fn":"parseTicketMutationPayload","args":[{"action":"create","input":{"title":"x","description":null,"project":null}}]}
+{"fn":"parseHttpTicketMutationRequest","args":[{"requestId":"11111111-1111-4111-8111-111111111111","expectedStoreId":"33333333-3333-4333-8333-333333333333","fromChatId":"1000000000000001","payload":{"action":"comment","ticketId":"G-1","body":"A comment."}}]}

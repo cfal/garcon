@@ -54,6 +54,338 @@ fn assert_recording(
     assert_eq!(stats.passed, stats.total, "{module}: recording differs");
 }
 
+fn ticket_recording_result<T: Serialize>(
+    result: Result<T, garcon_contract::ticket_validation::TicketValidationError>,
+) -> Result<Value, CaseError> {
+    let value =
+        result.map_err(|error| CaseError::new("TicketValidationError", error.to_string()))?;
+    serde_json::to_value(value).map_err(|error| CaseError::undeliverable(error.to_string()))
+}
+
+#[test]
+fn ticket_commands_recordings() {
+    use garcon_contract::ticket_commands::*;
+    assert_recording("ticket-commands", |function, args| {
+        let value = unknown(function, args.first())?;
+        let value = value.as_ref();
+        match function {
+            "parseTicketPatch" => ticket_recording_result(parse_ticket_patch(value)),
+            "parseMarkupTicketMutationPayload" => {
+                ticket_recording_result(parse_markup_ticket_mutation_payload(value))
+            }
+            "parseTicketMutationPayload" => {
+                ticket_recording_result(parse_ticket_mutation_payload(value))
+            }
+            "parseHttpTicketMutationRequest" => {
+                ticket_recording_result(parse_http_ticket_mutation_request(value))
+            }
+            _ => Err(CaseError::unhandled(function)),
+        }
+    });
+}
+
+#[test]
+fn ticket_query_recordings() {
+    use garcon_contract::ticket_query::*;
+    assert_recording("ticket-query", |function, args| {
+        let value = unknown(function, args.first())?;
+        let value = value.as_ref();
+        match function {
+            "parseTicketListQuery" => ticket_recording_result(parse_ticket_list_query(value)),
+            "parseTicketReadQuery" => ticket_recording_result(parse_ticket_read_query(value)),
+            "parseTicketCommentsQuery" => {
+                ticket_recording_result(parse_ticket_comments_query(value))
+            }
+            "parseTicketHistoryQuery" => ticket_recording_result(parse_ticket_history_query(value)),
+            _ => Err(CaseError::unhandled(function)),
+        }
+    });
+}
+
+#[test]
+fn ticket_query_codecs_match_bun_url_search_params() {
+    use garcon_contract::ticket_query::{ticket_query_params, ticket_search_params};
+    let lines = pinned_bun_stdout(
+        r#"import "./rust/garcon-contract/tests/oracles/ticket-query-oracle.ts";"#,
+        &[],
+    );
+    let mut counts = (0, 0, 0);
+    for line in lines.lines() {
+        let row: Value = garcon_js::json::from_str(line).unwrap();
+        let query = &row["query"];
+        match row["kind"].as_str().unwrap() {
+            "search" => {
+                counts.0 += 1;
+                let actual = ticket_search_params(query).unwrap();
+                let pairs: Vec<_> = url::form_urlencoded::parse(actual.as_bytes()).collect();
+                assert_eq!(json!(pairs), row["pairs"], "search pairs for {query}");
+                assert_eq!(json!(actual), row["text"], "search bytes for {query}");
+            }
+            "parse" => match ticket_query_params(query.as_str().unwrap()) {
+                Ok(actual) => {
+                    counts.1 += 1;
+                    let pairs: Vec<_> = actual.as_object().unwrap().iter().collect();
+                    assert_eq!(
+                        garcon_js::json::stringify(&json!(pairs)),
+                        garcon_js::json::stringify(&row["pairs"]),
+                        "parsed pairs for {query}",
+                    );
+                    assert_eq!(
+                        json!(serde_json::to_string(&actual).unwrap()),
+                        row["text"],
+                        "parsed bytes for {query}",
+                    );
+                }
+                Err(error) => {
+                    counts.2 += 1;
+                    assert_eq!(
+                        json!({"name": "TicketValidationError", "message": error.to_string()}),
+                        row["error"],
+                        "parse error for {query}",
+                    );
+                }
+            },
+            kind => panic!("unexpected ticket query oracle operation: {kind}"),
+        }
+    }
+    assert!(
+        counts.0 >= 25 && counts.1 >= 25 && counts.2 >= 25,
+        "{counts:?}"
+    );
+}
+
+#[test]
+fn ticket_records_recordings() {
+    use garcon_contract::ticket_records::*;
+    assert_recording("ticket-records", |function, args| {
+        let value = unknown(function, args.first())?;
+        let value = value.as_ref();
+        match function {
+            "parseTicket" => ticket_recording_result(parse_ticket(value)),
+            "parseTicketComment" => ticket_recording_result(parse_ticket_comment(value)),
+            "parseTicketActivity" => ticket_recording_result(parse_ticket_activity(value)),
+            "parseTicketWriteResult" => ticket_recording_result(parse_ticket_write_result(value)),
+            _ => Err(CaseError::unhandled(function)),
+        }
+    });
+}
+
+#[test]
+fn ticket_stored_recordings() {
+    use garcon_contract::ticket_stored::*;
+    assert_recording("ticket-stored", |function, args| {
+        let value = unknown(function, args.first())?;
+        let value = value.as_ref();
+        match function {
+            "normalizeStoredTicketOwner" => {
+                ticket_recording_result(normalize_stored_ticket_owner(value))
+            }
+            "normalizeStoredTicket" => ticket_recording_result(normalize_stored_ticket(value)),
+            "normalizeStoredTicketActivity" => {
+                ticket_recording_result(normalize_stored_ticket_activity(value))
+            }
+            "normalizeStoredTicketWriteResult" => {
+                ticket_recording_result(normalize_stored_ticket_write_result(value))
+            }
+            "normalizeStoredTicketRequest" => {
+                ticket_recording_result(normalize_stored_ticket_request(value))
+            }
+            "normalizeStoredTicketOutcome" => {
+                ticket_recording_result(normalize_stored_ticket_outcome(value))
+            }
+            "normalizeStoredTicketResult" => {
+                ticket_recording_result(normalize_stored_ticket_result(value))
+            }
+            _ => Err(CaseError::unhandled(function)),
+        }
+    });
+}
+
+#[test]
+fn ticket_responses_recordings() {
+    use garcon_contract::ticket_responses::*;
+    assert_recording("ticket-responses", |function, args| {
+        let value = unknown(function, args.first())?;
+        let value = value.as_ref();
+        match function {
+            "parseTicketBootstrap" => ticket_recording_result(parse_ticket_bootstrap(value)),
+            "parseTicketSummary" => ticket_recording_result(parse_ticket_summary(value)),
+            "parseTicketPage" => ticket_recording_result(parse_ticket_page(value)),
+            "parseTicketCommentView" => ticket_recording_result(parse_ticket_comment_view(value)),
+            "parseTicketCommentsPage" => ticket_recording_result(parse_ticket_comments_page(value)),
+            "parseTicketHistoryPage" => ticket_recording_result(parse_ticket_history_page(value)),
+            "parseTicketDetail" => ticket_recording_result(parse_ticket_detail(value)),
+            "parseTicketCounts" => ticket_recording_result(parse_ticket_counts(value)),
+            "parseTicketFacets" => ticket_recording_result(parse_ticket_facets(value)),
+            "parseTicketProjectDefault" => {
+                ticket_recording_result(parse_ticket_project_default(value))
+            }
+            _ => Err(CaseError::unhandled(function)),
+        }
+    });
+}
+
+#[test]
+fn ticket_stored_preserves_opaque_fields_as_javascript_json_text() {
+    use garcon_contract::ticket_stored::normalize_stored_ticket;
+    let wire = r#"{"assignee":{"kind":"user","username":"sample"},"payload":{"n":1.0,"big":9007199254740993,"exp21":1e21,"small":1e-7}}"#;
+    let bun = pinned_bun_stdout(
+        r#"import { normalizeStoredTicket } from "./common/ticket-stored.ts";
+           console.log(JSON.stringify(normalizeStoredTicket(JSON.parse(process.argv[1]))));"#,
+        &[wire],
+    );
+    let value = garcon_js::json::from_str(wire).unwrap();
+    let stored = normalize_stored_ticket(&value).unwrap();
+    assert_eq!(serde_json::to_string(&stored).unwrap(), bun.trim_end());
+}
+
+#[test]
+fn ticket_commands_separate_transport_envelopes_and_preserve_omitted_markup_project() {
+    use garcon_contract::ticket_commands::*;
+    let payload = json!({"action":"create","input":{"title":"  A ticket  "}});
+    let parsed = parse_markup_ticket_mutation_payload(&payload).unwrap();
+    let MarkupTicketMutationPayload::Create { input } = parsed else {
+        panic!("expected create");
+    };
+    assert_eq!(input.title, "A ticket");
+    assert!(input.project.project.is_none());
+    assert!(parse_ticket_mutation_payload(&payload).is_err());
+    let mut request = json!({
+        "requestId":"11111111-1111-4111-8111-111111111111",
+        "expectedStoreId":"33333333-3333-4333-8333-333333333333",
+        "payload":payload,
+    });
+    request["payload"]["input"]["project"] = json!("  Example release  ");
+    let parsed = parse_http_ticket_mutation_request(&request).unwrap();
+    let TicketMutationPayload::Create { input } = parsed.payload else {
+        panic!("expected create");
+    };
+    assert_eq!(input.project.project, "Example release");
+    request["actor"] = json!("forged");
+    assert!(parse_http_ticket_mutation_request(&request).is_err());
+}
+
+#[test]
+fn ticket_commands_only_close_via_close_and_distinguish_absence_from_null() {
+    use garcon_contract::ticket_commands::*;
+    assert_eq!(
+        parse_ticket_patch(&json!({"status":"closed"}))
+            .unwrap_err()
+            .to_string(),
+        "Use close to close a ticket.",
+    );
+    let patch = parse_ticket_patch(&json!({"title":"Trim ","assignee":null})).unwrap();
+    assert!(patch.assignee.is_null());
+    assert!(patch.parent_id.is_absent());
+    assert_eq!(
+        serde_json::to_value(patch).unwrap(),
+        json!({"title":"Trim","assignee":null})
+    );
+}
+
+#[test]
+fn ticket_query_fences_mutable_continuations_and_leaves_immutable_history_unfenced() {
+    use garcon_contract::ticket_query::*;
+    assert!(parse_ticket_list_query(&json!({"beforeNumber":10})).is_err());
+    assert!(parse_ticket_comments_query(&json!({"ticketId":"G-1","beforeSequence":10})).is_err());
+    assert!(
+        parse_ticket_read_query(&json!({"ticketId":"G-1","beforeCommentSequence":10})).is_err()
+    );
+    assert!(parse_ticket_read_query(&json!({
+        "ticketId":"G-1","beforeCommentSequence":10,"expectedCollectionRevision":0,"commentLimit":0
+    })).is_err());
+    assert_eq!(
+        parse_ticket_read_query(&json!({"ticketId":"G-1","commentLimit":0}))
+            .unwrap()
+            .comment_limit,
+        Some(0),
+    );
+    let history =
+        parse_ticket_history_query(&json!({"ticketId":"G-1","beforeSequence":10})).unwrap();
+    assert_eq!(
+        (history.before_sequence, history.limit),
+        (Some(10), Some(50))
+    );
+    assert!(
+        parse_ticket_history_query(&json!({"ticketId":"G-1","expectedCollectionRevision":2}))
+            .is_err()
+    );
+}
+
+fn synthetic_ticket_wire() -> Value {
+    json!({
+        "id":"G-1","number":1,"revision":1,"title":"Synthetic ticket","description":"Exact\nbody",
+        "project":"Sample","status":"open","resolution":null,"priority":2,"labels":[],
+        "assignee":null,"parentId":null,"createdAt":"2026-01-01T00:00:00.000Z",
+        "updatedAt":"2026-01-01T00:00:00.000Z",
+        "createdBy":{"kind":"user","username":"local","principalMode":"local","declaredChatId":null}
+    })
+}
+
+#[test]
+fn ticket_records_round_trip_typed_domain_records_and_reject_contradictions() {
+    use garcon_contract::ticket_records::*;
+    let mut ticket = synthetic_ticket_wire();
+    let parsed = parse_ticket(&ticket).unwrap();
+    assert_eq!(serde_json::to_value(parsed).unwrap(), ticket);
+    ticket["resolution"] = json!("done");
+    assert_eq!(
+        parse_ticket(&ticket).unwrap_err().to_string(),
+        "Ticket status and resolution disagree."
+    );
+    ticket["number"] = json!(2);
+    assert_eq!(
+        parse_ticket(&ticket).unwrap_err().to_string(),
+        "Ticket ID and number disagree."
+    );
+    assert_eq!(
+        parse_ticket_comment(&json!({"deletedAt":null,"body":null}))
+            .unwrap_err()
+            .to_string(),
+        "Comment body and tombstone disagree.",
+    );
+}
+
+#[test]
+fn ticket_stored_migrates_legacy_owners_without_rewriting_actor_identity() {
+    use garcon_contract::ticket_stored::*;
+    let legacy = json!({"kind":"user","username":"sample"});
+    let value = json!({"action":"created","actor":legacy,"ticket":{"assignee":legacy}});
+    let parsed = normalize_stored_ticket_activity(&value).unwrap();
+    assert_eq!(parsed["actor"], legacy);
+    assert_eq!(
+        parsed["ticket"]["assignee"],
+        json!({"kind":"user","ownerKey":"sample"})
+    );
+    let mixed = json!({"kind":"user","username":"sample","ownerKey":"not-the-same"});
+    assert!(normalize_stored_ticket_owner(&mixed).is_err());
+}
+
+#[test]
+fn ticket_responses_reject_inconsistent_detail_projections_and_continuations() {
+    use garcon_contract::ticket_responses::*;
+    let store_id = "33333333-3333-4333-8333-333333333333";
+    let mut ticket = synthetic_ticket_wire();
+    ticket["description"] = Value::Null;
+    let mut detail = json!({
+        "storeId":store_id,"collectionRevision":2,"ticket":ticket,"links":[],
+        "comments":{"storeId":store_id,"collectionRevision":2,"items":[],"nextBeforeSequence":null}
+    });
+    let parsed = parse_ticket_detail(&detail).unwrap();
+    assert!(parsed.ticket.description.is_none());
+    detail["comments"]["collectionRevision"] = json!(3);
+    assert_eq!(
+        parse_ticket_detail(&detail).unwrap_err().to_string(),
+        "Ticket detail projections disagree.",
+    );
+    assert!(
+        parse_ticket_page(&json!({
+            "storeId":store_id,"collectionRevision":2,"items":[],"nextBeforeNumber":1
+        }))
+        .is_err()
+    );
+}
+
 fn required_text<'a>(function: &str, argument: Option<&'a Value>) -> Result<&'a str, CaseError> {
     text(function, argument)?.ok_or_else(|| CaseError::unhandled(function))
 }

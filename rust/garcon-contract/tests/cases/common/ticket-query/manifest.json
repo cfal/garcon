@@ -1,0 +1,63 @@
+{
+  "module": "common/ticket-query.ts",
+  "tests": [
+    "common/__tests__/tickets.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/ticket-query.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseTicketListQuery",
+      "argument": 0
+    },
+    {
+      "fn": "parseTicketReadQuery",
+      "argument": 0
+    },
+    {
+      "fn": "parseTicketCommentsQuery",
+      "argument": 0
+    },
+    {
+      "fn": "parseTicketHistoryQuery",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.args[0]",
+      "type": "a URLSearchParams instance",
+      "where": "args",
+      "at": "common/__tests__/tickets.test.js:96:14",
+      "fn": "ticketQueryParams",
+      "count": 3
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a URLSearchParams instance",
+      "where": "args",
+      "at": "common/__tests__/tickets.test.js:98:79",
+      "fn": "ticketQueryParams",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a URLSearchParams instance",
+      "where": "args",
+      "at": "common/__tests__/tickets.test.js:99:69",
+      "fn": "ticketQueryParams",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a URLSearchParams instance",
+      "where": "args",
+      "at": "common/__tests__/tickets.test.js:100:39",
+      "fn": "ticketQueryParams",
+      "count": 1
+    }
+  ],
+  "cases": 209,
+  "sha256": "23f220517af7abf705adcac1990c7fb14ebf2729faaa56d208fa2588836e8eaa"
+}
