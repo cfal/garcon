@@ -1,4 +1,5 @@
 pub mod catalog;
+pub mod direct;
 pub mod execution;
 pub mod lifecycle;
 pub mod migration;
