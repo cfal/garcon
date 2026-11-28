@@ -18,7 +18,7 @@ pub struct ControlInputSignal<'a> {
 }
 
 impl ControlInputSignal<'_> {
-    fn check(self) -> ExecutionOperationResult<()> {
+    pub(crate) fn check(self) -> ExecutionOperationResult<()> {
         if self.token.is_cancelled() {
             Err((self.reason)())
         } else {

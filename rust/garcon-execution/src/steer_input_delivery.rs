@@ -1,10 +1,10 @@
 use std::{cell::Cell, rc::Rc};
 
 use async_trait::async_trait;
-use garcon_base::domain_error::DomainError;
+use garcon_base::{domain_error::DomainError, executor_disconnect::as_agent_call_error};
 use garcon_contract::error_codes::ErrorCode;
 use garcon_interface::{
-    errors::{AgentCallError, AgentDeliveryOutcome},
+    errors::AgentDeliveryOutcome,
     services::{AgentSteerFailureOutcome, AgentSteerRejectionReason, AgentSteerResult},
 };
 
@@ -249,7 +249,7 @@ impl SteerInputDelivery {
             }
             Err(error) if execution_domain_error(error.as_ref()).is_some() => Err(error),
             Err(error) => {
-                let uncertain = error.downcast_ref::<AgentCallError>().map_or_else(
+                let uncertain = as_agent_call_error(error.as_ref()).map_or_else(
                     || prepared.get(),
                     |error| error.outcome == AgentDeliveryOutcome::Unknown,
                 );
