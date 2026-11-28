@@ -1,14 +1,18 @@
 use std::{
     cell::{Cell, RefCell},
-    rc::Rc,
+    rc::{Rc, Weak},
     time::Duration,
 };
 
 use futures::future::join_all;
+use garcon_agents_common::execution::runtime_events::{RuntimeSteerRequest, RuntimeSteerTarget};
 use garcon_contract::chat_types::{ChatMessage, ErrorMessage};
 use garcon_interface::{
-    execution::AgentRunningSession, host::AgentLogger, producer::AgentFinalResponse,
+    execution::AgentRunningSession,
+    host::AgentLogger,
+    producer::AgentFinalResponse,
     resources::ExecutorResult,
+    services::{AgentSteerRejectionReason, AgentSteerResult},
 };
 use garcon_js::{
     clock::{Clock, SystemClock, to_iso_string},
@@ -33,9 +37,11 @@ use crate::{
         },
         runtime_session_state::{CodexTurnRoutes, FinishSessionOptions, RunningStatus},
         runtime_support::{
-            NoopLogger, denial_response_for_request, humanize_codex_app_server_error,
-            is_active_session_status,
+            CAPACITY_RETRY_DELAYS, MAX_CAPACITY_RETRIES, NoopLogger, denial_response_for_request,
+            has_terminal_pending_finish, humanize_codex_app_server_error, is_active_session_status,
+            is_capacity_error, is_terminal_session_status, merge_finish_options,
         },
+        steering::{rejected_codex_steer, steer_codex_session},
     },
     runtime_types::{
         CodexExecutionRequest, CodexProviderConfig, CodexStartRequest, CodexStartedSession,
@@ -48,11 +54,15 @@ use garcon_interface::native_message_source::NativeSourced;
 use super::{
     client_events::{BufferedClientEvent, CodexClientEvents},
     permission_events::{CodexApprovalEvents, CodexApprovalRoute},
-    source_registry::{CodexSessionSource, CodexSourceActivation, CodexSourceRegistry},
+    source_registry::{
+        CodexSessionSource, CodexSourceActivation, CodexSourceRegistry, PendingFinish,
+    },
     terminal::detached_turn_failure,
     turn_events::{CodexObservedTurnCompletion, dispatch_turn_notification},
     utility::CodexAppServerUtility,
 };
+
+mod capacity_retry;
 
 type CodexClientFactory = Rc<
     dyn Fn(Option<IndexMap<String, String>>, Option<&CodexProviderConfig>) -> CodexAppServerClient,
@@ -65,6 +75,7 @@ pub struct CodexAppServerRuntimeOptions {
     pub clock: Rc<dyn Clock>,
     pub materialization_timeout: Duration,
     pub settings_timeout: Duration,
+    pub capacity_retry_delays: Vec<Duration>,
     pub refresh: NativePathDiscoveryRefreshLimiter,
 }
 
@@ -80,6 +91,7 @@ impl CodexAppServerRuntimeOptions {
             clock: Rc::new(SystemClock),
             materialization_timeout: Duration::from_secs(10),
             settings_timeout: Duration::from_secs(10),
+            capacity_retry_delays: CAPACITY_RETRY_DELAYS.to_vec(),
             refresh: NativePathDiscoveryRefreshLimiter::default(),
         }
     }
@@ -96,11 +108,18 @@ struct ManagedRuntime {
     skills: CodexSkillDiscovery,
     materialization_timeout: Duration,
     settings_timeout: Duration,
+    capacity_retry_delays: Vec<Duration>,
     closed: Cell<bool>,
 }
 
 #[derive(Clone)]
 pub struct CodexAppServerRuntime(Rc<ManagedRuntime>);
+
+struct CapturedSteerTarget {
+    source: Weak<CodexSessionSource>,
+    turn_id: String,
+    used: Cell<bool>,
+}
 
 impl CodexAppServerRuntime {
     pub fn new(options: CodexAppServerRuntimeOptions) -> Self {
@@ -129,6 +148,11 @@ impl CodexAppServerRuntime {
             skills,
             materialization_timeout: options.materialization_timeout,
             settings_timeout: options.settings_timeout,
+            capacity_retry_delays: options
+                .capacity_retry_delays
+                .into_iter()
+                .take(MAX_CAPACITY_RETRIES)
+                .collect(),
             closed: Cell::new(false),
         }))
     }
@@ -266,7 +290,7 @@ impl CodexAppServerRuntime {
             .client
             .request("turn/start", Some(&build_turn_start_params(&input)), None)
             .await?;
-        if self.is_current(source) && source.turn_attempt.get() == generation {
+        if self.can_apply_turn_attempt(source, generation) {
             let turn_id = response["turn"]["id"]
                 .as_str()
                 .ok_or("Invalid Codex turn/start response id")?;
@@ -314,6 +338,7 @@ impl CodexAppServerRuntime {
                 confirmed_settings,
                 provider_owns_effort: requested.effort.is_none(),
                 settings_timeout: self.0.settings_timeout,
+                admitted_tier,
             },
         ));
         let previous = self.0.sources.borrow_mut().activate(source.clone());
@@ -449,6 +474,12 @@ impl CodexAppServerRuntime {
                     if self.is_current(&source)
                         && source.routes.borrow().active_turn_id() == Some(turn_id)
                     {
+                        if is_capacity_error(Some(raw)) {
+                            source
+                                .pending_capacity_failure
+                                .replace(Some((turn_id.into(), message.into())));
+                            return Ok(());
+                        }
                         self.finish_session(
                             &source,
                             FinishSessionOptions {
@@ -483,14 +514,43 @@ impl CodexAppServerRuntime {
 
     fn complete_turn(&self, completion: CodexObservedTurnCompletion) {
         let source = &completion.source;
-        let operation = Some(completion.operation.as_ref());
+        let operation = Some(&completion.operation);
         let failure = detached_turn_failure(&completion.turn).map(str::to_owned);
         if !completion.is_active {
-            self.publish_terminal(source, operation, failure, completion.final_response);
+            self.publish_terminal(
+                source,
+                operation.map(Rc::as_ref),
+                failure,
+                completion.final_response,
+            );
             return;
         }
         source.turn_attempt.set(source.turn_attempt.get() + 1);
+        let capacity =
+            source
+                .pending_capacity_failure
+                .borrow_mut()
+                .take()
+                .filter(|(turn_id, _)| {
+                    completion.turn.status == Some(CodexTurnStatus::Failed)
+                        && *turn_id == completion.turn.id
+                });
         if let Some(message) = failure {
+            if completion.turn.status == Some(CodexTurnStatus::Failed)
+                && (capacity.is_some() || is_capacity_error(completion.turn.error.as_deref()))
+            {
+                let message = capacity
+                    .as_ref()
+                    .map_or(message.as_str(), |(_, message)| message);
+                if self.schedule_capacity_retry(
+                    source.clone(),
+                    completion.operation.clone(),
+                    message,
+                ) {
+                    return;
+                }
+            }
+            let message = capacity.map_or(message, |(_, message)| message);
             self.finish_session(
                 source,
                 FinishSessionOptions {
@@ -501,6 +561,7 @@ impl CodexAppServerRuntime {
             );
             return;
         }
+        source.capacity_retry_count.set(0);
         let aborted = completion.turn.status == Some(CodexTurnStatus::Interrupted)
             || source.status.get() == RunningStatus::Interrupting;
         source.status.set(RunningStatus::Completing);
@@ -526,7 +587,7 @@ impl CodexAppServerRuntime {
         &self,
         source: &CodexSessionSource,
         options: FinishSessionOptions,
-        operation: Option<&CodexOperation>,
+        operation: Option<&Rc<CodexOperation>>,
     ) {
         self.finish_session_with_response(source, options, operation, None);
     }
@@ -535,10 +596,34 @@ impl CodexAppServerRuntime {
         &self,
         source: &CodexSessionSource,
         options: FinishSessionOptions,
-        operation: Option<&CodexOperation>,
+        operation: Option<&Rc<CodexOperation>>,
         response: Option<AgentFinalResponse>,
     ) {
         if !self.is_current(source) {
+            return;
+        }
+        if source.deliveries.get() > 0 {
+            let mut pending = source.pending_finish.borrow_mut();
+            let previous = pending.take();
+            let operation = operation.cloned().or_else(|| {
+                previous
+                    .as_ref()
+                    .and_then(|current| current.operation.clone())
+            });
+            let options = merge_finish_options(
+                previous.as_ref().map(|current| current.options.clone()),
+                options,
+            );
+            let response = if options.aborted || options.failed_message.is_some() {
+                None
+            } else {
+                response.or_else(|| previous.and_then(|current| current.response))
+            };
+            *pending = Some(PendingFinish {
+                options,
+                operation,
+                response,
+            });
             return;
         }
         self.0.sources.borrow_mut().finish(source);
@@ -564,9 +649,29 @@ impl CodexAppServerRuntime {
         );
         self.clean_attachments(source);
         if options.failed_message.is_some() || !options.aborted || options.emit_finished_on_abort {
-            self.publish_terminal(source, operation, options.failed_message, response);
+            self.publish_terminal(
+                source,
+                operation.map(Rc::as_ref),
+                options.failed_message,
+                response,
+            );
         }
         source.terminal.notify_waiters();
+    }
+
+    fn flush_pending_finish(&self, source: &CodexSessionSource) {
+        if source.deliveries.get() != 0 {
+            return;
+        }
+        let pending = source.pending_finish.borrow_mut().take();
+        if let Some(pending) = pending {
+            self.finish_session_with_response(
+                source,
+                pending.options,
+                pending.operation.as_ref(),
+                pending.response,
+            );
+        }
     }
 
     fn publish_terminal(
@@ -684,6 +789,69 @@ impl CodexAppServerRuntime {
                 },
             )
             .await
+    }
+
+    pub fn capture_steer_target(&self, thread_id: &str) -> Option<RuntimeSteerTarget> {
+        let source = self.steerable_source(thread_id)?;
+        let turn_id = source.routes.borrow().active_turn_id()?.to_owned();
+        Some(Rc::new(CapturedSteerTarget {
+            source: Rc::downgrade(&source),
+            turn_id,
+            used: Cell::new(false),
+        }))
+    }
+
+    pub async fn steer(&self, request: RuntimeSteerRequest) -> ExecutorResult<AgentSteerResult> {
+        use AgentSteerRejectionReason as Reason;
+        let no_active_turn = || rejected_codex_steer(Reason::NoActiveTurn, "No active Codex turn");
+        let Some(source) = self.steerable_source(&request.agent_session_id) else {
+            return Ok(no_active_turn());
+        };
+        let Some(target) = request
+            .target
+            .as_deref()
+            .and_then(|target| target.downcast_ref::<CapturedSteerTarget>())
+        else {
+            return Ok(no_active_turn());
+        };
+        if target.used.replace(true) {
+            return Ok(no_active_turn());
+        }
+        if !target
+            .source
+            .upgrade()
+            .is_some_and(|captured| Rc::ptr_eq(&captured, &source))
+            || source.routes.borrow().active_turn_id() != Some(target.turn_id.as_str())
+        {
+            return Ok(rejected_codex_steer(
+                Reason::TurnChanged,
+                "The active Codex turn changed",
+            ));
+        }
+        let turn_id = target.turn_id.clone();
+        source.deliveries.set(source.deliveries.get() + 1);
+        let runtime = self.clone();
+        let task = tokio::task::spawn_local(async move {
+            let result =
+                steer_codex_session(&source.client, &source.thread_id, &turn_id, request).await;
+            source.deliveries.set(source.deliveries.get() - 1);
+            runtime.flush_pending_finish(&source);
+            result
+        });
+        task.await?
+    }
+
+    fn steerable_source(&self, thread_id: &str) -> Option<Rc<CodexSessionSource>> {
+        self.0.sources.borrow().active(thread_id).filter(|source| {
+            !is_terminal_session_status(source.status.get())
+                && !has_terminal_pending_finish(
+                    source
+                        .pending_finish
+                        .borrow()
+                        .as_ref()
+                        .map(|pending| &pending.options),
+                )
+        })
     }
 
     pub fn running_sessions(&self) -> Vec<AgentRunningSession> {

@@ -139,6 +139,11 @@ impl CodexSourceThreadSettings {
         self.0.state.borrow().confirmed.clone()
     }
 
+    pub(super) async fn with_delivery<T>(&self, delivery: impl Future<Output = T>) -> T {
+        let _exclusive = self.0.updates.lock().await;
+        delivery.await
+    }
+
     async fn apply_thread_settings(&self, target: CodexThreadSettingsTarget) -> ExecutorResult<()> {
         let _exclusive = self.0.updates.lock().await;
         let (generation, confirmation) = {
