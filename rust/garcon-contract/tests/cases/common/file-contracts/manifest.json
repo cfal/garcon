@@ -37,10 +37,14 @@
     {
       "fn": "parseFileIdentityResponse",
       "argument": 0
+    },
+    {
+      "fn": "parseFileTreeResponse",
+      "argument": 0
     }
   ],
   "bunVersion": "1.4.3",
   "notCaptured": [],
-  "cases": 705,
-  "sha256": "3f0a3feab18de85d90715002ccc731b1520d5f195dccfe9a61e9570e2ec93d6f"
+  "cases": 748,
+  "sha256": "5ac9abdbce42af9aa4378954bc1647e3c5a39dc3f9142712e7d5bdf639659176"
 }
