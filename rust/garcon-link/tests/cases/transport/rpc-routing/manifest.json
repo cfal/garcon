@@ -1,0 +1,11 @@
+{
+  "module": "server/remote/transport/rpc-routing.ts",
+  "tests": [
+    "server/remote/transport/__tests__/rpc-routing.test.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "notCaptured": [],
+  "cases": 88,
+  "sha256": "eb9429549e3eed4653029664bb7a43b46b5226eabe74ba3090b5de3963aa4571"
+}

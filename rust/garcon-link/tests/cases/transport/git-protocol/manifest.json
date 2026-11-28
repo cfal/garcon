@@ -1,0 +1,9 @@
+{
+  "module": "server/remote/transport/git-protocol.ts",
+  "tests": [],
+  "inputs": "rust/garcon-link/tests/inputs/git-protocol.jsonl",
+  "guards": [],
+  "notCaptured": [],
+  "cases": 6,
+  "sha256": "f862d3b81cb325bdb87244f130d179929e945f49e2c1f0a3d4140b52c58058f5"
+}

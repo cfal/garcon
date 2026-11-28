@@ -1,0 +1,9 @@
+{
+  "module": "server/remote/transport/rpc-protocol.ts",
+  "tests": [],
+  "inputs": "rust/garcon-link/tests/inputs/rpc-continuity.jsonl",
+  "guards": [],
+  "notCaptured": [],
+  "cases": 67,
+  "sha256": "3717295ca9d64bc832aa0dddea2839a938cd969cf15f8798599c48845a340c10"
+}

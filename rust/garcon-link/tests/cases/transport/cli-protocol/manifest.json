@@ -1,0 +1,12 @@
+{
+  "module": "server/remote/transport/cli-protocol.ts",
+  "tests": [
+    "server/remote/transport/__tests__/cli-allowlist.test.ts",
+    "server/remote/transport/__tests__/rpc-routing.test.ts"
+  ],
+  "inputs": "rust/garcon-link/tests/inputs/cli-protocol.jsonl",
+  "guards": [],
+  "notCaptured": [],
+  "cases": 338,
+  "sha256": "74a4b7720c4fedf3fe32be47af1f4e9c1c0abae27c3aa23bdb5f9330e66da502"
+}

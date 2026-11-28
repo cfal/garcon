@@ -24,20 +24,20 @@ type Message = dyn Fn(&str) -> Result<(), SessionError>;
 type Failed = dyn Fn(SessionError);
 type Availability = dyn Fn(bool);
 
-struct Listeners<T: ?Sized> {
+pub(crate) struct Listeners<T: ?Sized> {
     next_id: Cell<u64>,
     callbacks: RefCell<BTreeMap<u64, Rc<T>>>,
 }
 
 impl<T: ?Sized + 'static> Listeners<T> {
-    fn new() -> Rc<Self> {
+    pub(crate) fn new() -> Rc<Self> {
         Rc::new(Self {
             next_id: Cell::new(0),
             callbacks: RefCell::default(),
         })
     }
 
-    fn subscribe(self: &Rc<Self>, callback: Rc<T>) -> impl Fn() + use<T> {
+    pub(crate) fn subscribe(self: &Rc<Self>, callback: Rc<T>) -> impl Fn() + use<T> {
         let mut callbacks = self.callbacks.borrow_mut();
         let id = callbacks
             .iter()
@@ -54,11 +54,11 @@ impl<T: ?Sized + 'static> Listeners<T> {
         }
     }
 
-    fn clear(&self) {
+    pub(crate) fn clear(&self) {
         self.callbacks.borrow_mut().clear();
     }
 
-    fn notify<E>(&self, mut call: impl FnMut(&T) -> Result<(), E>) -> Result<(), E> {
+    pub(crate) fn notify<E>(&self, mut call: impl FnMut(&T) -> Result<(), E>) -> Result<(), E> {
         let mut last = 0;
         loop {
             let next = self
@@ -246,5 +246,61 @@ impl SessionTransport {
 
     pub fn on_availability(&self, listener: AvailabilityChanged) -> impl Fn() + use<> {
         self.events.availability.subscribe(listener)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::message_session::MessageContinuityError;
+
+    use super::*;
+
+    struct ReadySocket;
+
+    impl SessionSocket for ReadySocket {
+        fn send(&self, _encoded: String) -> Result<(), SessionError> {
+            Ok(())
+        }
+        fn close(&self) {}
+    }
+
+    #[tokio::test]
+    async fn transport_becomes_ready_when_the_authenticated_socket_attaches() {
+        let transport = SessionTransport::new(
+            "id".to_owned(),
+            "peer".to_owned(),
+            Rc::new(|_| {}),
+            SessionTransportOptions::default(),
+        )
+        .unwrap();
+        assert!(transport.ready().now_or_never().is_none());
+        let changed = Rc::new(RefCell::new(Vec::new()));
+        let observed = Rc::clone(&changed);
+        let _off = transport.on_availability(Rc::new(move |connected| {
+            observed.borrow_mut().push(connected)
+        }));
+        let socket = transport.attach(Rc::new(ReadySocket)).unwrap();
+        assert!(transport.connected());
+        transport.ready().await.unwrap();
+        assert_eq!(*changed.borrow(), [true]);
+        socket.disconnected();
+        assert_eq!(*changed.borrow(), [true, false]);
+        assert!(!transport.connected());
+        assert!(transport.attach(Rc::new(ReadySocket)).is_err());
+    }
+
+    #[tokio::test]
+    async fn retirement_before_attachment_rejects_readiness() {
+        let transport = SessionTransport::new(
+            "id".to_owned(),
+            "peer".to_owned(),
+            Rc::new(|_| {}),
+            SessionTransportOptions::default(),
+        )
+        .unwrap();
+        let failure: SessionError = Rc::new(MessageContinuityError("synthetic failure"));
+        transport.close(Some(Rc::clone(&failure)));
+        let error = transport.ready().await.unwrap_err();
+        assert!(Rc::ptr_eq(&failure, &error));
     }
 }
