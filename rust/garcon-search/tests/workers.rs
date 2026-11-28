@@ -56,14 +56,18 @@ async fn query(worker: &ReaderWorker, chat: &str) -> Result<ReaderEvent, WorkerE
         .await
 }
 
-#[tokio::test]
-async fn distinct_readers_keep_their_own_connection_and_ignore_unrelated_retirement() {
+fn directory() -> tempfile::TempDir {
     let root = PathBuf::from(std::env::var_os("HOME").unwrap()).join("tmp/interface");
     std::fs::create_dir_all(&root).unwrap();
-    let temp = tempfile::Builder::new()
+    tempfile::Builder::new()
         .prefix("search-workers-")
         .tempdir_in(&root)
-        .unwrap();
+        .unwrap()
+}
+
+#[tokio::test]
+async fn distinct_readers_keep_their_own_connection_and_ignore_unrelated_retirement() {
+    let temp = directory();
     let path = temp.path().join("index.sqlite");
     let indexer = indexer_slot();
     assert_eq!(
@@ -218,4 +222,96 @@ async fn distinct_readers_keep_their_own_connection_and_ignore_unrelated_retirem
     first_slot.stop(DEADLINE).await.unwrap();
     second_slot.stop(DEADLINE).await.unwrap();
     indexer.stop(DEADLINE).await.unwrap();
+}
+
+#[tokio::test]
+async fn reader_searches_nul_and_boundary_normalized_surrogates_without_internal_failure() {
+    use garcon_contract::chat_types::parse_chat_message;
+    use garcon_js::clock::ManualClock;
+    use garcon_search::{message_projector::project_search_message, schema::*};
+
+    let temp = directory();
+    let path = temp.path().join("nul.sqlite");
+    let db = open_search_database(&path).unwrap().db;
+    let clock = ManualClock::new(0);
+    plan_chat_sync(
+        &db,
+        PlanChatSync {
+            mode: SearchSyncMode::Replace,
+            chat_id: CHAT,
+            transcript_view_id: VIEW,
+            expected_after_ordinal: 0,
+            target_through: 1,
+        },
+        &clock,
+    )
+    .unwrap();
+    let message = parse_chat_message(&serde_json::json!({ "type": "user-message", "timestamp": "", "content": "foo\0bar marker" }))
+        .unwrap().unwrap();
+    insert_rows_batch(
+        &db,
+        InsertRowsBatch {
+            chat_id: CHAT,
+            transcript_view_id: VIEW,
+            advance_to: 1,
+            rows: &[HistoricalSearchMessageRow {
+                ordinal: 1,
+                row: project_search_message(&message).unwrap(),
+            }],
+        },
+        &clock,
+    )
+    .unwrap();
+    finish_chat_sync(&db, CHAT, VIEW, &clock).unwrap();
+    close_search_database(db).unwrap();
+
+    let reader = reader_slot();
+    reader.start(path, None, DEADLINE).await.unwrap();
+    let worker = reader.worker().unwrap();
+    for (wire, matches) in [
+        (r#""foo\u0000bar""#, true),
+        (r#""foo\ud800bar""#, false),
+        (r#""foo\udc00bar""#, false),
+        (r##""#731\ud800""##, false),
+        (r##""#731\udc00""##, false),
+        (r#""marker""#, true),
+    ] {
+        let text: String = garcon_js::json::from_str(wire).unwrap();
+        let search = ReaderSearch {
+            query: compile_chat_search_query(&text, None),
+            order: TranscriptSearchOrder::Allowlist,
+            snippet_limit: 1,
+            ..options()
+        };
+        let frames = search_frames(
+            search,
+            vec![TranscriptSearchAllowedChat {
+                through_ordinal: 1,
+                ..allowed(CHAT)
+            }],
+        )
+        .unwrap();
+        let event = worker
+            .request(
+                frames.into_iter().map(ReaderRequest::Search),
+                None,
+                DEADLINE,
+                complete,
+            )
+            .await
+            .unwrap();
+        let ReaderEvent::SearchResult(result) = event else {
+            panic!("expected a normal result for {wire}")
+        };
+        assert_eq!(
+            result
+                .results
+                .iter()
+                .map(|hit| hit.chat_id.as_str())
+                .collect::<Vec<_>>(),
+            if matches { &[CHAT][..] } else { &[] },
+            "{wire}"
+        );
+    }
+    reader.stop(DEADLINE).await.unwrap();
 }

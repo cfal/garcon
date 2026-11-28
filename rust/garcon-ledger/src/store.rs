@@ -1,4 +1,9 @@
-use std::{cell::RefCell, collections::HashSet, mem, rc::Rc, sync::LazyLock};
+use std::{
+    cell::{Cell, RefCell},
+    mem,
+    rc::Rc,
+    sync::LazyLock,
+};
 
 use garcon_base::{
     event_loop_stalls::ActivityTracker,
@@ -39,8 +44,14 @@ use crate::{
     raw_page::read_raw_page,
     session_query::find_current_session,
     sqlite_operations::{LedgerResult, as_error, bind_ordinal, run_query, run_transaction},
-    staging_views::{encode_drafts, insert_encoded_rows, materialize_rows},
+    staging_views::{StagingViews, encode_drafts, insert_encoded_rows, materialize_rows},
 };
+
+mod anchors;
+mod bulk;
+mod read_pages;
+pub use anchors::{TranscriptReadSignal, TranscriptWatermark};
+pub use bulk::StageViewInput;
 
 const DEFAULT_CONNECTION_CACHE_SIZE: usize = 10;
 static LOGGER: LazyLock<ScopedLogger> = LazyLock::new(|| create_logger("ledger:store"));
@@ -62,6 +73,8 @@ pub struct InitializeViewInput<'a> {
 
 pub struct TranscriptLedgerStore {
     state: RefCell<StoreState>,
+    staging: Rc<StagingViews>,
+    anchor_read_epoch: Cell<u64>,
     create_view_id: Rc<dyn Fn() -> LedgerResult<TranscriptViewId>>,
     now: Rc<dyn Fn() -> LedgerResult<String>>,
 }
@@ -87,10 +100,12 @@ impl TranscriptLedgerStore {
                 Some(create) => Rc::new(move || Ok(create())),
                 None => Rc::new(|| Ok(transcript_view_id(&uuid::Uuid::new_v4().to_string())?)),
             };
+        let staging = Rc::new(StagingViews::default());
         Ok(Self {
             state: RefCell::new(StoreState {
                 connections: ConnectionCache {
                     root_directory,
+                    staging: staging.clone(),
                     cache_size,
                     synchronous: options.synchronous,
                     activity_tracker: options.activity_tracker,
@@ -100,6 +115,8 @@ impl TranscriptLedgerStore {
                 },
                 fences: LedgerFailureFences::default(),
             }),
+            staging,
+            anchor_read_epoch: Cell::new(0),
             create_view_id,
             now: options
                 .now
@@ -410,11 +427,7 @@ impl TranscriptLedgerStore {
         limit: u64,
         before: Option<u64>,
     ) -> LedgerResult<TranscriptPage> {
-        if !(1..=1000).contains(&limit) {
-            return Err(type_error(
-                "Transcript page limit must be between 1 and 1000",
-            ));
-        }
+        read_pages::validate_page_limit(limit)?;
         if before.is_some_and(|value| value < 1 || !is_safe_integer(value as f64)) {
             return Err(type_error(
                 "Transcript page cursor must be a positive integer",
@@ -500,6 +513,7 @@ impl TranscriptLedgerStore {
     }
 
     pub fn close_chat(&self, chat_id: &str) -> LedgerResult<()> {
+        self.staging.abandon(chat_id);
         let mut state = self.state.borrow_mut();
         let cache = &mut state.connections;
         let entry = cache
@@ -511,6 +525,8 @@ impl TranscriptLedgerStore {
     }
 
     pub fn close(&self) -> LedgerResult<()> {
+        self.anchor_read_epoch.set(self.anchor_read_epoch.get() + 1);
+        self.staging.abandon_all();
         let mut state = self.state.borrow_mut();
         let cache = &mut state.connections;
         let mut entries = mem::take(&mut cache.failed_close);
@@ -528,6 +544,10 @@ impl TranscriptLedgerStore {
             state.fences.clear();
         }
         first_failure.map_or(Ok(()), Err)
+    }
+
+    pub(crate) fn activity_tracker(&self) -> Option<Rc<ActivityTracker>> {
+        self.state.borrow().connections.activity_tracker.clone()
     }
 
     pub(crate) fn read<T>(
@@ -562,6 +582,7 @@ impl TranscriptLedgerStore {
 
 struct ConnectionCache {
     root_directory: String,
+    staging: Rc<StagingViews>,
     cache_size: usize,
     synchronous: LedgerSynchronous,
     activity_tracker: Option<Rc<ActivityTracker>>,
@@ -601,7 +622,7 @@ impl ConnectionCache {
             &self.root_directory,
             chat_id,
             self.synchronous,
-            &HashSet::new(),
+            &self.staging.retained(chat_id),
         );
         if let Some(finish) = finish {
             finish();

@@ -1,0 +1,9 @@
+{"fn":"encodeStagedDraftsFixture","args":[[]]}
+{"fn":"encodeStagedDraftsFixture","args":[[{"kind":"notice","content":"draft"},{"kind":"notice","content":"draft"}]]}
+{"fn":"encodeStagedDraftsFixture","args":[[{"kind":"notice","content":"emoji: \ud83d\ude00\n\"quoted\""},{"kind":"input","content":"draft","id":"submission-1"},{"kind":"input","content":"anonymous draft","id":null}]]}
+{"fn":"encodeStagedDraftsFixture","args":[[{"kind":"input","content":"one","id":"repeat"},{"kind":"input","content":"two","id":"repeat"}]]}
+{"fn":"materializeStagedDraftsFixture","args":[[],"view-a",1]}
+{"fn":"materializeStagedDraftsFixture","args":[[{"kind":"input","content":"first","id":null},{"kind":"notice","content":"next"},{"kind":"input","content":"last","id":"submission-2"}],"view-a",401]}
+{"fn":"materializeStagedDraftsFixture","args":[[{"kind":"notice","content":"first"}],"view-b",0]}
+{"fn":"materializeStagedDraftsFixture","args":[[{"kind":"notice","content":"last"},{"kind":"notice","content":"not addressable"}],"view-b",9007199254740991]}
+{"fn":"materializeStagedDraftsFixture","args":[[],"",1]}

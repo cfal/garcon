@@ -8,6 +8,11 @@ type Stage = {
   file: string;
   mode: 'stage' | 'unstage';
   contextLines: number;
+  reviewMode?: 'working' | 'staged';
+  reviewContext?: number;
+  bodyFingerprint?: string;
+  patchDigest?: string;
+  expectError?: boolean;
 } & ({ hunkIndex: number } | { selection: { lineIndices: number[] } });
 
 type Input = { snapshots: GitWorkbenchSnapshotOptions[] } | { stage: Stage[] };
@@ -29,10 +34,11 @@ if ('snapshots' in input) {
   }
 } else {
   for (const step of input.stage) {
+    const { reviewMode, reviewContext, bodyFingerprint, patchDigest, expectError, ...operation } = step;
     const snapshot = await git.getWorkbenchSnapshot({
       projectPath: step.projectPath,
-      mode: step.mode === 'stage' ? 'working' : 'staged',
-      context: step.contextLines,
+      mode: reviewMode ?? (step.mode === 'stage' ? 'working' : 'staged'),
+      context: reviewContext ?? step.contextLines,
       selectedFile: step.file,
     });
     if (snapshot.status !== 'ready') throw new Error('expected a workbench snapshot');
@@ -43,8 +49,18 @@ if ('snapshots' in input) {
     if (response.status !== 'ready') throw new Error('expected a review body');
     const body = response.files[step.file];
     if (!body?.patchDigest) throw new Error('expected a patch digest');
-    const request = { ...step, documentId, bodyFingerprint: body.bodyFingerprint, patchDigest: body.patchDigest };
-    output.push('hunkIndex' in request ? await git.stageHunk(request) : await git.stageSelection(request));
+    const request = {
+      ...operation, documentId, bodyFingerprint: bodyFingerprint ?? body.bodyFingerprint,
+      patchDigest: patchDigest ?? body.patchDigest,
+    };
+    try {
+      const result = 'hunkIndex' in request ? await git.stageHunk(request) : await git.stageSelection(request);
+      if (expectError) throw new Error('stage operation unexpectedly succeeded');
+      output.push(result);
+    } catch (error) {
+      if (!expectError || !(error instanceof Error) || !('code' in error)) throw error;
+      output.push({ code: error.code, message: error.message });
+    }
   }
 }
 console.log(JSON.stringify(output));
