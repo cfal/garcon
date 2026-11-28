@@ -22,7 +22,10 @@ use garcon_agent_codex::app_server::{
     request_builders::{
         CodexThreadConfiguration, CodexThreadSettings, thread_settings_target_from_snapshot,
     },
-    runtime::{thread_settings::CodexSourceThreadSettings, utility::CodexAppServerUtility},
+    runtime::{
+        interrupt::CodexInterrupt, thread_settings::CodexSourceThreadSettings,
+        utility::CodexAppServerUtility,
+    },
     steering::classify_codex_steer_rejection,
 };
 use garcon_agent_codex::slash_command_discovery::CodexSkillDiscovery;
@@ -113,6 +116,52 @@ fn steer_options() -> CodexSteerRequestOptions<'static> {
         prepare_delivery: async { Ok(()) }.boxed_local(),
         acknowledgement_timeout: Some(Duration::from_secs(1)),
     }
+}
+
+#[tokio::test]
+async fn interrupt_acknowledgements_coalesce_and_cannot_reopen_a_finished_turn() {
+    LocalSet::new()
+        .run_until(async {
+            for (mode, accepted, reopen) in [
+                ("", true, false),
+                ("interrupt-reject", false, true),
+                ("interrupt-terminal-reject", false, false),
+            ] {
+                let fixture = Fixture::new(FIXTURE);
+                let client = CodexAppServerClient::new(fixture.options(mode));
+                let interrupt = Rc::new(CodexInterrupt::default());
+                let detach = client.on_event(Rc::new({
+                    let interrupt = interrupt.clone();
+                    move |event| {
+                        if matches!(event, CodexAppServerEvent::Notification(note) if note.method == "turn/completed") {
+                            interrupt.clear();
+                        }
+                        Ok(())
+                    }
+                }));
+                let logger = Rc::new(DiscoveryLogger::default());
+                let reopened = Rc::new(Cell::new(false));
+                let first = interrupt.begin(client.clone(), "thread".into(), "turn".into(), logger.clone(), {
+                    let reopened = reopened.clone();
+                    move || reopened.set(true)
+                });
+                let second = interrupt.begin(
+                    client.clone(), "thread".into(), "turn".into(), logger.clone(),
+                    || panic!("coalesced acknowledgement replaced the original"),
+                );
+                assert_eq!(tokio::join!(first, second), (accepted, accepted));
+                assert_eq!(interrupt.current().is_some(), accepted);
+                client.shutdown().await.unwrap();
+                detach();
+                assert_eq!(reopened.get(), reopen);
+                let frames: Vec<_> = fixture.frames().into_iter()
+                    .filter(|frame| frame["method"] == "turn/interrupt").collect();
+                assert_eq!(frames.len(), 1);
+                assert_eq!(frames[0]["params"], json!({"threadId":"thread","turnId":"turn"}));
+                assert_eq!(logger.0.borrow().len(), usize::from(!accepted));
+            }
+        })
+        .await;
 }
 
 fn settings_source(client: CodexAppServerClient, timeout: Duration) -> CodexSourceThreadSettings {
@@ -274,19 +323,74 @@ fn utility_fixture(
     )
 }
 
+async fn original_utility_trace(
+    fixture: &Fixture,
+    native_path: &std::path::Path,
+    mode: &str,
+) -> String {
+    let output = tokio::process::Command::new("bun")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/oracles/app-server-utility.ts"
+        ))
+        .arg(&fixture.command)
+        .arg(native_path)
+        .arg(&fixture.trace)
+        .arg(mode)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let original = fs::read_to_string(&fixture.trace).unwrap();
+    fs::remove_file(&fixture.trace).unwrap();
+    original
+}
+
+#[tokio::test]
+async fn utility_rejects_unsupported_requests_and_denies_unowned_approvals() {
+    LocalSet::new().run_until(async {
+        let fixture = Rc::new(Fixture::new(FIXTURE));
+        let mode = "utility-server-requests";
+        let original = original_utility_trace(&fixture, &fixture._directory.path().join("unused.jsonl"), mode).await;
+        let logger = Rc::new(DiscoveryLogger::default());
+        let utility = CodexAppServerUtility::new(
+            Rc::new({
+                let fixture = fixture.clone();
+                move || CodexAppServerClient::new(fixture.options(mode))
+            }),
+            logger.clone(),
+            NativePathDiscoveryRefreshLimiter::default(),
+        );
+        let result = tokio::time::timeout(Duration::from_secs(3), utility.resolve_native_path(Some("thread"))).await;
+        utility.shutdown().await;
+        assert_eq!(result.expect("utility did not answer the peer requests").unwrap(), None);
+        assert_eq!(fs::read_to_string(&fixture.trace).unwrap(), original);
+        let frames = fixture.frames();
+        assert!(frames.contains(&json!({
+            "id":"unsupported", "error":{"code":-32601,"message":"Unsupported Codex app-server request: synthetic/unknown"},
+        })));
+        assert!(frames.contains(&json!({"id":101,"result":{"decision":"cancel"}})));
+        let mut warnings = logger.0.borrow().clone();
+        warnings.sort();
+        assert_eq!(warnings, [
+            "Codex app-server emitted invalid JSON.",
+            "Codex app-server stderr",
+            "Dropped an unowned Codex approval request",
+        ]);
+    }).await;
+}
+
 #[tokio::test]
 async fn retries_retryable_utility_app_server_overloads_and_reads_the_next_page() {
     LocalSet::new().run_until(async {
         let fixture = Rc::new(Fixture::new(FIXTURE));
         let path = fixture._directory.path().join("synthetic.jsonl");
         tokio::fs::write(&path, "{}\n").await.unwrap();
-        let output = tokio::process::Command::new("bun")
-            .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/oracles/app-server-utility.ts"))
-            .arg(&fixture.command).arg(&path).arg(&fixture.trace)
-            .output().await.unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        let original = fs::read_to_string(&fixture.trace).unwrap();
-        fs::remove_file(&fixture.trace).unwrap();
+        let original = original_utility_trace(&fixture, &path, "utility-overload").await;
         let utility = utility_fixture(fixture.clone(), "utility-overload", path.clone());
         let (left, right) = tokio::join!(utility.resolve_native_path(Some("thread")), utility.resolve_native_path(Some("thread")));
         assert_eq!(left.unwrap().as_deref(), path.to_str());

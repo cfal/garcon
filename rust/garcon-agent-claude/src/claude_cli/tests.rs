@@ -23,6 +23,58 @@ impl AgentLogger for Logger {
     fn error(&self, _: &str, _: Option<&IndexMap<String, Opaque>>) {}
 }
 
+#[test]
+fn api_retry_logs_javascript_numbers_and_keeps_signed_zero_until_serialization() {
+    #[derive(Default)]
+    struct RetryLogger(RefCell<Vec<IndexMap<String, Opaque>>>);
+    impl AgentLogger for RetryLogger {
+        fn debug(&self, _: &str, _: Option<&IndexMap<String, Opaque>>) {}
+        fn info(&self, _: &str, _: Option<&IndexMap<String, Opaque>>) {}
+        fn warn(&self, message: &str, fields: Option<&IndexMap<String, Opaque>>) {
+            assert_eq!(message, "Claude API request is retrying");
+            self.0.borrow_mut().push(fields.unwrap().clone());
+        }
+        fn error(&self, _: &str, _: Option<&IndexMap<String, Opaque>>) {}
+    }
+
+    let logger = Rc::new(RetryLogger::default());
+    let runtime = ClaudeCli::new(Rc::new(|| "not-spawned".into()), logger.clone());
+    let session = Rc::new(ClaudeRunningSession::new(options(Path::new("."))));
+    runtime
+        .begin_turn(&session, runtime_operation("run-1".into(), Rc::new(|_| {})))
+        .unwrap();
+    let retry = garcon_js::json::parse(
+        r#"{"type":"system","subtype":"api_retry","attempt":-0.0,"retry_delay_ms":0.000001,"error_status":1e21,"error":"synthetic retry"}"#,
+    )
+    .unwrap();
+    assert!(runtime.on_control_or_lifecycle(&session, &retry));
+
+    let warnings = logger.0.borrow();
+    let [details] = warnings.as_slice() else {
+        panic!("expected one retry warning");
+    };
+    assert_eq!(
+        serde_json::to_string(details).unwrap(),
+        concat!(
+            r#"{"chatId":"synthetic-chat","runId":"run-1","sessionId":"syntheti","processId":null,"matchedUserInput":false,"#,
+            r#""attempt":0,"maxRetries":null,"delayMs":0.000001,"errorStatus":1e+21,"error":"synthetic retry"}"#,
+        ),
+    );
+    let attempt = garcon_js::json::as_number(details["attempt"].as_value()).unwrap();
+    assert!(attempt.is_sign_negative());
+    drop(warnings);
+
+    let retry = garcon_js::json::parse(
+        r#"{"type":"system","subtype":"api_retry","retry_delay_ms":1.25,"error_status":529.0}"#,
+    )
+    .unwrap();
+    assert!(runtime.on_control_or_lifecycle(&session, &retry));
+    let warnings = logger.0.borrow();
+    let status = &warnings[1]["errorStatus"];
+    assert_eq!(serde_json::to_string(status).unwrap(), "529");
+    assert_eq!(serde_json::to_string(status.as_value()).unwrap(), "529.0");
+}
+
 #[tokio::test(start_paused = true)]
 async fn an_interrupt_receipt_replaces_the_receipt_deadline_with_a_completion_deadline() {
     LocalSet::new()
@@ -477,7 +529,8 @@ read -r close || exit 1
             }), decision: Some(decide), ..
         } = receive(&mut events).await else { panic!("expected structured question"); };
         assert_eq!(decide.permission_occurrence_id(), permission_occurrence_id);
-        let requested_tool = serde_json::to_value(requested_tool).unwrap();
+        let requested_tool: Value =
+            garcon_js::json::from_slice(&serde_json::to_vec(&requested_tool).unwrap()).unwrap();
         assert_eq!(requested_tool["type"], "ask-user-question-tool-use");
         assert_eq!(requested_tool["timestamp"], "1970-01-01T00:00:01.234Z");
         let answer = PermissionDecisionPayload {

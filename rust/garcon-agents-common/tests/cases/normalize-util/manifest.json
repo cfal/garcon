@@ -1,0 +1,24 @@
+{
+  "module": "server-agents/common/src/shared/normalize-util.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/normalize-util.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "normalizeTodoItems",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeToolInput",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeToolResultContent",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 67,
+  "sha256": "97811e9c0cdcf7e5e9167feec873146739a201767c5f865de12b5f2c52552066"
+}

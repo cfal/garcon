@@ -47,8 +47,10 @@ use crate::{
     staging_views::{StagingViews, encode_drafts, insert_encoded_rows, materialize_rows},
 };
 
+mod activity;
 mod anchors;
 mod bulk;
+mod cleanup;
 mod read_pages;
 pub use anchors::{TranscriptReadSignal, TranscriptWatermark};
 pub use bulk::StageViewInput;
@@ -75,6 +77,7 @@ pub struct TranscriptLedgerStore {
     state: RefCell<StoreState>,
     staging: Rc<StagingViews>,
     anchor_read_epoch: Cell<u64>,
+    activity_reads: activity::ActivityReads,
     create_view_id: Rc<dyn Fn() -> LedgerResult<TranscriptViewId>>,
     now: Rc<dyn Fn() -> LedgerResult<String>>,
 }
@@ -117,6 +120,7 @@ impl TranscriptLedgerStore {
             }),
             staging,
             anchor_read_epoch: Cell::new(0),
+            activity_reads: activity::ActivityReads::default(),
             create_view_id,
             now: options
                 .now
@@ -513,6 +517,7 @@ impl TranscriptLedgerStore {
     }
 
     pub fn close_chat(&self, chat_id: &str) -> LedgerResult<()> {
+        self.activity_reads.retire(chat_id);
         self.staging.abandon(chat_id);
         let mut state = self.state.borrow_mut();
         let cache = &mut state.connections;
@@ -526,6 +531,7 @@ impl TranscriptLedgerStore {
 
     pub fn close(&self) -> LedgerResult<()> {
         self.anchor_read_epoch.set(self.anchor_read_epoch.get() + 1);
+        self.activity_reads.close();
         self.staging.abandon_all();
         let mut state = self.state.borrow_mut();
         let cache = &mut state.connections;
@@ -689,14 +695,17 @@ pub(crate) fn assert_current<'a>(
 }
 
 fn validate_chat_directory_name(chat_id: &str) -> LedgerResult<()> {
-    if chat_id.is_empty()
-        || !chat_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-    {
+    if !is_chat_directory_name(chat_id) {
         return Err(type_error("Chat ID is not a safe ledger directory name"));
     }
     Ok(())
+}
+
+fn is_chat_directory_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
 pub(crate) fn validate_content_start_ordinal(value: u64, row_count: usize) -> LedgerResult<()> {

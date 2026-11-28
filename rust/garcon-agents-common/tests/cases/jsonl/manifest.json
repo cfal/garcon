@@ -1,0 +1,13 @@
+{
+  "module": "server-agents/common/src/lib/jsonl.ts",
+  "tests": [
+    "server-agents/common/src/lib/__tests__/jsonl.test.js"
+  ],
+  "inputs": "rust/garcon-agents-common/tests/inputs/jsonl.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 201,
+  "sha256": "51803c27f8fbbb7dbf5ce9573594822b77e6b05c127b6c7e913bb51039505d23"
+}

@@ -1,3 +1,4 @@
+mod activity_startup;
 mod adoption;
 mod anchor_cases;
 mod anchor_views;

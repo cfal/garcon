@@ -1,0 +1,4 @@
+{"fn":"normalizeToolInput","args":["{\"a\":\"\\ud800\"}"],"result":{"a":"\ufffd"},"reason":"unpaired surrogate in a result"}
+{"fn":"normalizeToolResultContent","args":["{\"a\":\"\\ud800\"}"],"result":{"a":"\ufffd"},"reason":"unpaired surrogate in a result"}
+{"fn":"normalizeToolInput","args":["{\"n\":1e400}"],"result":{"raw":"{\"n\":1e400}"},"reason":"number beyond the double range is a parse error at the JSON boundary"}
+{"fn":"normalizeToolResultContent","args":["[1e400]"],"result":{"raw":"[1e400]"},"reason":"number beyond the double range is a parse error at the JSON boundary"}
