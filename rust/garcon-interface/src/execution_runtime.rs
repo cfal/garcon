@@ -1,13 +1,23 @@
 //! Ports `server-agents/interface/src/contracts/execution-runtime.ts`.
 
+use std::rc::Rc;
+
 use async_trait::async_trait;
-use garcon_contract::api_providers::{ApiProtocol, ModelDiscoveryKind};
+use garcon_contract::api_providers::{
+    ApiProtocol, ApiProviderModelDiscoveryResponse, ModelDiscoveryKind,
+};
 use garcon_contract::executor_path::ExecutorPath;
 use garcon_contract::project_resolution::ProjectResolution;
 use garcon_contract::tickets::TicketProjectDefault;
 use serde::{Deserialize, Serialize};
 
-use crate::resources::{ExecutorCallOptions, ExecutorResult};
+use crate::{
+    files::ExecutionFilesService,
+    git::{ExecutionGhService, ExecutionGitService},
+    integration::AgentIntegration,
+    resources::{ExecutorCallOptions, ExecutorResult},
+    terminals::ExecutionTerminalService,
+};
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -94,4 +104,43 @@ pub struct ExecutorInfo {
     pub integration_ids: Vec<String>,
     pub project_base_path: ExecutorPath,
     pub services: ExecutorServices,
+}
+
+#[async_trait(?Send)]
+pub trait ExecutionRuntimeApi {
+    fn id(&self) -> &str;
+    fn availability(&self) -> ExecutorAvailability;
+    async fn get_info(&self, options: Option<ExecutorCallOptions>) -> ExecutorResult<ExecutorInfo>;
+    async fn get_agent_integration(
+        &self,
+        agent_id: &str,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<Rc<AgentIntegration>>;
+    async fn get_project_service(
+        &self,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<Rc<dyn ExecutionProjectService>>;
+    async fn discover_api_provider_models(
+        &self,
+        request: ApiProviderDiscoveryRequest,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<ApiProviderModelDiscoveryResponse>;
+    async fn get_files_service(
+        &self,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<Rc<dyn ExecutionFilesService>>;
+    async fn get_git_service(
+        &self,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<Rc<dyn ExecutionGitService>>;
+    async fn get_gh_service(
+        &self,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<Rc<dyn ExecutionGhService>>;
+    async fn get_terminal_service(
+        &self,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<Rc<dyn ExecutionTerminalService>>;
+    fn on_availability_changed(&self, listener: Rc<dyn Fn(ExecutorAvailability)>) -> Box<dyn Fn()>;
+    async fn dispose(&self) -> ExecutorResult<()>;
 }

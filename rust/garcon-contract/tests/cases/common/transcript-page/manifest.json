@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-contract/tests/support/transcript_page_oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/transcript-page.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 59,
+  "sha256": "56349fc15b6de56d2eea47c5fe9633e7580ebde5853894e288fa5162f922efcb"
+}

@@ -1,6 +1,6 @@
 //! Structural comparison of a recorded result with a port's result, with the
-//! rules of `rust/parity/src/wildcard.ts`: object key order is not compared,
-//! and a string that contains `[..]` matches any run of characters in place
+//! rules of `rust/parity/src/wildcard.ts`: a string that contains `[..]`
+//! matches any run of characters in place
 //! of it, while a string that is exactly `[..]` matches any value. Where both
 //! recording runs varied the same way, a wildcard is written with its shape:
 //! `[..hex:44]` matches exactly 44 lowercase hexadecimal characters.
@@ -244,6 +244,36 @@ pub fn first_difference_exact(expected: &Value, actual: &Value) -> Option<Differ
     difference(expected, actual, "$", Comparison::Exact)
 }
 
+/// Compares the serialized object order after structural comparison passed.
+pub(crate) fn first_key_order_difference(expected: &Value, actual: &Value) -> Option<Difference> {
+    key_order_difference(expected, actual, "$")
+}
+
+fn key_order_difference(expected: &Value, actual: &Value, path: &str) -> Option<Difference> {
+    match (expected, actual) {
+        (Value::Object(entries), Value::Object(others)) => {
+            // A recorded undefined property can be absent at the JSON boundary.
+            let keys = || entries.keys().filter(|key| others.contains_key(*key));
+            if keys().ne(others.keys()) {
+                let expected = Value::Array(keys().cloned().map(Value::String).collect());
+                let actual = Value::Array(others.keys().cloned().map(Value::String).collect());
+                return Some(Difference::new(path, "key-order", &expected, &actual));
+            }
+            keys().find_map(|key| {
+                key_order_difference(&entries[key], &others[key], &child_path(path, key))
+            })
+        }
+        (Value::Array(items), Value::Array(others)) => items
+            .iter()
+            .zip(others)
+            .enumerate()
+            .find_map(|(index, (item, other))| {
+                key_order_difference(item, other, &array_path(path, index))
+            }),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Comparison {
     RecordedResult,
@@ -374,6 +404,27 @@ mod tests {
         let swapped = difference(json!([1, 2]), json!([2, 1])).expect("ordered arrays differ");
         assert_eq!((swapped.path.as_str(), swapped.kind), ("$[0]", "value"));
         assert_eq!(found(json!([1, 2]), json!([1])).kind, "length");
+    }
+
+    #[test]
+    fn finds_the_first_serialized_object_order_difference_in_a_nested_result() {
+        let expected = json!({"rows":[{"1":1,"2":2,"z":0,"a":1}]});
+        let actual = json!({"rows":[{"2":2,"1":1,"a":1,"z":0}]});
+        assert!(first_difference(&expected, &actual).is_none());
+        let order = first_key_order_difference(&expected, &actual).unwrap();
+        assert_eq!(order.kind, "key-order");
+        assert_eq!(order.path, "$.rows[0]");
+        assert_eq!(order.expected, r#"["1","2","z","a"]"#);
+        assert_eq!(order.actual, r#"["2","1","a","z"]"#);
+    }
+
+    #[test]
+    fn order_comparison_leaves_discarded_and_wildcard_values_open() {
+        let expected =
+            json!({"z": "[..]", "discarded": markers::undefined(), "a": [markers::undefined()]});
+        let actual = json!({"z": {"any": 1, "order": 2}, "a": [null]});
+        assert!(first_difference(&expected, &actual).is_none());
+        assert!(first_key_order_difference(&expected, &actual).is_none());
     }
 
     #[test]

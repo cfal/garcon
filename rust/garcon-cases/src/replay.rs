@@ -113,6 +113,7 @@ struct Failure<'a> {
 struct Report<'a> {
     module: String,
     failures: Vec<Failure<'a>>,
+    order_issues: Vec<Failure<'a>>,
     stats: Stats,
 }
 
@@ -125,27 +126,41 @@ fn in_case(difference: Difference) -> Difference {
     }
 }
 
-fn check_result(
-    case: &RecordedCase,
+fn check_result<'a>(
+    case: &'a RecordedCase,
     actual: &Value,
     known_differences: &mut usize,
+    order_issues: Option<&mut Vec<Failure<'a>>>,
 ) -> Option<Difference> {
-    let original = compare::first_difference(&case.result, actual).map(in_case);
-    let Some(known) = &case.known else {
-        return original;
+    let original = compare::first_difference(&case.result, actual);
+    let expected = if let Some(known) = &case.known {
+        if original.is_none() {
+            return Some(Difference {
+                path: "$.result".to_owned(),
+                kind: "stale-known-difference",
+                expected: format!("a difference still present ({})", known.reason),
+                actual: "matches the original recording".to_owned(),
+            });
+        }
+        if let Some(difference) = compare::first_difference_exact(&known.result, actual) {
+            return Some(in_case(difference));
+        }
+        *known_differences += 1;
+        &known.result
+    } else {
+        if let Some(difference) = original {
+            return Some(in_case(difference));
+        }
+        &case.result
     };
-    if original.is_none() {
-        return Some(Difference {
-            path: "$.result".to_owned(),
-            kind: "stale-known-difference",
-            expected: format!("a difference still present ({})", known.reason),
-            actual: "matches the original recording".to_owned(),
+    if let Some(issues) = order_issues
+        && let Some(difference) = compare::first_key_order_difference(expected, actual)
+    {
+        issues.push(Failure {
+            case,
+            difference: in_case(difference),
         });
     }
-    if let Some(difference) = compare::first_difference_exact(&known.result, actual) {
-        return Some(in_case(difference));
-    }
-    *known_differences += 1;
     None
 }
 
@@ -160,19 +175,29 @@ fn check<'a, F>(
     recording: &'a manifest::Recording,
     dispatch: &mut F,
     with_wildcards: usize,
+    audit_key_order: bool,
 ) -> Report<'a>
 where
     F: FnMut(&str, &[Value]) -> Result<Value, CaseError>,
 {
     let mut failures: Vec<Failure<'a>> = Vec::new();
+    let mut order_issues = Vec::new();
     let mut known_differences = 0;
     for case in &recording.cases {
         let difference = match dispatch(&case.function, &case.args) {
-            Ok(value) => check_result(case, &value, &mut known_differences),
+            Ok(value) => check_result(
+                case,
+                &value,
+                &mut known_differences,
+                audit_key_order.then_some(&mut order_issues),
+            ),
             Err(error) => match &error.outcome {
-                Outcome::Error { .. } | Outcome::Thrown(_) => {
-                    check_result(case, &error.recorded(), &mut known_differences)
-                }
+                Outcome::Error { .. } | Outcome::Thrown(_) => check_result(
+                    case,
+                    &error.recorded(),
+                    &mut known_differences,
+                    audit_key_order.then_some(&mut order_issues),
+                ),
                 Outcome::Unhandled => Some(Difference {
                     path: "$".to_owned(),
                     kind: "unhandled",
@@ -201,6 +226,7 @@ where
             known_differences,
         },
         failures,
+        order_issues,
     }
 }
 
@@ -317,7 +343,32 @@ where
         "{}: expected {expected_wildcards} wildcard cases, found {count}",
         recording.module,
     );
-    let report = check(&recording, &mut dispatch, count);
+    let audit_key_order =
+        std::env::var_os("GARCON_CASES_AUDIT_KEY_ORDER").is_some_and(|value| value == "1");
+    let report = check(&recording, &mut dispatch, count, audit_key_order);
+    if audit_key_order {
+        let directory = cases_dir.as_ref();
+        let directory = directory
+            .canonicalize()
+            .unwrap_or_else(|_| directory.to_owned());
+        let issues: Vec<_> = report
+            .order_issues
+            .iter()
+            .map(|issue| {
+                json!({
+                    "case": issue.case.id, "path": issue.difference.path,
+                    "expected": issue.difference.expected, "actual": issue.difference.actual,
+                })
+            })
+            .collect();
+        println!(
+            "KEY_ORDER_AUDIT {}",
+            json!({
+                "directory": directory.to_string_lossy(), "module": report.module, "cases": report.stats.total,
+                "structuralFailures": report.failures.len(), "orderOnly": issues,
+            })
+        );
+    }
     if report.failures.is_empty() {
         println!("{}", summary(&report));
         return report.stats;
@@ -335,7 +386,33 @@ mod tests {
     where
         F: FnMut(&str, &[Value]) -> Result<Value, CaseError>,
     {
-        super::check(recording, dispatch, wildcard_cases(recording).count())
+        super::check(
+            recording,
+            dispatch,
+            wildcard_cases(recording).count(),
+            false,
+        )
+    }
+
+    #[test]
+    fn audit_counts_only_cases_that_would_otherwise_pass() {
+        let (_dir, recording) = recording(&[
+            ("orderOnly", json!([]), json!({"z": 1, "a": 2})),
+            ("valueAndOrder", json!([]), json!({"z": 1, "a": 2})),
+        ]);
+        let report = super::check(
+            &recording,
+            &mut |function, _| {
+                Ok(json!({"a": 2, "z": if function == "orderOnly" { 1 } else { 7 }}))
+            },
+            0,
+            true,
+        );
+        assert_eq!(report.stats.passed, 1);
+        assert_eq!(report.failures[0].difference.kind, "value");
+        assert_eq!(report.order_issues.len(), 1);
+        assert_eq!(report.order_issues[0].case.function, "orderOnly");
+        assert_eq!(report.order_issues[0].difference.path, "$.result");
     }
 
     // A recording on disk with the given cases of one function.
