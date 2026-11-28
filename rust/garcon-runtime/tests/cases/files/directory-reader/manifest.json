@@ -1,0 +1,11 @@
+{
+  "module": "server/runtime/files/directory-reader.ts",
+  "tests": [],
+  "inputs": "rust/garcon-runtime/tests/inputs/directory-reader.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 10,
+  "sha256": "3b16a4a0e848973e95f7debe0ff07698c1a7ab61fe18354645b840ab817c8838"
+}

@@ -59,7 +59,19 @@ the user corrects how a port behaves, the correction is added under
   JSON boundary" and the port's exact result; it needs no further approval.
   Never make a validator reject a genuine U+FFFD, and never add a lossless
   string type to carry surrogates. A function whose original works on UTF-16
-  code units is still ported and tested on code units.
+  code units is still ported and tested on code units. The same holds for a
+  result: where slicing by code units leaves an unpaired surrogate in what the
+  original returns, the port returns U+FFFD in its place and the case is
+  listed with the reason "unpaired surrogate in a result".
+- Prototype lookups (standing decision, 2026-11-28, ADR-028). Where the
+  original indexes a plain object with an untrusted key and so returns an
+  inherited member (`table["__proto__"]`, `"constructor"`, `"toString"`),
+  or assigns through such a key and changes a prototype instead of adding an
+  entry, the port looks up and stores own keys only and takes the original's
+  normal path for a missing or present key. Each recorded case that differs
+  is listed in the unit's `known-differences.jsonl` with the reason
+  "prototype lookup in the original" and the port's exact result; it needs
+  no further approval. The port never emulates a prototype.
 - A request header is read as Fetch's `headers.get()` returns it: every field
   of that name, each trimmed, joined with `", "`. Reading only the first
   field accepts requests the original refuses.
