@@ -1404,6 +1404,7 @@ dependencies = [
  "base64 0.23.1",
  "encoding_rs",
  "futures",
+ "garcon-agents-common",
  "garcon-base",
  "garcon-cases",
  "garcon-contract",
@@ -1423,6 +1424,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-util",
+ "url",
  "uuid",
  "windows-sys 0.61.2",
 ]
