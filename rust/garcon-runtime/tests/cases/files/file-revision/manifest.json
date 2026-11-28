@@ -1,0 +1,11 @@
+{
+  "module": "server/runtime/files/file-revision.ts",
+  "tests": [],
+  "inputs": "rust/garcon-runtime/tests/inputs/file-revision.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 3,
+  "sha256": "da115a4a10cd8a642c2231f417f6a46d7970fc1b43a09058a32d8ec9f3c43390"
+}

@@ -1,0 +1,10 @@
+{"fn":"relativeFilePath","args":["/synthetic/project","/synthetic/project/src/one.ts"]}
+{"fn":"relativeFilePath","args":["/synthetic/project","/synthetic/project"]}
+{"fn":"relativeFilePath","args":["/synthetic/project","/synthetic/project/nested/../file"]}
+{"fn":"relativeFilePath","args":["/synthetic/project","/synthetic/project/literal\\name"]}
+{"fn":"relativeFilePath","args":["/synthetic/project","/synthetic/other"]}
+{"fn":"relativeFilePath","args":["/synthetic/project","/synthetic/project/λ/😀"]}
+{"fn":"fileBreadcrumbs","args":["/","/synthetic/project"]}
+{"fn":"fileBreadcrumbs","args":["/synthetic/project","/synthetic/project"]}
+{"fn":"fileBreadcrumbs","args":["/synthetic/project","/synthetic/project/λ/😀"]}
+{"fn":"fileBreadcrumbs","args":["/synthetic/project","/synthetic/project/nested/../../other"]}

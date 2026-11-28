@@ -1,0 +1,33 @@
+{"fn":"toolResultTextPart","args":[null]}
+{"fn":"toolResultTextPart","args":[{"type":"text","text":"x","extra":true}]}
+{"fn":"toolResultTextPart","args":[{"type":"content","content":{"type":"text","text":""}}]}
+{"fn":"toolResultTextPart","args":[{"type":"content","content":{"type":"text","text":""},"extra":1}]}
+{"fn":"toolResultTextPart","args":[{"type":"content","content":{"type":"image"}}]}
+{"fn":"isPlainTextPart","args":[null]}
+{"fn":"isPlainTextPart","args":[{"type":"text","text":""}]}
+{"fn":"isPlainTextPart","args":[{"type":"text","text":"x","extra":true}]}
+{"fn":"isPlainTextPart","args":[{"type":"content","content":{"type":"text","text":""}}]}
+{"fn":"plainToolResultTextPart","args":[null]}
+{"fn":"plainToolResultTextPart","args":[{"type":"text","text":"x"}]}
+{"fn":"plainToolResultTextPart","args":[{"type":"content","content":{"type":"text","text":""}}]}
+{"fn":"plainToolResultTextPart","args":[{"type":"content","content":{"type":"text","text":""},"extra":1}]}
+{"fn":"plainToolResultTextPart","args":[{"type":"content","content":{"type":"text","text":"","description":"x"}}]}
+{"fn":"isEmptyToolResult","args":[null]}
+{"fn":"isEmptyToolResult","args":[[""]]}
+{"fn":"isEmptyToolResult","args":[{}]}
+{"fn":"isEmptyToolResult","args":[{"raw":" \n\ufeff"}]}
+{"fn":"isEmptyToolResult","args":[{"raw":"\u0085"}]}
+{"fn":"isEmptyToolResult","args":[{"rawOutput":{"output":" \t "}}]}
+{"fn":"isEmptyToolResult","args":[{"rawOutput":{"output":"","extra":1}}]}
+{"fn":"isEmptyToolResult","args":[{"rawOutput":{}}]}
+{"fn":"isEmptyToolResult","args":[{"content":[""]}]}
+{"fn":"isEmptyToolResult","args":[{"items":[{"type":"content","content":{"type":"text","text":""}}]}]}
+{"fn":"isEmptyToolResult","args":[{"items":[{"type":"text","text":"","more":true}]}]}
+{"fn":"isEmptyToolResult","args":[{"items":[{"type":"text","text":"\ud83c\udf32"}]},{"maxChars":1,"maxBlocks":1}]}
+{"fn":"isEmptyToolResult","args":[{"raw":"\ud83c\udf32"},{"maxChars":1,"maxBlocks":0}]}
+{"fn":"isEmptyToolResult","args":[{"items":[{"type":"text","text":"\ud83c\udf32"}]},{"maxChars":0,"maxBlocks":1}]}
+{"fn":"isEmptyToolResult","args":[{"items":[{"type":"text","text":" \n"},{"type":"text","text":"X"}]},{"maxChars":2,"maxBlocks":5}]}
+{"fn":"isEmptyToolResult","args":[{"items":[{"type":"text","text":" "},{"type":"text","text":"X"}]},{"maxChars":2,"maxBlocks":1}]}
+{"fn":"isEmptyToolResult","args":[{"items":[{"type":"text","text":" "},{"type":"text","text":"X"}]},{"maxChars":2,"maxBlocks":2}]}
+{"fn":"isEmptyToolResult","args":[{"items":[{"type":"text","text":"x"}]},{"maxChars":-1,"maxBlocks":2}]}
+{"fn":"isEmptyToolResult","args":[{"raw":"\ud83d\ude00 "},{"maxChars":-2,"maxBlocks":0}]}

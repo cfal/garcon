@@ -1,0 +1,12 @@
+{
+  "module": "common/tool-result-message.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/tool-result-message.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 16,
+  "sha256": "00c2e5e5c044a6d9d664809f372da154f1737a8e1ba8b76b1ec7ebc42d425e54"
+}

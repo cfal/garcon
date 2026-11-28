@@ -1,0 +1,78 @@
+{
+  "module": "common/execution-defaults.ts",
+  "tests": [
+    "common/__tests__/execution-defaults.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/execution-defaults.jsonl",
+  "guards": [
+    {
+      "fn": "executionDefaultsForAgent",
+      "argument": 0,
+      "guard": "rust/garcon-contract/tests/inputs/common/execution-defaults-guards.ts#executionDefaults",
+      "dropped": 95,
+      "kept": 32
+    },
+    {
+      "fn": "normalizeSupportedPermissionMode",
+      "argument": 1,
+      "guard": "rust/garcon-contract/tests/inputs/common/execution-defaults-guards.ts#permissionModes",
+      "dropped": 58,
+      "kept": 0
+    },
+    {
+      "fn": "normalizeSupportedThinkingMode",
+      "argument": 1,
+      "guard": "rust/garcon-contract/tests/inputs/common/execution-defaults-guards.ts#thinkingModes",
+      "dropped": 58,
+      "kept": 0
+    },
+    {
+      "fn": "isThinkingModeSupported",
+      "argument": 0,
+      "guard": "common/chat-modes.ts#isThinkingMode",
+      "dropped": 74,
+      "kept": 0
+    },
+    {
+      "fn": "isThinkingModeSupported",
+      "argument": 1,
+      "guard": "rust/garcon-contract/tests/inputs/common/execution-defaults-guards.ts#thinkingModes",
+      "dropped": 58,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "executionDefaultsForAgent",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeSupportedPermissionMode",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeSupportedPermissionMode",
+      "argument": 1
+    },
+    {
+      "fn": "normalizeSupportedThinkingMode",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeSupportedThinkingMode",
+      "argument": 1
+    },
+    {
+      "fn": "isThinkingModeSupported",
+      "argument": 1
+    },
+    {
+      "fn": "isPermissionModeSupported",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 135,
+  "sha256": "3c662de8a150e530e0fd0be63c984a47cedaa2dcb9cfb57cc86a194245443a76"
+}

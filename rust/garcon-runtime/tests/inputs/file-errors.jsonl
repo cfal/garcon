@@ -1,0 +1,12 @@
+{"fn":"mapFileOperationError","args":["boundary"]}
+{"fn":"mapFileOperationError","args":["ENOENT"]}
+{"fn":"mapFileOperationError","args":["ENOTDIR"]}
+{"fn":"mapFileOperationError","args":["EACCES"]}
+{"fn":"mapFileOperationError","args":["EPERM"]}
+{"fn":"mapFileOperationError","args":["ELOOP"]}
+{"fn":"mapDirectoryCreationError","args":["EEXIST"]}
+{"fn":"mapDirectoryCreationError","args":["ENAMETOOLONG"]}
+{"fn":"mapDirectoryCreationError","args":["EINVAL"]}
+{"fn":"mapDirectoryCreationError","args":["EROFS"]}
+{"fn":"revisionConflict","args":[]}
+{"fn":"creationUnsupported","args":[]}

@@ -1,0 +1,89 @@
+{
+  "module": "common/start-selection.ts",
+  "tests": [
+    "common/__tests__/start-selection.test.js",
+    "common/__tests__/start-selection-native.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/start-selection.jsonl",
+  "guards": [
+    {
+      "fn": "resolveStartSelection",
+      "argument": 1,
+      "guard": "rust/garcon-contract/tests/inputs/common/start-selection-guards.ts#startSelectionSettings",
+      "dropped": 4,
+      "kept": 1
+    },
+    {
+      "fn": "resolveStartSelection",
+      "argument": 2,
+      "guard": "rust/garcon-contract/tests/inputs/common/start-selection-guards.ts#requestedStartSelection",
+      "dropped": 1,
+      "kept": 5
+    },
+    {
+      "fn": "new StartSelectionError",
+      "argument": 0,
+      "guard": "rust/garcon-contract/tests/inputs/common/start-selection-guards.ts#startSelectionErrorCode",
+      "dropped": 85,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "resolveModelSelection",
+      "argument": 0
+    },
+    {
+      "fn": "resolveModelSelection",
+      "argument": 2
+    },
+    {
+      "fn": "resolveStartSelection",
+      "argument": 0
+    },
+    {
+      "fn": "resolveStartSelection",
+      "argument": 1
+    },
+    {
+      "fn": "resolveStartSelection",
+      "argument": 2
+    },
+    {
+      "fn": "requireCatalogAgent",
+      "argument": 0
+    },
+    {
+      "fn": "requireCatalogModels",
+      "argument": 0
+    },
+    {
+      "fn": "requireCatalogProvider",
+      "argument": 0
+    },
+    {
+      "fn": "resolveCatalogModelSelection",
+      "argument": 0
+    },
+    {
+      "fn": "resolveCatalogModelSelection",
+      "argument": 1
+    },
+    {
+      "fn": "resolveCatalogModelSelection",
+      "argument": 2
+    },
+    {
+      "fn": "validateExplicitModes",
+      "argument": 0
+    },
+    {
+      "fn": "validateExplicitModes",
+      "argument": 2
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 553,
+  "sha256": "8fad58f4ecc3ad818b0a8c6ce4795ca3cba1c69a3d8af13c618bfb6b903b6012"
+}

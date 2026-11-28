@@ -1,0 +1,94 @@
+{
+  "module": "common/preambles.ts",
+  "tests": [
+    "common/__tests__/preambles.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/preambles.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isPreambleId",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeOrderedPreambleIds",
+      "argument": 0
+    },
+    {
+      "fn": "normalizePreambleSelectionChoice",
+      "argument": 0
+    },
+    {
+      "fn": "isPreambleSelectionUnavailableReason",
+      "argument": 0
+    },
+    {
+      "fn": "normalizePreamblesMutationResponse",
+      "argument": 0
+    },
+    {
+      "fn": "isPreambleBoundaryKind",
+      "argument": 0
+    },
+    {
+      "fn": "normalizePendingPreambleBoundary",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeChatPreambleSelection",
+      "argument": 0
+    },
+    {
+      "fn": "normalizePreambleSelectionReference",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeUnavailablePreambleSelectionReference",
+      "argument": 0
+    },
+    {
+      "fn": "normalizePreambleSelectionProjection",
+      "argument": 0
+    },
+    {
+      "fn": "isPreamblesInvalidationReason",
+      "argument": 0
+    },
+    {
+      "fn": "normalizePreambleTitle",
+      "argument": 0
+    },
+    {
+      "fn": "normalizePreambleScope",
+      "argument": 0
+    },
+    {
+      "fn": "normalizePreambleDefinitionInput",
+      "argument": 0
+    },
+    {
+      "fn": "normalizePreamble",
+      "argument": 0
+    },
+    {
+      "fn": "normalizePreamblesSnapshot",
+      "argument": 0
+    },
+    {
+      "fn": "renderPreambleContent",
+      "argument": 1
+    },
+    {
+      "fn": "samePreambleBoundary",
+      "argument": 0
+    },
+    {
+      "fn": "samePreambleBoundary",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 623,
+  "sha256": "21084350a6a0f3569201306db8b91255f1257e462399124836a4af2058c7125a"
+}
