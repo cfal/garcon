@@ -117,7 +117,7 @@ describe('a scenario run against the stand-in controller', () => {
       name: 'with-dependencies',
       description: 'Only marked 501s block dependent cases.',
       steps: [
-        { name: 'unported', http: { method: 'POST', path: '/api/v1/app/settings' } },
+        { name: 'unported', http: { method: 'GET', path: '/api/v1/app/settings' } },
         { name: 'direct', http: { method: 'GET', path: '/api/v1/things?etag={{unported.headers.etag}}' } },
         { name: 'transitive', http: { method: 'GET', path: '/api/v1/things?item={{direct.body.id}}' } },
         { name: 'ordinary-response', http: { method: 'GET', path: '/api/v1/auth/status' } },
@@ -140,7 +140,7 @@ describe('a scenario run against the stand-in controller', () => {
       })),
     }, runs, replay.name);
     const report = renderReport('native-probe', [result], true);
-    expect(report).toContain('| with-dependencies | 1/6 | 1/6 | 1 | 2 | 2 |');
+    expect(report).toContain('| with-dependencies | 1/6 | 1/6 | 1 | 2 | 0 | 2 |');
     expect(report).toContain('- with-dependencies/direct: blocked by unported');
     expect(report).toContain('- with-dependencies/transitive: blocked by direct');
     expect(replaySummary([result], report)).toContain('BLOCKED with-dependencies/transitive by direct');
@@ -149,6 +149,40 @@ describe('a scenario run against the stand-in controller', () => {
     const withoutMismatches = { ...result, cases: result.cases.slice(0, 4) };
     expect(replayPassed([withoutMismatches])).toBe(false);
     expect(replayPassed([withoutMismatches], true)).toBe(true);
+  });
+
+  test('only the first unavailable write changes how later differences are counted', async () => {
+    const replay: Scenario = {
+      name: 'blocked-write',
+      description: 'A blocked mutation can still make later state differ.',
+      steps: [
+        ...['GET', 'HEAD', 'OPTIONS'].map((method) => ({
+          name: method, http: { method, path: '/api/v1/app/settings' },
+        })),
+        { name: 'before', http: { method: 'GET', path: '/absent' } },
+        { name: 'blocked', http: { method: 'PATCH', path: '/api/v1/things/{{GET.body.id}}' } },
+        { name: 'later-write', http: { method: 'POST', path: '/api/v1/app/settings' } },
+        { name: 'after', http: { method: 'GET', path: '/absent' } },
+        { name: 'matches', http: { method: 'GET', path: '/api/v1/auth/status' } },
+        { name: 'missing', http: { method: 'GET', path: '/api/v1/things/{{matches.body.missing}}' } },
+      ],
+    };
+    const runs = await runScenario(repoRoot, { ...probe, command: [...probe.command, '--settings-unported'] }, replay);
+    const golden: Golden = { scenario: replay.name, cases: runs.map(({ name, capture }) => ({
+      name, expected: name === 'matches' ? capture : { status: 200 }, noise: [],
+    })).reverse() };
+    const result = compareScenario(golden, runs, replay.name);
+    const byName = new Map(result.cases.map((entry) => [entry.name, entry]));
+    expect(byName.get('before')?.difference).not.toBeNull();
+    expect(byName.get('blocked')?.unavailable).toEqual({ kind: 'blocked', supplier: 'GET' });
+    expect(byName.get('later-write')?.unavailable).toEqual({ kind: 'unported' });
+    expect(byName.get('after')?.unavailable).toMatchObject({ kind: 'after-unported-write', write: 'blocked' });
+    expect(byName.get('matches')).toMatchObject({ native: true, difference: null });
+    expect(byName.get('missing')?.unavailable).toMatchObject({
+      kind: 'after-unported-write', write: 'blocked', difference: { path: '$.request' },
+    });
+    expect(replayPassed([result], true)).toBe(false);
+    expect(renderReport('native-probe', [result], true)).toContain('| blocked-write | 1/9 | 1/9 | 4 | 1 | 2 | 1 |');
   });
 
   for (const clientRequestId of ['probe-request', undefined]) {
@@ -163,6 +197,7 @@ describe('a scenario run against the stand-in controller', () => {
           { name: 'direct', http: { method: 'GET', path: '/api/v1/things/{{socket.body.id}}' } },
           { name: 'transitive', http: { method: 'GET', path: '/api/v1/things/{{direct.body.id}}' } },
           { name: 'status', http: { method: 'GET', path: '/api/v1/auth/status' } },
+          { name: 'differs', http: { method: 'GET', path: '/absent' } },
         ],
       };
       const runs = await runScenario(repoRoot, { ...probe, command: [...probe.command, '--ws-unported'] }, replay);
@@ -170,16 +205,17 @@ describe('a scenario run against the stand-in controller', () => {
         type: clientRequestId === undefined ? 'ws-fault' : 'client-request-error', garconRsUnported: true,
       }] });
       expect(runs.map((run) => run.unavailable ?? null)).toEqual([
-        { kind: 'unported' }, { kind: 'blocked', supplier: 'socket' }, { kind: 'blocked', supplier: 'direct' }, null,
+        { kind: 'unported' }, { kind: 'blocked', supplier: 'socket' }, { kind: 'blocked', supplier: 'direct' }, null, null,
       ]);
       expect(runs.slice(1, 3).map((run) => run.capture)).toEqual([null, null]);
       const result = compareScenario({ scenario: replay.name, cases: replay.steps.map(({ name }) => ({
         name, expected: name === 'status' ? runs[3]!.capture : { status: 200 }, noise: [],
       })) }, runs, replay.name);
       const report = renderReport('socket-probe', [result], true);
-      expect(report).toContain('| socket-dependencies | 1/4 | 1/4 | 1 | 2 | 0 |');
+      expect(report).toContain('| socket-dependencies | 1/5 | 1/5 | 1 | 2 | 1 | 0 |');
       expect(report).toContain('socket-dependencies/direct: blocked by socket');
       expect(report).toContain('socket-dependencies/transitive: blocked by direct');
+      expect(report).toContain('socket-dependencies/differs: after unported write socket');
       expect(replayPassed([result])).toBe(false);
       expect(replayPassed([result], true)).toBe(true);
     });
