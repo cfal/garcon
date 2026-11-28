@@ -6,6 +6,7 @@
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { bunCheck, pinnedBunVersion } from './src/bun-version.js';
 import { commandBuild, originalBuild, type ServerBuild } from './src/environment.js';
 import { mergeRuns, readGolden, writeGolden } from './src/golden.js';
 import { compareScenario, renderReport, replaySummary, type ScenarioResult } from './src/report.js';
@@ -16,15 +17,17 @@ import { unitCli, UNIT_USAGE } from './src/unit/cli.js';
 const repoRoot = resolve(import.meta.dir, '../..');
 
 const usage = `Usage:
-  bun rust/parity/cli.ts record [--scenario <name>]
+  bun rust/parity/cli.ts record [--scenario <name>] [--any-bun]
   bun rust/parity/cli.ts replay [--build "<command>"] [--label <name>] [--scenario <name>] [--report <path>]
-  bun rust/parity/cli.ts unit record <module.ts> --tests <test file>... [--inputs <file.jsonl>] [--guard <function>:<argument index>=<guard>]... --out <dir>
+  bun rust/parity/cli.ts unit record <module.ts> --tests <test file>... [--inputs <file.jsonl>] [--guard <function>:<argument index>=<guard>]... [--json <function>:<argument index>]... [--any-bun] --out <dir>
   bun rust/parity/cli.ts unit replay <dir>
 
 record   Runs the original twice per scenario and writes rust/parity/golden/.
+         It runs only on the Bun the repository pins (ADR-026), unless
+         --any-bun is given.
 replay   Runs a build (default: the original) against the recordings, writes
          the report when --report is given, and exits non-zero on any
-         mismatch.
+         mismatch. On another Bun than the pinned one it warns.
 
 Unit cases (ADR-020):
 ${UNIT_USAGE.split('\n').slice(1).join('\n')}`;
@@ -67,6 +70,8 @@ const { positionals, values } = parseArgs({
     build: { type: 'string' },
     label: { type: 'string' },
     report: { type: 'string' },
+    // Records on another Bun than the pinned one.
+    'any-bun': { type: 'boolean' },
     help: { type: 'boolean', short: 'h' },
   },
 });
@@ -76,6 +81,13 @@ if (values.help || (command !== 'record' && command !== 'replay')) {
   console.log(usage);
   process.exit(values.help ? 0 : 2);
 }
+// The original behaves differently on another Bun, so a recording has to come from the pinned one.
+const bun = bunCheck(command, Bun.version, await pinnedBunVersion(repoRoot), values['any-bun'] === true);
+if (bun.refuse) {
+  console.error(bun.warning);
+  process.exit(2);
+}
+if (bun.warning) console.error(`warning: ${bun.warning}`);
 if (command === 'record') {
   await record(values.scenario);
 } else {
