@@ -2,7 +2,10 @@
 
 use std::rc::Rc;
 
-use base64::engine::{Engine, general_purpose::STANDARD};
+use base64::engine::{
+    Engine,
+    general_purpose::{GeneralPurpose, GeneralPurposeConfig, STANDARD},
+};
 use garcon_base::errors::ErrorInput;
 use garcon_base::http_body::fetch_header_value;
 use garcon_base::http_error::json_error_from_unknown;
@@ -23,6 +26,10 @@ use crate::websocket_auth::select_web_socket_protocol;
 use super::server_sockets::BrowserSockets;
 
 const WEBSOCKET_GUID: &[u8] = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+const WEBSOCKET_KEY_DECODER: GeneralPurpose = GeneralPurpose::new(
+    &base64::alphabet::STANDARD,
+    GeneralPurposeConfig::new().with_decode_allow_trailing_bits(true),
+);
 const PERMESSAGE_DEFLATE: &str =
     "permessage-deflate; client_no_context_takeover; server_no_context_takeover";
 
@@ -86,6 +93,9 @@ impl BrowserSockets {
                 response
                     .headers_mut()
                     .insert(SEC_WEBSOCKET_VERSION, HeaderValue::from_static("13"));
+                response
+                    .headers_mut()
+                    .insert(CONNECTION, HeaderValue::from_static("close"));
                 return Ok(response);
             }
         };
@@ -140,7 +150,11 @@ fn browser_handshake<B>(request: &Request<B>) -> Result<BrowserHandshake, Invali
     }
     let headers = request.headers();
     let key = fetch_header_value(headers, &SEC_WEBSOCKET_KEY)
-        .filter(|key| STANDARD.decode(key).is_ok_and(|key| key.len() == 16))
+        .filter(|key| {
+            WEBSOCKET_KEY_DECODER
+                .decode(key)
+                .is_ok_and(|key| key.len() == 16)
+        })
         .ok_or(InvalidUpgrade::InvalidRequest)?;
     if fetch_header_value(headers, &SEC_WEBSOCKET_VERSION).as_deref() != Some("13") {
         return Err(InvalidUpgrade::UnsupportedVersion);
