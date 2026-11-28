@@ -1,0 +1,8 @@
+{"fn":"isCleanCommandSuccess","args":[{"outcome":"failed","exitCode":0,"signal":null,"capture":"complete","cwd":{"kind":"reported","path":"/synthetic"}}]}
+{"fn":"isCleanCommandSuccess","args":[{"outcome":"finished","exitCode":1,"signal":null,"capture":"complete","cwd":{"kind":"reported","path":"/synthetic"}}]}
+{"fn":"isCleanCommandSuccess","args":[{"outcome":"finished","exitCode":null,"signal":null,"capture":"complete","cwd":{"kind":"withheld"}}]}
+{"fn":"isCleanCommandSuccess","args":[{"outcome":"finished","exitCode":0,"signal":"SIGTERM","capture":"complete","cwd":{"kind":"reported","path":"/synthetic"}}]}
+{"fn":"isCleanCommandSuccess","args":[{"outcome":"finished","exitCode":0,"signal":null,"capture":"truncated","cwd":{"kind":"reported","path":"/synthetic"}}]}
+{"fn":"isCleanCommandSuccess","args":[{"outcome":"finished","exitCode":0,"signal":null,"capture":"incomplete","cwd":{"kind":"reported","path":"/synthetic"}}]}
+{"fn":"isCleanCommandSuccess","args":[{"outcome":"finished","exitCode":0,"signal":null,"capture":"complete","cwd":{"kind":"unavailable","reason":"not captured"}}]}
+{"fn":"isCleanCommandSuccess","args":[{"outcome":"finished","exitCode":0,"signal":null,"capture":"complete","cwd":{"kind":"withheld"}}]}

@@ -48,6 +48,7 @@ pub mod server_runtime;
 pub mod settings;
 pub mod slash_commands;
 pub mod tags;
+pub mod template_tokens;
 pub mod terminal;
 pub mod terminal_error;
 pub mod ticket_validation;

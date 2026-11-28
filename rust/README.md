@@ -401,8 +401,12 @@ a repo-relative `suite`, and includes `case`, `path`, the exact Rust
 `result` at that JSON path, and a `reason`. For example, a scenario case
 named `range` would use a path such as `$.headers["content-range"]`.
 Use the containing object's path when the approved result omits a field.
-The edge replay uses these entries only with `--build`. The trace comparer
-checks entries for the suites it compares.
+The edge replay uses these entries only with `--build`. A scenario approval
+may include `"buildLabels": ["native"]`: run the named build with `--label native`
+to apply it. Other labels compare against the golden with no approval or
+staleness check for that entry. Without `buildLabels`, the approval applies
+to all build labels. The trace comparer checks entries for the suites it
+compares.
 
 For a recorded unit, use `known-differences.jsonl` beside its manifest.
 Each line has `fn`, the recorded `args`, the exact encoded Rust `result`,
