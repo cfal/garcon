@@ -4,6 +4,7 @@ use std::io;
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use garcon_base::domain_error::DomainError;
+use garcon_base::file_stat;
 use garcon_contract::error_codes::ErrorCode;
 use garcon_contract::file_contracts::{FileRevision, MAX_FILE_VIEW_BYTES};
 use garcon_interface::resources::ExecutorResult;
@@ -45,14 +46,7 @@ pub(super) fn file_too_large(max_bytes: usize) -> DomainError {
     )
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct RevisionStat {
-    pub dev: i128,
-    pub ino: i128,
-    pub size: i128,
-    pub mtime_ns: i128,
-    pub ctime_ns: i128,
-}
+pub use garcon_base::file_stat::FileIdentity as RevisionStat;
 
 pub fn revision_from_stat(stat: RevisionStat) -> FileRevision {
     let source = format!(
@@ -65,6 +59,15 @@ pub fn revision_from_stat(stat: RevisionStat) -> FileRevision {
 pub(crate) struct FileStat {
     pub revision: RevisionStat,
     pub is_file: bool,
+}
+
+impl From<file_stat::FileStat> for FileStat {
+    fn from(stat: file_stat::FileStat) -> Self {
+        Self {
+            revision: stat.identity,
+            is_file: stat.is_file,
+        }
+    }
 }
 
 fn revision_for_file_stat(stat: &FileStat) -> Result<FileRevision, DomainError> {
@@ -215,28 +218,11 @@ async fn read_content(handle: &mut File, limit: usize) -> ExecutorResult<Vec<u8>
 
 #[cfg(unix)]
 pub(crate) async fn stat_path(path: &str) -> io::Result<FileStat> {
-    Ok(stat_from_metadata(tokio::fs::metadata(path).await?))
+    Ok(file_stat::stat_from_metadata(tokio::fs::metadata(path).await?).into())
 }
 
-#[cfg(unix)]
 pub(crate) async fn stat_handle(handle: &File) -> io::Result<FileStat> {
-    Ok(stat_from_metadata(handle.metadata().await?))
-}
-
-#[cfg(unix)]
-fn stat_from_metadata(metadata: std::fs::Metadata) -> FileStat {
-    use std::os::unix::fs::MetadataExt;
-    let nanos = |seconds: i64, ns: i64| i128::from(seconds) * 1_000_000_000 + i128::from(ns);
-    FileStat {
-        revision: RevisionStat {
-            dev: metadata.dev().into(),
-            ino: metadata.ino().into(),
-            size: metadata.size().into(),
-            mtime_ns: nanos(metadata.mtime(), metadata.mtime_nsec()),
-            ctime_ns: nanos(metadata.ctime(), metadata.ctime_nsec()),
-        },
-        is_file: metadata.is_file(),
-    }
+    Ok(file_stat::stat_handle(handle).await?.into())
 }
 
 #[cfg(unix)]
@@ -279,50 +265,6 @@ pub(crate) async fn stat_path(path: &str) -> io::Result<FileStat> {
         .open(path)
         .await?;
     stat_handle(&handle).await
-}
-
-#[cfg(windows)]
-pub(crate) async fn stat_handle(handle: &File) -> io::Result<FileStat> {
-    use std::mem::{MaybeUninit, size_of};
-    use std::os::windows::io::AsRawHandle;
-    use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, FILE_BASIC_INFO, FileBasicInfo, GetFileInformationByHandle,
-        GetFileInformationByHandleEx,
-    };
-    let file = handle.try_clone().await?.into_std().await;
-    tokio::task::spawn_blocking(move || {
-        let is_file = file.metadata()?.is_file();
-        let handle = file.as_raw_handle();
-        let mut identity = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
-        let mut times = MaybeUninit::<FILE_BASIC_INFO>::uninit();
-        // SAFETY: both buffers have the documented type and size, and file owns the live handle.
-        let (identity, times) = unsafe {
-            if GetFileInformationByHandle(handle, identity.as_mut_ptr()) == 0
-                || GetFileInformationByHandleEx(
-                    handle,
-                    FileBasicInfo,
-                    times.as_mut_ptr().cast(),
-                    size_of::<FILE_BASIC_INFO>() as u32,
-                ) == 0
-            {
-                return Err(io::Error::last_os_error());
-            }
-            (identity.assume_init(), times.assume_init())
-        };
-        let u64_parts = |high: u32, low: u32| (u64::from(high) << 32) | u64::from(low);
-        let epoch_ns = |time: i64| (i128::from(time) - 116_444_736_000_000_000) * 100;
-        Ok(FileStat {
-            revision: RevisionStat {
-                dev: identity.dwVolumeSerialNumber.into(),
-                ino: u64_parts(identity.nFileIndexHigh, identity.nFileIndexLow).into(),
-                size: u64_parts(identity.nFileSizeHigh, identity.nFileSizeLow).into(),
-                mtime_ns: epoch_ns(times.LastWriteTime),
-                ctime_ns: epoch_ns(times.ChangeTime),
-            },
-            is_file,
-        })
-    })
-    .await?
 }
 
 #[cfg(test)]
