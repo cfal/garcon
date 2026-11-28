@@ -1,5 +1,6 @@
 use std::error::Error;
 
+use garcon_base::executor_disconnect::as_agent_call_error;
 use garcon_contract::error_codes::{ErrorCode, is_error_code};
 use garcon_interface::{
     errors::{AgentCallError, AgentDeliveryOutcome, AgentIntegrationError},
@@ -21,20 +22,14 @@ pub fn execution_setup_failure(error: Box<dyn Error>) -> Box<dyn Error> {
 }
 
 pub fn is_lost_launch_reply(error: &(dyn Error + 'static)) -> bool {
-    error
-        .downcast_ref::<AgentCallError>()
-        .is_some_and(|error| error.outcome == AgentDeliveryOutcome::Unknown)
+    as_agent_call_error(error).is_some_and(|error| error.outcome == AgentDeliveryOutcome::Unknown)
 }
 
 pub fn dispatch_failure_detail(error: &(dyn Error + 'static)) -> AgentRunFailureDetail {
     let code = error
         .downcast_ref::<AgentIntegrationError>()
         .map(|error| error.code.as_str())
-        .or_else(|| {
-            error
-                .downcast_ref::<AgentCallError>()
-                .map(|error| error.code.as_str())
-        })
+        .or_else(|| as_agent_call_error(error).map(|error| error.code.as_str()))
         .or_else(|| execution_domain_error(error).map(|error| error.code.as_str()))
         .unwrap_or("DISPATCH_FAILED");
     let message = error.to_string();

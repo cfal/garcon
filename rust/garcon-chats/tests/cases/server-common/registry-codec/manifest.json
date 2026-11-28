@@ -1,0 +1,56 @@
+{
+  "module": "rust/garcon-chats/tests/oracles/registry-codec.ts",
+  "tests": [
+    "rust/garcon-chats/tests/oracles/registry-codec.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "decodeEntry",
+      "argument": 0,
+      "guard": "acceptsEntry",
+      "dropped": 0,
+      "kept": 60
+    },
+    {
+      "fn": "allocateIds",
+      "argument": 0,
+      "guard": "acceptsAllocation",
+      "dropped": 12,
+      "kept": 9
+    },
+    {
+      "fn": "allocateIds",
+      "argument": 1,
+      "guard": "acceptsExisting",
+      "dropped": 0,
+      "kept": 29
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "decodeEntry",
+      "argument": 0
+    },
+    {
+      "fn": "parseSegments",
+      "argument": 0
+    },
+    {
+      "fn": "validSegmentId",
+      "argument": 0
+    },
+    {
+      "fn": "allocateIds",
+      "argument": 0
+    },
+    {
+      "fn": "allocateIds",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 230,
+  "sha256": "f95fbc7a73852b3891b85f62801a7775409c9cb7cce805604339af57ca3a4e6f"
+}

@@ -155,16 +155,16 @@ Parallel. Each needs only wave 0.
 | --- | --- | --- | --- | --- |
 | agent-conformance | interface | `garcon_interface::testing` (the conformance kit), the roster test in `garcon-executor`, and a way to run the SACS modules for one driver (ADR-027) | The kit passes against the direct integrations and fails a planted facet-shape bug; the SACS registry test still locks the roster | kit merged (interface, 2d291e970); the per-driver compatibility suite command for the Rust worker exists (harness); the roster test and the run against the direct integrations wait for agents-direct (link) |
 | worker | link, runtime-*, agents-direct | `garcon-executor`: `Executor::start`, `api`, `serve`; RPC dispatch, `ProducerRelay`, CLI gateway, executor arguments, listener secret | `executor-*` and `git-*` suites, TypeScript controller with Rust worker, both dial directions | claimed by link 2026-11-28. Merged: `Executor::start`, `api` (the shared `ExecutionRuntimeApi`), `serve`, listener secret, handshake, project, files, and terminal services, the CLI gateway, bulk history, the producer relay, and the roster with the first direct integration (31d673492, in the gate). Under the TypeScript controller in both dial directions, `executor-files`, `executor-terminals`, and `executor-cli*`: 26 of 27 with the Rust worker and 26 of 27 with the original, identical outcomes on all 27 (the one failure in both is a missing Claude binary on the test machine). Open: the Responses and Anthropic registrations, the compatibility suite and the direct scripted suites through the Rust worker, the git RPC server |
-| agent-claude | worker | Claude CLI transport, protocol, steering, history, forking | `claude-*` and `scripted-*` suites and the SACS modules for its driver through the Rust worker; conformance kit | claimed by agent-claude 2026-11-28; plan approved |
-| agent-codex | worker | App-server client, runtime, converter, history, code-mode parser | `codex-*` suites and the SACS modules for its driver through the Rust worker; conformance kit | claimed by agent-codex 2026-11-28; plan approved |
+| agent-claude | worker | Claude CLI transport, protocol, steering, history, forking | `claude-*` and `scripted-*` suites and the SACS modules for its driver through the Rust worker; conformance kit | claimed by agent-claude 2026-11-28; plan approved. Merged (in the gate): model context (982 recorded), slash command metadata (69), tool-use conversion (141, two provisional known differences) and permission requests (69), native paths (6 recorded plus file tests compared with Bun). Open: tool results (waits for the shared `normalize-util`), CLI stream and native history, shared forking and CLI login, transport, facets, worker parity |
+| agent-codex | worker | App-server client, runtime, converter, history, code-mode parser | `codex-*` suites and the SACS modules for its driver through the Rust worker; conformance kit | claimed by agent-codex 2026-11-28; plan approved. Merged (in the gate): command display (92 recorded) and the shared CLI update modules in `garcon_agents_common::cli_update` (277 recorded; status bytes compared with the original over a fake npm and CLI). Open: shared usage, CLI facet wiring, converters, app-server client, runtime, history, code mode |
 | agent-pi | worker | Pi RPC runtime | `pi-*` suites | claimed by agent-pi 2026-11-28, after the shared leaves of garcon-agents-common |
-| agent-opencode | worker | `opencode serve` supervisor, event stream, permissions | `opencode-*` suites | claimed by agent-opencode 2026-11-28 |
+| agent-opencode | worker | `opencode serve` supervisor, event stream, permissions | `opencode-*` suites | claimed by agent-opencode 2026-11-28. Merged (in the gate): the shared executable lookup `garcon_agents_common::which` (112 layouts equal to `Bun.which`). Open: pure modules, supervisor, event stream, permissions |
 | agent-antigravity | worker | Shared ACP runtime, Antigravity converter | `antigravity-*` suites | claimed by agent-acp 2026-11-28, after the shared ACP runtime; plan approved |
 | agent-shell | worker | Shell agent and its native store | `shell-*` suites | claimed by agent-pi 2026-11-28, after Pi |
 | agents-best-effort | worker | cursor, amp, factory | Ported unit tests and golden converter cases only; no scripted tier exists | cursor claimed by agent-acp, factory and amp by agent-pi, 2026-11-28 |
-| chats | stores, ledger | Registry, metadata index, list projector, ownership journal, identifiers, tags, parents, order | Ported unit tests; registry files read by both | claimed by interface 2026-11-28; plan requested before code |
-| agents-registry | chats, agents-direct | `AgentRegistry`, runtime router, directory, catalog, session settings, producer bindings, `ExecutorManager` with the in-process Local runtime | Ported unit tests | open |
-| execution | execution-state, agents-registry | Coordinator, queue drainer, steering, accepted input, start, session, steer, queue, and fork commands | Ported unit tests | claimed by research 2026-11-28 for the parts the original tests against fakes: accepted input and terminal helpers, receipt projection, command settlement; steer, queued steer, and control input delivery and the queue drainer; the coordinator. The command modules that need the chats registry and the agent registry wait for those units |
+| chats | stores, ledger | Registry, metadata index, list projector, ownership journal, identifiers, tags, parents, order | Ported unit tests; registry files read by both | claimed by interface 2026-11-28. Merged (in the gate): the registry with its v6 codec and ID allocator (230 recorded; files written by each implementation read by the other), the metadata index with paced preview repair, the list and summary projector (228 recorded; controller bytes compared with Bun), order ranking (66 recorded), tag and parent mutation services. Open: the ownership journal and its cross-writer gate; routes and the concrete ledger, board, and archive adapters belong to chat-surface |
+| agents-registry | chats, agents-direct | `AgentRegistry`, runtime router, directory, catalog, session settings, producer bindings, `ExecutorManager` with the in-process Local runtime | Ported unit tests | claimed by research 2026-11-28, in `garcon-execution`; plan approved. Merged (in the gate): directory, event bus, listener dispatch, session-loss retry, turn operation (26 recorded). `ExecutorManager` receives the Local `ExecutionRuntimeApi` handle from the composition root (ADR-022) and uses `garcon_stores::executors` for configuration and public URLs; the remote factory is a trait until remote-client |
+| execution | execution-state, agents-registry | Coordinator, queue drainer, steering, accepted input, start, session, steer, queue, and fork commands | Ported unit tests | claimed by research 2026-11-28. Merged (in the gate): accepted input and terminal helpers, receipt projection, command settlement; steer, queued steer, and control input delivery and the queue drainer (64 recorded); the coordinator with its command, query, and lifecycle facets against fakes (17 recorded; the API contract test ported). Open: the registry-backed start, session, queue, steer, and fork commands, after agents-registry |
 | chat-surface | execution, edge | Chat routes, command routes, snapshots, rows, browser chat handler, `server-event-wiring` | **Core milestone:** generic server suites pass in-process on the native controller with direct providers | open |
 | remote-client | link, agents-registry | `RemoteExecutorClient`, remote integration and service proxies, CLI dispatcher | Remote lanes, Rust controller with TypeScript worker | open |
 
@@ -371,8 +371,31 @@ runs.
 
 ## Open questions
 
-None. The six questions of 2026-11-28 are decided in ADR-029, ADR-030, and
-ADR-031.
+The six questions of 2026-11-28 are decided in ADR-029, ADR-030, and
+ADR-031. One is open:
+
+1. Provider output that the shared parser changes or rejects at its first
+   read. The original hands some provider values on unchecked, and its own
+   shared parser trims or refuses them at the first read; the port's typed
+   messages can only hold the checked form, so it applies the check at the
+   provider. Two cases so far. The Claude converter passes the model's
+   `changes` and `allowedPrompts` arrays through unchanged, and the parser
+   drops members other than the declared strings (2 of 141 recorded converter
+   cases). The Codex usage report can carry a token total beyond the safe
+   integer range, which `parseAgentUsageReport` rejects; the port fails the
+   usage read at the provider. The difference shows only for input no real
+   model or account produces, and only in the bytes of the link message, the
+   stored row, and the live frame of a Local turn; every reader, the browser
+   included, sees the same result. Proceeding as accepted (RULES.md, JSON);
+   refusing it means message and report types that carry unchecked values.
+2. A defect of the original the port does not copy. When a fork's target
+   file already exists, the original's writer
+   (`server-agents/common/src/forking/fork-jsonl.ts`, `TargetWriter`) fails
+   to create it and then deletes the existing file in its cleanup. No test
+   covers the path, and the target name is new for every fork, so it should
+   not occur. The port fails the same way and leaves the existing file.
+   Proceeding with that; say if the original should be corrected as well or
+   if the port should delete the file as the original does.
 
 ## Out of scope
 
