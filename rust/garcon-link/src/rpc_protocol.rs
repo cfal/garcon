@@ -102,7 +102,7 @@ impl IntegrationManifest {
             .unwrap_or_default();
         Ok(Self {
             descriptor: integration.descriptor.clone(),
-            scope: integration.producers.scope().clone(),
+            scope: integration.producers.scope()?,
             settings,
             attachments: integration.attachments.clone(),
             capabilities: NULLABLE_AGENT_FACETS
