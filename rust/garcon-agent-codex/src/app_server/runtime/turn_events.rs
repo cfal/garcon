@@ -46,15 +46,9 @@ pub fn dispatch_turn_notification(
         }
         "item/completed" | "rawResponseItem/completed" => {
             let turn_id = params["turnId"].as_str()?;
-            let source = registry
+            let (source, operation) = registry
                 .borrow()
                 .source_for_client_turn(client, thread_id, turn_id)?;
-            let operation = source
-                .routes
-                .borrow()
-                .operation_for_turn(turn_id)
-                .cloned()
-                .unwrap();
             if notification.method == "item/completed" {
                 if let Some(item) = read_live_thread_item(&params["item"]) {
                     emit_item(&source, logger, &operation, turn_id, &item, timestamp);
@@ -76,7 +70,7 @@ pub fn dispatch_turn_notification(
         }
         "turn/completed" => {
             let turn_id = params["turn"]["id"].as_str()?;
-            let source = registry
+            let (source, operation) = registry
                 .borrow()
                 .source_for_client_turn(client, thread_id, turn_id)?;
             let turn = CodexCompletedTurn::read(turn_id, &params["turn"]);
@@ -84,11 +78,10 @@ pub fn dispatch_turn_notification(
                 .borrow()
                 .active(thread_id)
                 .is_some_and(|active| Rc::ptr_eq(&active, &source));
-            let (operation, first_completion, is_active) = {
+            let (first_completion, is_active) = {
                 let mut routes = source.routes.borrow_mut();
-                let operation = routes.operation_for_turn(turn_id).cloned().unwrap();
                 let is_active = is_current_source && routes.active_turn_id() == Some(turn_id);
-                (operation, routes.mark_terminal(turn_id), is_active)
+                (routes.mark_terminal(turn_id), is_active)
             };
             if first_completion && is_active {
                 source.live_raw_results.borrow_mut().clear();
