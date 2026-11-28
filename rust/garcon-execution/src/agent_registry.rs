@@ -4,24 +4,45 @@
 //! The registry mutations and runtime lifecycle methods are ported separately.
 
 mod adoption;
+mod transcript_source;
 
 pub use adoption::AdoptionChatRegistry;
 
+use std::rc::Rc;
+
+use garcon_base::log::Logger;
+use garcon_chats::registry_contracts::ChatRegistryEntry;
 use indexmap::IndexMap;
 
 use crate::{
+    directory::AgentDirectory,
     runtime_router::{AgentRuntimeRouter, AgentRuntimeRouterOptions, RunningSession},
     types::ExecutionOperationResult,
 };
 
+pub type RegistryCarryOverRevision = dyn Fn(&ChatRegistryEntry) -> String;
+
+pub struct AgentRegistryOptions {
+    pub runtime: AgentRuntimeRouterOptions,
+    pub directory: Rc<AgentDirectory>,
+    pub get_carry_over_revision: Rc<RegistryCarryOverRevision>,
+    pub logger: Rc<dyn Logger>,
+}
+
 pub struct AgentRegistry {
     runtime: AgentRuntimeRouter,
+    directory: Rc<AgentDirectory>,
+    get_carry_over_revision: Rc<RegistryCarryOverRevision>,
+    logger: Rc<dyn Logger>,
 }
 
 impl AgentRegistry {
-    pub fn new(runtime: AgentRuntimeRouterOptions) -> Self {
+    pub fn new(options: AgentRegistryOptions) -> Self {
         Self {
-            runtime: AgentRuntimeRouter::new(runtime),
+            runtime: AgentRuntimeRouter::new(options.runtime),
+            directory: options.directory,
+            get_carry_over_revision: options.get_carry_over_revision,
+            logger: options.logger,
         }
     }
 
