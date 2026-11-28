@@ -1,0 +1,28 @@
+{
+  "module": "server/controller/settings/settings-shared.ts",
+  "tests": [],
+  "inputs": "rust/garcon-stores/tests/inputs/settings-shared.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "normalizeUiSettings",
+      "argument": 0
+    },
+    {
+      "fn": "sanitizeFolderFilter",
+      "argument": 0
+    },
+    {
+      "fn": "sanitizeStringArray",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeRemoteSettingsVersion",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 19,
+  "sha256": "24e17ff3371eec70c4417b922afd1de63124a8f770738b4516414eac399e79cc"
+}
