@@ -42,6 +42,18 @@ the user corrects how a port behaves, the correction is added under
 - Silence a lint with `#[expect(lint, reason = "...")]`, not `#[allow]`.
 - No `unsafe` without a `// SAFETY:` comment, and only where no safe API
   exists.
+- `hasNodeErrorCode` and `diagnosticErrorCode` read `.code` and `.name` off
+  any thrown value; `garcon_base::errors` can only see what it is told about.
+  A new error type that carries a code or its own JavaScript class name
+  implements `garcon_base::errors::DiagnosticError` and reaches those
+  functions as `ErrorInput::Diagnostic(&error)` before it is erased to
+  `dyn Error`; a type that is routinely erased first gets a downcast in that
+  module and a test through the erased path. Test with the concrete error a
+  real failing call produces (`std::io::Error` from the file system), never
+  only with a stand-in built for the test.
+- A request header is read as Fetch's `headers.get()` returns it: every field
+  of that name, each trimmed, joined with `", "`. Reading only the first
+  field accepts requests the original refuses.
 
 ## JSON
 
