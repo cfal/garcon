@@ -1,4 +1,5 @@
 pub mod active_turn;
+pub mod claude_auth;
 pub mod claude_auth_login;
 pub mod claude_cli;
 pub mod cli_control;
@@ -26,4 +27,5 @@ pub mod steering;
 pub mod tool_result_converter;
 pub mod tool_use_converter;
 pub mod turn_publisher;
+pub mod usage_format;
 pub mod user_input;
