@@ -1,21 +1,26 @@
 //! ADR-020 recordings for the browser WebSocket and controller contracts.
 
 use garcon_cases::{CaseError, markers, replay, round_tripped, text, unknown};
+use serde::Serialize;
 use serde_json::{Value, json};
 
 use garcon_contract::chat_execution_control::{
-    ChatExecutionControlState, empty_chat_execution_control_state,
-    parse_chat_execution_control_state, parse_execution_control_server_instance_id,
+    empty_chat_execution_control_state, parse_chat_execution_control_state,
+    parse_execution_control_server_instance_id,
 };
 use garcon_contract::queue_state::{
-    ChatQueueState, empty_chat_queue_state, parse_chat_queue_state, parse_queue_pause,
+    empty_chat_queue_state, parse_chat_queue_state, parse_queue_pause,
 };
 use garcon_contract::ws_auth::{
     bearer_token_from_web_socket_protocol_header, parse_web_socket_protocol_header,
     web_socket_protocol_header_contains, web_socket_protocols_for_auth,
 };
+use garcon_contract::ws_requests::{
+    ChatReloadCancelRequest, ChatReloadRequest, ChatSubscribeRequest, ClientWsMessage,
+    ReconnectStateQueryRequest, WsPingRequest, parse_client_ws_message,
+};
 use garcon_contract::ws_value_parsing::{
-    self, NonNegativeSafeInteger, canonical_chat_id, non_negative_int, required_path, required_str,
+    self, canonical_chat_id, non_negative_int, required_path, required_str,
 };
 
 fn assert_recording(
@@ -55,12 +60,70 @@ fn ws_auth_recordings() {
     });
 }
 
-fn integer_record(value: NonNegativeSafeInteger) -> Value {
-    if value.is_negative_zero() {
-        markers::number(-0.0)
-    } else {
-        json!(value.get())
+fn instance_record(name: &str, value: impl Serialize) -> Value {
+    let encoded = serde_json::to_string(&value).expect("message is serializable");
+    let fields = garcon_js::json::from_str(&encoded).expect("message serializes to an object");
+    markers::instance(name, fields)
+}
+
+fn client_ws_message_record(message: ClientWsMessage) -> Value {
+    match message {
+        ClientWsMessage::ReconnectStateQuery(value) => {
+            instance_record("ReconnectStateQueryRequest", value)
+        }
+        ClientWsMessage::ChatSubscribe(value) => instance_record("ChatSubscribeRequest", value),
+        ClientWsMessage::ChatReload(value) => instance_record("ChatReloadRequest", value),
+        ClientWsMessage::ChatReloadCancel(value) => {
+            instance_record("ChatReloadCancelRequest", value)
+        }
+        ClientWsMessage::WsPing(value) => instance_record("WsPingRequest", value),
     }
+}
+
+#[test]
+fn ws_requests_recordings() {
+    assert_recording("ws-requests", |function, args| match function {
+        "parseClientWsMessage" => {
+            let result = parse_client_ws_message(unknown(function, args.first())?.as_ref())
+                .map_err(|error| CaseError::new("TypeError", error.to_string()))?;
+            Ok(result.map_or(Value::Null, client_ws_message_record))
+        }
+        "new ChatReloadCancelRequest" => {
+            let chat_id = text(function, args.first())?.map(str::to_owned);
+            let request_id = text(function, args.get(1))?.map(str::to_owned);
+            Ok(instance_record(
+                "ChatReloadCancelRequest",
+                ChatReloadCancelRequest::new(chat_id, request_id),
+            ))
+        }
+        _ => {
+            let value = unknown(function, args.first())?;
+            let object = value
+                .as_object()
+                .ok_or_else(|| CaseError::unhandled(function))?;
+            Ok(match function {
+                "ReconnectStateQueryRequest.fromJson" => instance_record(
+                    "ReconnectStateQueryRequest",
+                    ReconnectStateQueryRequest::from_json(object),
+                ),
+                "ChatSubscribeRequest.fromJson" => ChatSubscribeRequest::from_json(object)
+                    .map_or(Value::Null, |value| {
+                        instance_record("ChatSubscribeRequest", value)
+                    }),
+                "ChatReloadRequest.fromJson" => {
+                    instance_record("ChatReloadRequest", ChatReloadRequest::from_json(object))
+                }
+                "ChatReloadCancelRequest.fromJson" => instance_record(
+                    "ChatReloadCancelRequest",
+                    ChatReloadCancelRequest::from_json(object),
+                ),
+                "WsPingRequest.fromJson" => {
+                    instance_record("WsPingRequest", WsPingRequest::from_json(object))
+                }
+                _ => return Err(CaseError::unhandled(function)),
+            })
+        }
+    });
 }
 
 #[test]
@@ -71,29 +134,21 @@ fn ws_value_parsing_recordings() {
             "str" => json!(ws_value_parsing::str(&value)),
             "requiredStr" => json!(required_str(&value)),
             "requiredPath" => json!(required_path(&value)),
-            "nonNegativeInt" => non_negative_int(&value).map_or(Value::Null, integer_record),
+            "nonNegativeInt" => json!(non_negative_int(&value)),
             "canonicalChatId" => json!(canonical_chat_id(&value)),
             _ => return Err(CaseError::unhandled(function)),
         })
     });
 }
 
-fn queue_record(queue: &ChatQueueState) -> Value {
-    let mut value = json!(queue);
-    value["reorderRevision"] = integer_record(queue.reorder_revision);
-    value
-}
-
 #[test]
 fn queue_state_recordings() {
     assert_recording("queue-state", |function, args| {
         Ok(match function {
-            "emptyChatQueueState" => queue_record(&empty_chat_queue_state()),
-            "parseChatQueueState" => {
-                parse_chat_queue_state(unknown(function, args.first())?.as_ref())
-                    .as_ref()
-                    .map_or(Value::Null, queue_record)
-            }
+            "emptyChatQueueState" => json!(empty_chat_queue_state()),
+            "parseChatQueueState" => json!(parse_chat_queue_state(
+                unknown(function, args.first())?.as_ref()
+            )),
             "parseQueuePause" => {
                 let value = round_tripped(function, args.first())?;
                 match parse_queue_pause(value.as_deref()) {
@@ -106,29 +161,50 @@ fn queue_state_recordings() {
     });
 }
 
-fn execution_control_record(control: &ChatExecutionControlState) -> Value {
-    let mut value = json!(control);
-    value["queue"] = queue_record(&control.queue);
-    value["version"] = integer_record(control.version);
-    value
-}
-
 #[test]
 fn chat_execution_control_recordings() {
     assert_recording("chat-execution-control", |function, args| {
         Ok(match function {
-            "emptyChatExecutionControlState" => execution_control_record(
-                &empty_chat_execution_control_state(required_text(function, args.first())?),
-            ),
+            "emptyChatExecutionControlState" => json!(empty_chat_execution_control_state(
+                required_text(function, args.first())?
+            )),
             "parseExecutionControlServerInstanceId" => {
                 json!(parse_execution_control_server_instance_id(
                     unknown(function, args.first())?.as_ref()
                 ))
             }
-            "parseChatExecutionControlState" => {
-                parse_chat_execution_control_state(unknown(function, args.first())?.as_ref())
-                    .as_ref()
-                    .map_or(Value::Null, execution_control_record)
+            "parseChatExecutionControlState" => json!(parse_chat_execution_control_state(
+                unknown(function, args.first())?.as_ref()
+            )),
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+#[test]
+fn chat_title_contracts_recordings() {
+    use garcon_contract::chat_title_contracts::*;
+    assert_recording("chat-title-contracts", |function, args| {
+        Ok(match function {
+            "isChatTitleWithinLimit" => {
+                json!(is_chat_title_within_limit(required_text(
+                    function,
+                    args.first()
+                )?))
+            }
+            "fitDerivedChatTitle" => json!(fit_derived_chat_title(
+                required_text(function, args.first())?,
+                required_text(function, args.get(1))?,
+            )),
+            "parseUpdateChatTitleRequest" => {
+                json!(parse_update_chat_title_request(
+                    unknown(function, args.first())?.as_ref()
+                ))
+            }
+            "parseUpdateChatTitleResponse" => {
+                json!(parse_update_chat_title_response(
+                    unknown(function, args.first())?.as_ref()
+                ))
             }
             _ => return Err(CaseError::unhandled(function)),
         })

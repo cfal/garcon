@@ -1,0 +1,4 @@
+{"fn":"isChatTitleWithinLimit","args":[""]}
+{"fn":"fitDerivedChatTitle","args":["example",""]}
+{"fn":"fitDerivedChatTitle","args":[""," (123)"]}
+{"fn":"parseUpdateChatTitleResponse","args":[{"success":true,"chatId":"chat-a","title":"New title","changed":false,"extra":true}]}

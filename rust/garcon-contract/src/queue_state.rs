@@ -7,7 +7,7 @@ use regex::Regex;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::ws_value_parsing::{NonNegativeSafeInteger, non_negative_int};
+use crate::ws_value_parsing::non_negative_int;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -93,7 +93,7 @@ pub struct ChatQueueState {
     pub steering_entry_id: Option<String>,
     pub recently_dispatched: Vec<RecentlyDispatchedQueueEntry>,
     pub pause: Option<QueuePause>,
-    pub reorder_revision: NonNegativeSafeInteger,
+    pub reorder_revision: u64,
 }
 
 pub const MAX_RECENTLY_DISPATCHED_QUEUE_ENTRIES: usize = 32;
@@ -104,7 +104,7 @@ pub fn empty_chat_queue_state() -> ChatQueueState {
         steering_entry_id: None,
         recently_dispatched: Vec::new(),
         pause: None,
-        reorder_revision: NonNegativeSafeInteger::ZERO,
+        reorder_revision: 0,
     }
 }
 
@@ -120,9 +120,7 @@ fn parse_queue_entry_attachment(value: &Value) -> Option<QueueEntryAttachment> {
 }
 
 fn positive_revision(value: &Value) -> Option<u64> {
-    non_negative_int(value)
-        .map(NonNegativeSafeInteger::get)
-        .filter(|value| *value > 0)
+    non_negative_int(value).filter(|value| *value > 0)
 }
 
 fn parse_queue_entry(value: &Value) -> Option<QueueEntry> {
@@ -303,7 +301,7 @@ mod tests {
     #[test]
     fn initializes_a_zero_reorder_revision() {
         let queue = empty_chat_queue_state();
-        assert_eq!(queue.reorder_revision.get(), 0);
+        assert_eq!(queue.reorder_revision, 0);
         assert_eq!(queue.steering_entry_id, None);
         assert_eq!(json!(queue), baseline());
     }
@@ -331,10 +329,7 @@ mod tests {
             let mut queue = baseline();
             queue["reorderRevision"] = json!(revision);
             assert_eq!(
-                parse_chat_queue_state(&queue)
-                    .unwrap()
-                    .reorder_revision
-                    .get(),
+                parse_chat_queue_state(&queue).unwrap().reorder_revision,
                 revision
             );
         }

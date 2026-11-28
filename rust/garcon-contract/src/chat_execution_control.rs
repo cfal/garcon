@@ -7,14 +7,14 @@ use serde_json::Value;
 use crate::queue_state::{
     ChatQueueState, canonical_iso_timestamp, empty_chat_queue_state, parse_chat_queue_state,
 };
-use crate::ws_value_parsing::{NonNegativeSafeInteger, non_negative_int};
+use crate::ws_value_parsing::non_negative_int;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatExecutionControlState {
     pub server_instance_id: String,
     pub queue: ChatQueueState,
-    pub version: NonNegativeSafeInteger,
+    pub version: u64,
     pub updated_at: Option<String>,
 }
 
@@ -33,7 +33,7 @@ pub fn empty_chat_execution_control_state(server_instance_id: &str) -> ChatExecu
     ChatExecutionControlState {
         server_instance_id: server_instance_id.to_owned(),
         queue: empty_chat_queue_state(),
-        version: NonNegativeSafeInteger::ZERO,
+        version: 0,
         updated_at: None,
     }
 }
@@ -65,7 +65,7 @@ mod tests {
     fn requires_an_explicit_server_instance_for_empty_controls() {
         let control = empty_chat_execution_control_state("server-instance-test");
         assert_eq!(control.server_instance_id, "server-instance-test");
-        assert_eq!(control.version.get(), 0);
+        assert_eq!(control.version, 0);
         assert_eq!(control.updated_at, None);
     }
 
