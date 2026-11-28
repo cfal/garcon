@@ -1,20 +1,23 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  locationPath, MAX_VARIANTS_PER_FUNCTION, replaceLeaf, trapVariants,
+  candidateVariants, locationPath, MAX_VARIANTS_PER_FUNCTION, replaceLeaf, trapVariants,
 } from '../unit/traps.js';
 import type { Json } from '../wildcard.js';
 
 // The recorder skips a variant equal to a recorded case, as this does.
-function generate(calls: Json[][]) {
+function generate(calls: Json[][], jsonArguments: number[] = []) {
   const known = new Set(calls.map((call) => JSON.stringify(call)));
   const variants = trapVariants(calls, (args) => {
     const key = JSON.stringify(args);
     if (known.has(key)) return true;
     known.add(key);
     return false;
-  });
+  }, jsonArguments);
   return { variants, origins: variants.map((variant) => variant.origin), args: variants.map((variant) => variant.args) };
 }
+
+const finite = ['zero', 'negative-zero', 'negative-one', 'half', '1e21', '1e-7', '2^53'];
+const nonFinite = ['nan', 'infinity', 'negative-infinity'];
 
 const empty = (path: string) => `trap:empty@${path}`;
 const trapOf = (origin: string) => origin.slice('trap:'.length, origin.indexOf('@')).split('+')[0]!;
@@ -86,10 +89,27 @@ describe('trapVariants', () => {
     expect(args.slice(6)).toEqual([[{ $: 'number', value: 'NaN' }], [{ $: 'number', value: 'Infinity' }], [{ $: 'number', value: '-Infinity' }]]);
   });
 
+  test('makes no NaN or infinity for an argument declared JSON, though it is a number', () => {
+    // The first argument reaches a port as the number it is, the second as JSON.
+    const { variants } = generate([[1, 2]], [1]);
+    const trapsOfArgument = (argument: number) => variants.filter((variant) => variant.argument === argument).map((variant) => trapOf(variant.origin));
+    expect(trapsOfArgument(0)).toEqual([...finite, ...nonFinite]);
+    expect(trapsOfArgument(1)).toEqual(finite);
+    // The same for an argument the recording holds as a number marker.
+    expect(generate([[{ $: 'number', value: '-0' }]], [0]).origins.map(trapOf)).toEqual(['zero', ...finite.slice(2)]);
+  });
+
+  test('yields every candidate in order, and keeps a budget only when asked', () => {
+    const calls = Array.from({ length: 30 }, (_, index): Json[] => [[String(index)]]);
+    const every = [...candidateVariants(calls, () => false)];
+    expect(every.length).toBeGreaterThan(MAX_VARIANTS_PER_FUNCTION);
+    // The recorder pulls the candidates of a function in batches, which together are the whole list.
+    expect(trapVariants(calls, () => false)).toEqual(every.slice(0, MAX_VARIANTS_PER_FUNCTION));
+  });
+
   test('replaces a number inside an object or an array only by a number JSON can carry', () => {
     // A port receives such a number as JSON, which cannot hold NaN or an infinity.
     const { variants } = generate([[{ a: [1], m: { $: 'map', value: [['k', 2]] } }]]);
-    const finite = ['zero', 'negative-zero', 'negative-one', 'half', '1e21', '1e-7', '2^53'];
     for (const path of ['$.args[0].a[0]', '$.args[0].m.value[0][1]']) {
       expect(variants.filter((variant) => variant.origin.endsWith(`@${path}`)).map((variant) => trapOf(variant.origin))).toEqual(finite);
     }

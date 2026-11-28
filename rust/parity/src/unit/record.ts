@@ -1,10 +1,10 @@
 import { readFile, stat } from 'node:fs/promises';
-import { relative, resolve } from 'node:path';
+import { delimiter, dirname, relative, resolve } from 'node:path';
 import { isObject, wildcardPaths, type Json } from '../wildcard.js';
-import { callKey, mergeCaptured, sameJson, type CaptureRecord, type Case, type Guard, type GuardSpec, type Manifest, type NotCaptured, type RecordedCase } from './cases.js';
+import { callKey, mergeCaptured, sameJson, type CaptureRecord, type Case, type Guard, type GuardSpec, type JsonArgument, type Manifest, type NotCaptured, type RecordedCase } from './cases.js';
 import type { EncodeFailure } from './encode.js';
 import { runWithRecordStream, type StreamRun } from './process.js';
-import { trapVariants } from './traps.js';
+import { candidateVariants, MAX_VARIANTS_PER_FUNCTION, type Variant } from './traps.js';
 
 const PRELOAD = resolve(import.meta.dir, 'record-preload.ts');
 const EVALUATOR = resolve(import.meta.dir, 'evaluate.ts');
@@ -17,12 +17,10 @@ const ROOT_VARIABLE = 'GARCON_UNIT_RECORD_ROOT';
 // A call that has no outcome after this long is given up and listed.
 export const EVALUATE_STALL_MS = 15_000;
 
-// A call the evaluator makes. The guard of a trap variant, as the evaluator
-// loads it, holds the call back when it rejects the argument.
+// A call the evaluator makes.
 export interface EvaluationInput {
   fn: string;
   args: Json[];
-  guard?: { argument: number; spec: string };
 }
 
 // A call to make in a fresh process: a trap variant of a recorded call, or a
@@ -31,6 +29,8 @@ export interface Input extends EvaluationInput {
   kind: 'trap' | 'input';
   // `trap:<name>@<path>`, or `<inputs file>:<line>`.
   origin: string;
+  // The guard that was asked whether a trap variant is recorded at all.
+  guard?: { argument: number; spec: string };
 }
 
 // What one evaluation run observed for one input.
@@ -38,13 +38,18 @@ export type Evaluation =
   | { result: Json }
   | { notCaptured: EncodeFailure }
   | { missing: true }
-  | { timedOut: true }
-  // The guard of the trap variant rejected its argument.
-  | { guarded: true };
+  | { timedOut: true };
 
 // A fixed time zone and locale keep recordings comparable across machines.
+// The Bun that runs the recorder comes first on PATH, so that a test or a
+// module which starts `bun` by name runs on the same one (ADR-026).
 function childEnvironment(variables: Record<string, string>): NodeJS.ProcessEnv {
-  const environment: NodeJS.ProcessEnv = { ...process.env, TZ: 'UTC', LANG: 'C.UTF-8' };
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    PATH: [dirname(process.execPath), process.env.PATH].filter(Boolean).join(delimiter),
+    TZ: 'UTC',
+    LANG: 'C.UTF-8',
+  };
   delete environment.LC_ALL;
   return { ...environment, ...variables };
 }
@@ -82,39 +87,65 @@ export async function captureTests(repoRoot: string, modulePath: string, tests: 
   return records;
 }
 
-// Calls the module's exports with the inputs, in order, in a fresh process,
-// and returns each outcome. A call that stalls ends its process; the run then
-// resumes with the next input.
-export async function evaluateInputs(modulePath: string, inputs: ReadonlyArray<EvaluationInput>, stallMs = EVALUATE_STALL_MS): Promise<Evaluation[]> {
-  const evaluations: Evaluation[] = [];
-  while (evaluations.length < inputs.length) {
-    const remaining = inputs.length - evaluations.length;
-    const received: Evaluation[] = [];
+// Runs the evaluator over `lines`, in order, and returns what it wrote for
+// each of them. A line whose call stalls gets `stalled`; its process ends, and
+// the run resumes with the lines after it.
+async function evaluateLines<T>(
+  modulePath: string,
+  lines: readonly string[],
+  stallMs: number,
+  read: (record: Json) => T,
+  stalled: T,
+): Promise<T[]> {
+  const answers: T[] = [];
+  while (answers.length < lines.length) {
+    const remaining = lines.length - answers.length;
+    const received: T[] = [];
     let open = true;
     const run = await runWithRecordStream([process.execPath, EVALUATOR, modulePath], childEnvironment({ [EVALUATE_STREAM_VARIABLE]: '3' }), {
-      stdin: inputs.slice(evaluations.length).map((input) => JSON.stringify(input)).join('\n'),
+      stdin: lines.slice(answers.length).join('\n'),
       stallMs,
       onRecord: (record) => {
-        if (!open) return;
-        if (!isObject(record) || !['result', 'notCaptured', 'missing', 'guarded'].some((key) => key in record)) {
-          throw new Error('malformed evaluation');
-        }
-        received.push(record as unknown as Evaluation);
+        if (open) received.push(read(record));
       },
     });
     open = false;
     if (run.malformed) throw new Error(`The unit evaluator wrote a malformed record: ${run.malformed}`);
-    evaluations.push(...received);
+    answers.push(...received);
     if (!run.stalled) {
       if (received.length !== remaining) {
-        throw childFailure(`The unit evaluator stopped after ${received.length} of ${remaining} calls (exit code ${run.code}).`, run);
+        throw childFailure(`The unit evaluator stopped after ${received.length} of ${remaining} inputs (exit code ${run.code}).`, run);
       }
       break;
     }
-    // The calls run in order, so the one that stalled is the first without an outcome.
-    if (evaluations.length < inputs.length) evaluations.push({ timedOut: true });
+    // The inputs run in order, so the one that stalled is the first without an answer.
+    if (answers.length < lines.length) answers.push(stalled);
   }
-  return evaluations;
+  return answers;
+}
+
+// Calls the module's exports with the inputs, in order, in a fresh process,
+// and returns each outcome.
+export async function evaluateInputs(modulePath: string, inputs: ReadonlyArray<EvaluationInput>, stallMs = EVALUATE_STALL_MS): Promise<Evaluation[]> {
+  return evaluateLines(modulePath, inputs.map((input) => JSON.stringify(input)), stallMs, (record) => {
+    if (!isObject(record) || !['result', 'notCaptured', 'missing'].some((key) => key in record)) {
+      throw new Error('malformed evaluation');
+    }
+    return record as unknown as Evaluation;
+  }, { timedOut: true });
+}
+
+// What a guard did with a trap variant of its argument.
+export type Verdict = 'kept' | 'dropped' | 'stalled';
+
+// Asks the guard of each input, in a fresh process and without calling the
+// original, and returns whether it kept or dropped the variant. A guard that
+// gives no answer in time counts as stalled.
+export async function askGuards(modulePath: string, inputs: ReadonlyArray<Input>, stallMs = EVALUATE_STALL_MS): Promise<Verdict[]> {
+  return evaluateLines(modulePath, inputs.map((input) => JSON.stringify({ ...input, guardOnly: true })), stallMs, (record) => {
+    if (!isObject(record) || typeof record.guarded !== 'boolean') throw new Error('malformed evaluation');
+    return record.guarded ? 'dropped' : 'kept';
+  }, 'stalled');
 }
 
 async function readInputs(repoRoot: string, path: string): Promise<Input[]> {
@@ -134,15 +165,12 @@ async function readInputs(repoRoot: string, path: string): Promise<Input[]> {
 interface MergedEvaluation {
   result?: Json;
   notCaptured?: NotCaptured;
-  // The guard of the trap variant rejected it in both runs, so it is not a case.
-  guarded?: true;
   noise: string[];
 }
 
 // Merges the two evaluation runs of one input.
-export function mergeEvaluation(input: Input, first: Evaluation, second: Evaluation, stallMs: number): MergedEvaluation {
+function mergeEvaluation(input: Input, first: Evaluation, second: Evaluation, stallMs: number): MergedEvaluation {
   const label = `${input.fn} (${JSON.stringify(input.args).slice(0, 80)}) [${input.origin}]`;
-  if ('guarded' in first && 'guarded' in second) return { guarded: true, noise: [] };
   if ('timedOut' in first || 'timedOut' in second) {
     return { noise: [], notCaptured: { fn: input.fn, where: 'result', path: '$.result', type: `no outcome within ${stallMs} ms`, at: null, count: 1 } };
   }
@@ -152,11 +180,6 @@ export function mergeEvaluation(input: Input, first: Evaluation, second: Evaluat
   if ('notCaptured' in first || 'notCaptured' in second) {
     const failure = 'notCaptured' in first ? first.notCaptured : (second as { notCaptured: EncodeFailure }).notCaptured;
     return { noise: [], notCaptured: { fn: input.fn, where: 'result', ...failure, at: null, count: 1 } };
-  }
-  // A guard that decides differently in two runs of the same input would
-  // leave what is recorded to chance.
-  if ('guarded' in first || 'guarded' in second) {
-    throw new Error(`A guard of ${input.fn} did not decide the same way in both runs: ${label}.`);
   }
   const result = sameJson(first.result, second.result);
   return { result, noise: wildcardPaths({ result }, '$').map((path) => `${label}: differs between runs at ${path}`) };
@@ -171,6 +194,9 @@ export interface RecordOptions {
   // Guards of typed arguments: a trap variant of such an argument is recorded
   // only when the original's own guard accepts it.
   guards?: GuardSpec[];
+  // Arguments that reach a port as JSON even when they are a number: NaN and
+  // the infinities are not made for them, since JSON cannot carry them.
+  jsonArguments?: JsonArgument[];
   // How long a call may take before it is given up and listed.
   stallMs?: number;
 }
@@ -196,6 +222,17 @@ interface CountedGuard {
   kept: number;
 }
 
+// The trap candidates of one function, and the variants kept so far.
+interface Plan {
+  fn: string;
+  candidates: Generator<Variant>;
+  inputs: Input[];
+  exhausted: boolean;
+}
+
+// Guards are keyed by the function and the argument they guard.
+type GuardTable = Map<string, CountedGuard>;
+
 const guardKey = (fn: string, argument: number): string => JSON.stringify([fn, argument]);
 
 // A guard of another file than the recorded module is written `<file>#<export>`.
@@ -204,8 +241,8 @@ function guardParts(guard: string): { file: string | null; name: string } {
   return hash === -1 ? { file: null, name: guard } : { file: guard.slice(0, hash), name: guard.slice(hash + 1) };
 }
 
-async function countedGuards(repoRoot: string, specs: readonly GuardSpec[]): Promise<Map<string, CountedGuard>> {
-  const guards = new Map<string, CountedGuard>();
+async function countedGuards(repoRoot: string, specs: readonly GuardSpec[]): Promise<GuardTable> {
+  const guards: GuardTable = new Map();
   for (const { fn, argument, guard } of specs) {
     if (guards.has(guardKey(fn, argument))) throw new Error(`Two guards for argument ${argument} of ${fn}.`);
     const { file, name } = guardParts(guard);
@@ -224,6 +261,65 @@ async function countedGuards(repoRoot: string, specs: readonly GuardSpec[]): Pro
 function shownPath(repoRoot: string, path: string): string {
   const shown = relative(repoRoot, path);
   return shown.startsWith('..') ? path : shown;
+}
+
+// Fills a function with trap variants, up to MAX_VARIANTS_PER_FUNCTION. Each
+// variant of a guarded argument is kept only when the original's guard accepts
+// it. Candidates keep coming, in their order, until the function has its fill
+// or they run out, so a guard costs a function none of the variants a port can
+// receive. `known` receives every variant that is kept, so that an explicit
+// input equal to it is not repeated.
+async function fillPlan(
+  modulePath: string,
+  plan: Plan,
+  guards: ReadonlyMap<number, CountedGuard>,
+  known: Set<string>,
+  stallMs: number,
+  noise: string[],
+): Promise<void> {
+  while (plan.inputs.length < MAX_VARIANTS_PER_FUNCTION && !plan.exhausted) {
+    const batch: Array<{ variant: Variant; input: Input }> = [];
+    const remaining = MAX_VARIANTS_PER_FUNCTION - plan.inputs.length;
+    while (batch.length < remaining) {
+      const next = plan.candidates.next();
+      if (next.done) {
+        plan.exhausted = true;
+        break;
+      }
+      const variant = next.value;
+      const guard = guards.get(variant.argument);
+      batch.push({
+        variant,
+        input: { fn: plan.fn, args: variant.args, kind: 'trap', origin: variant.origin, ...(guard ? { guard: { argument: variant.argument, spec: guard.spec } } : {}) },
+      });
+    }
+    const asked = batch.filter((entry) => entry.input.guard !== undefined);
+    const guarded = asked.map((entry) => entry.input);
+    const first = await askGuards(modulePath, guarded, stallMs);
+    const second = await askGuards(modulePath, guarded, stallMs);
+    let index = 0;
+    for (const { variant, input } of batch) {
+      if (input.guard === undefined) {
+        plan.inputs.push(input);
+        known.add(callKey(plan.fn, input.args));
+        continue;
+      }
+      const guard = guards.get(variant.argument)!;
+      const a = first[index];
+      const b = second[index++];
+      if (a !== b && a !== 'stalled' && b !== 'stalled') {
+        throw new Error(`A guard of ${plan.fn} did not decide the same way in both runs: ${variant.origin}.`);
+      }
+      const verdict = a === 'stalled' || b === 'stalled' ? 'stalled' : a;
+      if (verdict === 'kept') guard.kept += 1;
+      else guard.dropped += 1;
+      if (verdict === 'stalled') noise.push(`${variant.origin} (${plan.fn}): its guard gave no answer within ${stallMs} ms; not recorded`);
+      if (verdict === 'kept') {
+        plan.inputs.push(input);
+        known.add(callKey(plan.fn, input.args));
+      }
+    }
+  }
 }
 
 // Records a module in memory: the calls its tests make to its exports, from
@@ -248,24 +344,34 @@ export async function recordUnit(options: RecordOptions): Promise<Recording> {
 
   const functions = [...new Set([...observed.cases, ...explicit].map((entry) => entry.fn))];
   const known = new Set(observed.cases.map((entry) => callKey(entry.fn, entry.args)));
-  const inputs: Input[] = [];
+  // Every candidate generated, so that none is generated twice.
+  const generated = new Set<string>();
+  const jsonArguments = options.jsonArguments ?? [];
+  for (const { fn, argument } of jsonArguments) {
+    if (!functions.includes(fn)) throw new Error(`--json ${fn}:${argument}: no call to a function of that name was recorded.`);
+  }
   const noise = [...observed.noise];
-  for (const fn of functions) {
-    const variants = trapVariants(
+  const stallMs = options.stallMs ?? EVALUATE_STALL_MS;
+  const plans: Plan[] = functions.map((fn) => ({
+    fn,
+    candidates: candidateVariants(
       observed.cases.filter((entry) => entry.fn === fn).map((entry) => entry.args),
       (args) => {
         const key = callKey(fn, args);
-        if (known.has(key)) return true;
-        known.add(key);
+        if (known.has(key) || generated.has(key)) return true;
+        generated.add(key);
         return false;
       },
-    );
-    // A call the tests made is always a case; only a trap variant asks its guard.
-    inputs.push(...variants.map((variant): Input => {
-      const guard = guards.get(guardKey(fn, variant.argument));
-      return { fn, args: variant.args, kind: 'trap', origin: variant.origin, ...(guard ? { guard: { argument: variant.argument, spec: guard.spec } } : {}) };
-    }));
+      new Set(jsonArguments.filter((entry) => entry.fn === fn).map((entry) => entry.argument)),
+    ),
+    inputs: [],
+    exhausted: false,
+  }));
+  for (const plan of plans) {
+    const own = new Map([...guards.values()].filter((guard) => guard.fn === plan.fn).map((guard) => [guard.argument, guard]));
+    await fillPlan(modulePath, plan, own, known, stallMs, noise);
   }
+  const inputs: Input[] = plans.flatMap((plan) => plan.inputs);
   for (const input of explicit) {
     if (known.has(callKey(input.fn, input.args))) {
       noise.push(`${input.fn} (${JSON.stringify(input.args).slice(0, 80)}) [${input.origin}]: equals a recorded case; not repeated`);
@@ -274,7 +380,6 @@ export async function recordUnit(options: RecordOptions): Promise<Recording> {
     inputs.push(input);
   }
 
-  const stallMs = options.stallMs ?? EVALUATE_STALL_MS;
   const first = await evaluateInputs(modulePath, inputs, stallMs);
   const second = await evaluateInputs(modulePath, inputs, stallMs);
   const evaluated = inputs.map((input, index) => ({ input, ...mergeEvaluation(input, first[index]!, second[index]!, stallMs) }));
@@ -283,11 +388,6 @@ export async function recordUnit(options: RecordOptions): Promise<Recording> {
   // counted per function and reason.
   const counted = new Map<string, NotCaptured>();
   for (const entry of evaluated) {
-    if (entry.input.guard) {
-      const guard = guards.get(guardKey(entry.input.fn, entry.input.guard.argument))!;
-      if (entry.guarded) guard.dropped += 1;
-      else guard.kept += 1;
-    }
     noise.push(...entry.noise);
     if (!entry.notCaptured) continue;
     const { at: _at, ...rest } = entry.notCaptured;
@@ -331,6 +431,8 @@ export async function recordUnit(options: RecordOptions): Promise<Recording> {
       tests: options.tests,
       inputs: inputsPath ? relative(options.repoRoot, inputsPath) : null,
       guards: manifestGuards,
+      jsonArguments,
+      bunVersion: Bun.version,
       notCaptured,
     },
     review,
