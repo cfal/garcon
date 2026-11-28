@@ -49,7 +49,7 @@ pub trait AgentLogger {
 }
 
 pub trait AgentEnvironmentReader {
-    fn get(&self, name: &str) -> Option<String>;
+    fn get(&self, name: &str) -> ExecutorResult<Option<String>>;
 }
 
 #[derive(Clone, Serialize, Deserialize)]
