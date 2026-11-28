@@ -1048,6 +1048,7 @@ dependencies = [
  "garcon-contract",
  "garcon-interface",
  "garcon-js",
+ "garcon-link",
  "indexmap",
  "serde",
  "serde_json",
