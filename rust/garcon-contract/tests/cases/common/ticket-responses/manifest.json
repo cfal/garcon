@@ -1,0 +1,54 @@
+{
+  "module": "common/ticket-responses.ts",
+  "tests": [
+    "common/__tests__/ticket-responses.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/ticket-responses.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseTicketBootstrap",
+      "argument": 0
+    },
+    {
+      "fn": "parseTicketSummary",
+      "argument": 0
+    },
+    {
+      "fn": "parseTicketPage",
+      "argument": 0
+    },
+    {
+      "fn": "parseTicketCommentView",
+      "argument": 0
+    },
+    {
+      "fn": "parseTicketCommentsPage",
+      "argument": 0
+    },
+    {
+      "fn": "parseTicketHistoryPage",
+      "argument": 0
+    },
+    {
+      "fn": "parseTicketDetail",
+      "argument": 0
+    },
+    {
+      "fn": "parseTicketCounts",
+      "argument": 0
+    },
+    {
+      "fn": "parseTicketFacets",
+      "argument": 0
+    },
+    {
+      "fn": "parseTicketProjectDefault",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 634,
+  "sha256": "059cd7b87a0ae1675d3769adcc553a1b34f04a28991ceca02c9883437d78b69c"
+}
