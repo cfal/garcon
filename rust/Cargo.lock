@@ -898,6 +898,7 @@ name = "garcon-agent-claude"
 version = "0.0.0"
 dependencies = [
  "futures",
+ "garcon-agents-common",
  "garcon-base",
  "garcon-cases",
  "garcon-contract",
@@ -911,6 +912,8 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-util",
+ "uuid",
 ]
 
 [[package]]
