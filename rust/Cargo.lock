@@ -1146,8 +1146,10 @@ dependencies = [
 name = "garcon-search"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "garcon-cases",
  "garcon-contract",
+ "garcon-interface",
  "garcon-js",
  "icu_normalizer",
  "indexmap",

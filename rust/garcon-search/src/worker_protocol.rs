@@ -188,6 +188,12 @@ pub(crate) fn json_bytes_within(value: &(impl Serialize + ?Sized), bytes: usize)
     serde_json::to_writer(ByteBudget(bytes), value).is_ok()
 }
 
+pub(crate) fn json_byte_len(value: &(impl Serialize + ?Sized)) -> serde_json::Result<usize> {
+    let mut budget = ByteBudget(usize::MAX);
+    serde_json::to_writer(&mut budget, value)?;
+    Ok(usize::MAX - budget.0)
+}
+
 pub(crate) fn valid_indexer_request(request: &IndexerRequest) -> bool {
     use IndexerRequest::*;
     match request {

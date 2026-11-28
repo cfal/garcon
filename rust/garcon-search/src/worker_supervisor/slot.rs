@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use tokio::time::timeout;
+use tokio::{sync::Notify, time::timeout};
 use tokio_util::sync::CancellationToken;
 
 use super::{Response, SearchWorker, WorkerError, cancelled};
@@ -27,14 +27,16 @@ pub struct WorkerSlot<R, E> {
     epoch: Cell<u64>,
     current: RefCell<Option<SearchWorker<R, E>>>,
     changing: Cell<bool>,
+    changed: Notify,
     admitted: Cell<bool>,
 }
 
-struct Changing<'a>(&'a Cell<bool>);
+struct Changing<'a>(&'a Cell<bool>, &'a Notify);
 
 impl Drop for Changing<'_> {
     fn drop(&mut self) {
         self.0.set(false);
+        self.1.notify_waiters();
     }
 }
 
@@ -65,6 +67,7 @@ impl<R: Send + 'static, E: Send + 'static> WorkerSlot<R, E> {
             epoch: Cell::new(0),
             current: RefCell::new(None),
             changing: Cell::new(false),
+            changed: Notify::new(),
             admitted: Cell::new(false),
         }
     }
@@ -80,6 +83,10 @@ impl<R: Send + 'static, E: Send + 'static> WorkerSlot<R, E> {
             .cloned()
     }
 
+    pub(crate) fn current_worker(&self) -> Option<SearchWorker<R, E>> {
+        self.current.borrow().clone()
+    }
+
     pub fn retire(&self) {
         self.admitted.set(false);
         if let Some(worker) = self.current.borrow().as_ref() {
@@ -91,7 +98,7 @@ impl<R: Send + 'static, E: Send + 'static> WorkerSlot<R, E> {
         if self.changing.replace(true) {
             return Err(WorkerError::Active);
         }
-        Ok(Changing(&self.changing))
+        Ok(Changing(&self.changing, &self.changed))
     }
 
     pub async fn start(
@@ -139,7 +146,13 @@ impl<R: Send + 'static, E: Send + 'static> WorkerSlot<R, E> {
     }
 
     pub async fn stop(&self, deadline: Duration) -> Result<(), WorkerError> {
-        let _change = self.begin_change()?;
+        let _change = loop {
+            let changed = self.changed.notified();
+            if let Ok(guard) = self.begin_change() {
+                break guard;
+            }
+            changed.await;
+        };
         self.admitted.set(false);
         let Some(worker) = self.current.borrow().clone() else {
             return Ok(());

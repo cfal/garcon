@@ -160,6 +160,7 @@ impl Reader {
                 if !done {
                     return Ok(None);
                 }
+                // INFALLIBLE: the checked search remains present until removal in this handler.
                 let search = self
                     .searches
                     .remove(&request_id)
