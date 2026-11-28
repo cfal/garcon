@@ -4,6 +4,7 @@ use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
+use garcon_base::errors::{DiagnosticError, ErrorInput, diagnostic_error_code};
 use garcon_base::path_boundary::ProjectBoundaryError;
 use garcon_cases::{CaseError, replay, text};
 use garcon_contract::git_error::{GitServiceError, GitServiceErrorCode};
@@ -173,6 +174,11 @@ esac"#,
             .unwrap_err();
         let error = error.downcast_ref::<GitOutputLimitError>().unwrap();
         assert_eq!((error.stream, error.max_bytes), ("stdout", 1024));
+        assert_eq!(error.diagnostic_metadata().name, "GitOutputLimitError");
+        assert_eq!(
+            diagnostic_error_code(ErrorInput::Diagnostic(error)),
+            "GitOutputLimitError"
+        );
         assert_eq!(git.attempts(), 1);
         let result = run_git(git.cwd(), args("stderr"), options).await.unwrap();
         assert_eq!(result.stdout, "");

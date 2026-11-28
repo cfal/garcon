@@ -5,6 +5,7 @@ use std::future::Future;
 use std::rc::Rc;
 
 use garcon_base::errors::NamedError;
+use garcon_base::keyed_lock::LockAborted;
 use garcon_base::path_boundary::resolve_real_within_base;
 use garcon_contract::git_error::{GitServiceError, GitServiceErrorCode};
 use garcon_contract::git_execution::GIT_OPERATION_TIMEOUT_MS;
@@ -13,6 +14,8 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, sleep_until};
 use tokio_util::sync::CancellationToken;
+
+use crate::cancellation::check_cancelled;
 
 use super::git_domain_error::GitDomainError;
 use super::types::{GitCommandOptions, GitProcessError};
@@ -138,26 +141,15 @@ impl Drop for StopTimer {
     }
 }
 
-pub(super) fn git_abort_error(message: &str) -> NamedError {
-    NamedError {
-        name: "AbortError".to_owned(),
-        message: message.to_owned(),
-        code: None,
-    }
-}
-
 pub(super) fn check_git_cancelled(signal: &CancellationToken) -> Result<(), NamedError> {
-    if signal.is_cancelled() {
-        Err(git_abort_error("This operation was aborted"))
-    } else {
-        Ok(())
-    }
+    check_cancelled(Some(signal))
 }
 
 pub fn is_git_cancellation(error: &(dyn std::error::Error + 'static)) -> bool {
     error
         .downcast_ref::<NamedError>()
         .is_some_and(|error| matches!(error.name.as_str(), "AbortError" | "TimeoutError"))
+        || error.is::<LockAborted>()
         || error
             .downcast_ref::<GitProcessError>()
             .is_some_and(|error| error.aborted == Some(true) || error.timed_out == Some(true))
@@ -258,4 +250,89 @@ pub(super) fn mark_git_output_truncated() {
 
 pub fn git_output_truncated() -> bool {
     current().is_some_and(|context| context.output_truncated.get())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use garcon_base::errors::{ErrorInput, diagnostic_error_code};
+    use garcon_base::keyed_lock::KeyedLock;
+    use tokio::sync::oneshot;
+    use tokio::task::LocalSet;
+    use tokio::time::timeout;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn preaborted_git_scope_preserves_abort_metadata() {
+        let signal = CancellationToken::new();
+        signal.cancel();
+        let options = ExecutorCallOptions {
+            signal: Some(signal),
+            ..Default::default()
+        };
+        let result = LocalSet::new()
+            .run_until(with_git_operation::<(), _>(
+                "/",
+                Some(options),
+                false,
+                |_| async {
+                    panic!("preaborted operation must not run");
+                },
+            ))
+            .await;
+        let error = result.unwrap_err();
+        assert_eq!(
+            diagnostic_error_code(ErrorInput::Error(error.as_ref())),
+            "AbortError"
+        );
+        assert!(is_git_cancellation(error.as_ref()));
+        assert_eq!(error.to_string(), "The operation was aborted.");
+    }
+
+    #[tokio::test]
+    async fn cancelled_repository_lock_waiter_is_git_cancellation() {
+        let lock = KeyedLock::new();
+        let signal = CancellationToken::new();
+        let (entered, entered_rx) = oneshot::channel();
+        let (release, release_rx) = oneshot::channel();
+        let owner = lock.run_exclusive(
+            "repo",
+            || async {
+                entered.send(()).unwrap();
+                release_rx.await.unwrap();
+            },
+            None,
+        );
+        let waiter = async {
+            entered_rx.await.unwrap();
+            let work = lock.run_exclusive(
+                "repo",
+                || async {
+                    panic!("cancelled waiter must not acquire the lock");
+                },
+                Some(&signal),
+            );
+            tokio::pin!(work);
+            assert!(futures::poll!(&mut work).is_pending());
+            signal.cancel();
+            let result: ExecutorResult<()> = work.await.map_err(Into::into);
+            release.send(()).unwrap();
+            result
+        };
+        let (owner, result) = timeout(Duration::from_secs(1), async {
+            tokio::join!(owner, waiter)
+        })
+        .await
+        .unwrap();
+        owner.unwrap();
+        let error = result.unwrap_err();
+        assert_eq!(
+            diagnostic_error_code(ErrorInput::Error(error.as_ref())),
+            "AbortError"
+        );
+        assert!(is_git_cancellation(error.as_ref()));
+        assert_eq!(error.to_string(), "The operation was aborted.");
+    }
 }

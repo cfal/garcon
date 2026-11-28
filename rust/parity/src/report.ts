@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Golden } from './golden.js';
 import { compareWithKnown, missingKnownCase, type KnownDifference } from './known-differences.js';
-import type { CaseRun } from './runner.js';
+import type { CaseRun, UnavailableCase } from './runner.js';
 import type { Difference } from './wildcard.js';
 
 export interface CaseResult {
@@ -9,6 +9,7 @@ export interface CaseResult {
   name: string;
   difference: Difference | null;
   native: boolean;
+  unavailable?: UnavailableCase;
   fallbacks: string[];
 }
 
@@ -26,7 +27,7 @@ export function compareScenario(golden: Golden | null, runs: CaseRun[], scenario
     scenario,
     name,
     difference,
-    native: run !== undefined && run.fallbacks.length === 0,
+    native: difference === null && run !== undefined && !run.unavailable && run.fallbacks.length === 0,
     fallbacks: run?.fallbacks ?? [],
   });
   const byName = new Map(runs.map((run) => [run.name, run]));
@@ -34,15 +35,33 @@ export function compareScenario(golden: Golden | null, runs: CaseRun[], scenario
   const approvals = known.filter((entry) => entry.scope === 'scenario' && entry.name === scenario);
   const cases = golden.cases.map((expected) => {
     const run = byName.get(expected.name);
-    return run
-      ? result(expected.name, compareWithKnown(expected.expected, run.capture, approvals.filter((entry) => entry.case === expected.name)), run)
-      : result(expected.name, { path: '$', kind: 'missing', expected: 'a recorded case', actual: '(case no longer generated)' });
+    if (!run) return result(expected.name, { path: '$', kind: 'missing', expected: 'a recorded case', actual: '(case no longer generated)' });
+    if (run.unavailable) return { ...result(expected.name, null, run), unavailable: run.unavailable };
+    if (run.unresolvedPlaceholder !== undefined) {
+      return result(expected.name, { path: '$.request', kind: 'missing', expected: 'all response placeholders resolved', actual: run.unresolvedPlaceholder }, run);
+    }
+    return result(expected.name, compareWithKnown(expected.expected, run.capture, approvals.filter((entry) => entry.case === expected.name)), run);
   });
   // A step added without recording again would otherwise never be checked.
   const unrecorded = runs.filter((run) => !recorded.has(run.name)).map((run) =>
     result(run.name, { path: '$', kind: 'extra', expected: '(not recorded)', actual: 'a generated case; run bun run parity:record' }, run));
   const stale = approvals.filter((entry) => !recorded.has(entry.case) && !byName.has(entry.case));
   return { scenario, missingGolden: false, cases: [...cases, ...unrecorded, ...stale.map((entry) => result(entry.case, missingKnownCase(entry)))] };
+}
+
+export function replayPassed(results: ScenarioResult[], allowUnported = false): boolean {
+  return results.every((result) => !result.missingGolden
+    && result.cases.every((entry) => entry.difference === null && (allowUnported || !entry.unavailable)));
+}
+
+function counts(cases: CaseResult[]) {
+  return {
+    passed: cases.filter((entry) => !entry.difference && !entry.unavailable).length,
+    native: cases.filter((entry) => entry.native).length,
+    unported: cases.filter((entry) => entry.unavailable?.kind === 'unported').length,
+    blocked: cases.filter((entry) => entry.unavailable?.kind === 'blocked').length,
+    mismatching: cases.filter((entry) => entry.difference).length,
+  };
 }
 
 // Failures that differ the same way share one field and kind, so one port bug
@@ -64,9 +83,16 @@ function cell(text: string): string {
 // never recorded, and the first difference of each of the first failing cases.
 export function replaySummary(results: ScenarioResult[], report: string): string {
   const failing = results.flatMap((result) => result.cases).filter((result) => result.difference);
-  const lines = report.split('\n');
-  const neverRecorded = lines.findIndex((line) => line.startsWith('Never recorded:'));
-  const shown = lines.slice(0, neverRecorded === -1 ? 6 : neverRecorded + 1);
+  const shown = [report.split('\n\n## ', 1)[0]!];
+  for (const { scenario, cases } of results) {
+    const { unported } = counts(cases);
+    if (unported > 0) shown.push(`UNPORTED ${scenario}: ${unported} cases`);
+    for (const entry of cases) {
+      if (entry.unavailable?.kind === 'blocked') {
+        shown.push(`BLOCKED ${scenario}/${entry.name} by ${entry.unavailable.supplier}`);
+      }
+    }
+  }
   for (const result of failing.slice(0, 20)) {
     shown.push(`FAIL ${result.scenario}/${result.name} at ${result.difference!.path}: expected ${result.difference!.expected}, got ${result.difference!.actual}`);
   }
@@ -78,14 +104,19 @@ export function replaySummary(results: ScenarioResult[], report: string): string
 export function renderReport(label: string, results: ScenarioResult[], measuresFallback: boolean): string {
   const cases = results.flatMap((result) => result.cases);
   const failing = cases.filter((result) => result.difference);
-  const native = cases.filter((result) => result.native).length;
+  const total = counts(cases);
   const lines: string[] = [];
   lines.push('# Parity replay report', '');
   lines.push(`Build: \`${label}\``, '');
-  lines.push(`Passed: ${cases.length - failing.length}/${cases.length} cases`);
+  lines.push(`Passed: ${total.passed}/${cases.length} cases`);
   if (measuresFallback) {
-    const rate = cases.length === 0 ? 0 : ((cases.length - native) / cases.length) * 100;
-    lines.push(`Served without falling back to the original: ${native}/${cases.length} (fallback rate ${rate.toFixed(1)}%)`);
+    lines.push(
+      `Matched natively: ${total.native}/${cases.length} cases`,
+      `Matched via fallback: ${total.passed - total.native}/${cases.length} cases`,
+      `Unported: ${total.unported}/${cases.length} cases`,
+      `Blocked by an unported step: ${total.blocked}/${cases.length} cases`,
+      `Mismatching: ${total.mismatching}/${cases.length} cases`,
+    );
   }
   const missing = results.filter((result) => result.missingGolden).map((result) => result.scenario);
   if (missing.length > 0) lines.push('', `Never recorded: ${missing.join(', ')}`);
@@ -107,11 +138,27 @@ export function renderReport(label: string, results: ScenarioResult[], measuresF
     }
   }
 
-  lines.push('', '## Scenarios', '', '| scenario | passed | native |', '| --- | ---: | ---: |');
+  lines.push('', '## Scenarios', '');
+  if (measuresFallback) {
+    lines.push('| scenario | passed | matched natively | unported | blocked | mismatching |', '| --- | ---: | ---: | ---: | ---: | ---: |');
+  } else {
+    lines.push('| scenario | passed | native |', '| --- | ---: | ---: |');
+  }
   for (const result of results) {
-    const passed = result.cases.filter((entry) => !entry.difference).length;
-    const nativeCount = result.cases.filter((entry) => entry.native).length;
-    lines.push(`| ${result.scenario} | ${passed}/${result.cases.length} | ${measuresFallback ? `${nativeCount}/${result.cases.length}` : 'n/a'} |`);
+    const { passed, native, unported, blocked, mismatching } = counts(result.cases);
+    const runCount = result.cases.length;
+    const classifications = measuresFallback ? `${native}/${runCount} | ${unported} | ${blocked} | ${mismatching}` : 'n/a';
+    lines.push(`| ${result.scenario} | ${passed}/${runCount} | ${classifications} |`);
+  }
+
+  if (total.unported + total.blocked > 0) {
+    lines.push('', '## Unported and blocked cases', '');
+    for (const entry of cases) {
+      if (entry.unavailable?.kind === 'unported') lines.push(`- ${entry.scenario}/${entry.name}: unported`);
+      if (entry.unavailable?.kind === 'blocked') {
+        lines.push(`- ${entry.scenario}/${entry.name}: blocked by ${entry.unavailable.supplier}`);
+      }
+    }
   }
 
   if (failing.length > 0) {
