@@ -50,6 +50,7 @@ not a claim that its implementations have landed.
 | Unit case | Recorded invocation of a pure module with its TypeScript arguments and result. Separate from edge scenarios and suite traces. |
 | JavaScript compatibility helpers | `garcon-js`; JS semantics such as UTF-16, JSON, numbers and lexical path operations, not application policy. |
 | Shared wire contract | `garcon-contract` DTOs and codecs; Rust casing may differ but message names and property spelling do not change. |
+| `lib/` of `server-agents/common` | A crate cannot have a module named `lib`, so `lib/{errors,jsonl,json-file-store}.ts` are `garcon_agents_common::{errors, jsonl, json_file_store}` at the crate root. |
 
 Sources: [MAP.md](MAP.md), [RULES.md](RULES.md), [DECISIONS.md](DECISIONS.md),
 [executor transport](../docs/executor/transport.md),

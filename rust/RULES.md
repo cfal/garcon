@@ -126,6 +126,14 @@ the user corrects how a port behaves, the correction is added under
   `serde_json`'s. They replace a lone surrogate escape, which a JavaScript
   string can hold and a Rust `String` cannot, with U+FFFD instead of failing
   the whole document.
+- Two inputs are parse errors at the JSON boundary where the original reads
+  them (`garcon-js/src/json.rs`): a number literal beyond the double range
+  (`1e400`, which the original reads as an infinity and prints as `null`)
+  and nesting deeper than 128 levels. Record such cases and list them in
+  `known-differences.jsonl` with the reason "number beyond the double range
+  is a parse error at the JSON boundary" or "nesting deeper than 128 levels
+  is a parse error at the JSON boundary"; do not leave the inputs out and do
+  not work around the parser.
 - Opaque JSON, a value that came from outside and is written out again (tool
   input, provider payloads, stored rows), is a `garcon_js::json::Opaque`, not
   a bare `serde_json::Value`. `Opaque` reads numbers as JavaScript doubles and
