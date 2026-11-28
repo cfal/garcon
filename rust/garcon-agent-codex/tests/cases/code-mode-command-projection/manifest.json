@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agent-codex/tests/oracles/code-mode-command-projection.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-codex/tests/oracles/code-mode-projection-inputs.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 11,
+  "sha256": "cb9f095c82145567a1feeaeb081101c02a5ac96484942f7f12232612f15a0e8f"
+}

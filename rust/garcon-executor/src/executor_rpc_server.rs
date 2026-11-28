@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
+use crate::git_rpc_server::GitRpcServer;
 use crate::history_rpc_server::HistoryRpcServer;
 use crate::producer_relay::{LaunchRequest, ProducerRelay, ProducerRelaySession, RelayIntegration};
 use crate::terminal_rpc_server::TerminalRpcServer;
@@ -42,6 +43,7 @@ pub(crate) struct ExecutorRpcServer {
     relay: Rc<ProducerRelay>,
     producer_session: ProducerRelaySession,
     terminals: Rc<TerminalRpcServer>,
+    git: GitRpcServer,
     histories: RefCell<HashMap<String, Rc<HistoryRpcServer>>>,
     disposed: Cell<bool>,
     unsubscribe: RefCell<Vec<Box<dyn Fn()>>>,
@@ -67,6 +69,7 @@ impl ExecutorRpcServer {
         }
         let server = Rc::new(Self {
             terminals: TerminalRpcServer::new(api.terminals(), primary),
+            git: GitRpcServer::new(api.clone()),
             histories: RefCell::default(),
             api,
             primary: Rc::downgrade(primary),
@@ -285,8 +288,11 @@ impl ExecutorRpcServer {
                 validate_file_rpc_request(method, request).map_err(shared_error)?;
                 self.handle_files(method, request, signal).await
             }
-            method if is_git_rpc_method(method) && !call.integration_id.is_empty() => {
-                Err(rejected("Git operations are executor services"))
+            method if is_git_rpc_method(method) => {
+                if !call.integration_id.is_empty() {
+                    return Err(rejected("Git operations are executor services"));
+                }
+                self.git.handle(call, signal).await
             }
             "catalog.snapshot"
             | "settings.migrate"

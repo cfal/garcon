@@ -1,0 +1,14 @@
+{"fn":"sessionConfigTrace","args":["chat",null]}
+{"fn":"sessionConfigTrace","args":["chat",{}]}
+{"fn":"sessionConfigTrace","args":["chat",{"projectPath":"","model":"model"}]}
+{"fn":"sessionConfigTrace","args":["chat",{"projectPath":"/repo","model":""}]}
+{"fn":"sessionConfigTrace","args":["chat",{"projectPath":"/repo","model":"model"}]}
+{"fn":"sessionConfigTrace","args":["chat",{"executorId":null,"projectPath":"/repo","model":"model","permissionMode":"invalid","thinkingMode":"think-harder"}]}
+{"fn":"sessionConfigTrace","args":["chat",{"executorId":"remote","projectPath":" ","model":" ","permissionMode":"acceptEdits","thinkingMode":"ultra","agentSettingsById":{"sample":{"ownerId":"sample","schemaVersion":1,"values":{"n":1.0,"big":9007199254740992,"exp21":1e21}}}}]}
+{"fn":"sessionAdmissionTrace","args":["absent"]}
+{"fn":"sessionAdmissionTrace","args":["open"]}
+{"fn":"sessionAdmissionTrace","args":["stopped"]}
+{"fn":"executionAbortsTrace","args":["other-owner"]}
+{"fn":"executionAbortsTrace","args":["replace"]}
+{"fn":"executionAbortsTrace","args":["async-rejection"]}
+{"fn":"executionAbortsTrace","args":["ready"]}

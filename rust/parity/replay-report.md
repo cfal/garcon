@@ -2,13 +2,13 @@
 
 Build: `garcon-server`
 
-Passed: 12249/12249 cases
-Matched natively: 122/12249 cases
-Matched via fallback: 12127/12249 cases
-Unported: 0/12249 cases
-Blocked by an unported step: 0/12249 cases
-After an unported write: 0/12249 cases
-Mismatching: 0/12249 cases
+Passed: 12254/12254 cases
+Matched natively: 122/12254 cases
+Matched via fallback: 12132/12254 cases
+Unported: 0/12254 cases
+Blocked by an unported step: 0/12254 cases
+After an unported write: 0/12254 cases
+Mismatching: 0/12254 cases
 
 ## Scenarios
 
@@ -38,6 +38,7 @@ Mismatching: 0/12249 cases
 | chat-canvases | 525/525 | 0/525 | 0 | 0 | 0 | 0 |
 | chat-tags | 547/547 | 0/547 | 0 | 0 | 0 | 0 |
 | duplicate-http-headers | 5/5 | 0/5 | 0 | 0 | 0 | 0 |
+| executors-connection | 5/5 | 0/5 | 0 | 0 | 0 | 0 |
 | executors-seeded | 271/271 | 0/271 | 0 | 0 | 0 | 0 |
 | executors | 600/600 | 0/600 | 0 | 0 | 0 | 0 |
 | exhausted-revisions | 243/243 | 0/243 | 0 | 0 | 0 | 0 |

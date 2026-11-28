@@ -375,11 +375,16 @@ async fn edge_routes(web_build_dir: PathBuf, config: &Path) -> compose_routes::R
 
 #[tokio::test]
 async fn unported_inventory_matches_the_original_after_subtracting_registered_handlers() {
+    use garcon_stores::executors::config_store::ExecutorConfigStore;
+    use garcon_stores::tickets::{service::TicketServiceOptions, setup::initialize_tickets};
+
     let config = tempfile::tempdir().unwrap();
     let edge_routes = LocalSet::new()
         .run_until(edge_routes("/fixture/build".into(), config.path()))
         .await;
-    use garcon_stores::tickets::{service::TicketServiceOptions, setup::initialize_tickets};
+    let executors = ExecutorConfigStore::open(&config.path().to_string_lossy())
+        .await
+        .unwrap();
     let tickets = Rc::new(initialize_tickets(
         config.path(),
         TicketServiceOptions {
@@ -391,6 +396,7 @@ async fn unported_inventory_matches_the_original_after_subtracting_registered_ha
     ));
     let routes = compose_routes::compose_routes([
         &edge_routes,
+        &routes::executors::create_executor_connection_routes(&executors, None, "/tools".into()),
         &routes::tickets::create_ticket_routes(&tickets),
     ])
     .unwrap();

@@ -3,7 +3,6 @@
   {"method":"POST","path":"/api/v1/executors"},
   {"method":"PATCH","path":"/api/v1/executors/:executorId"},
   {"method":"DELETE","path":"/api/v1/executors/:executorId"},
-  {"method":"GET","path":"/api/v1/executors/:executorId/connection"},
   {"method":"GET","path":"/api/v1/usage"},
   {"method":"GET","path":"/api/v1/agents/cli-updates"},
   {"method":"POST","path":"/api/v1/agents/cli-updates"},

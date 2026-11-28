@@ -17,7 +17,7 @@ use crate::chat_message_coercion::{
 };
 use crate::cli_presentation::{
     CliBodyDisclosure, CliPresentation, CliRowFormat, coerce_durable_cli_body_disclosure,
-    coerce_durable_cli_presentation, is_cli_row_format,
+    coerce_durable_cli_presentation, is_cli_presentation, is_cli_row_format,
 };
 use crate::command_output::{
     CommandOutcome, CommandOutputContext, command_outcome_text, is_command_output_data,
@@ -100,7 +100,7 @@ message_structs! {
     CliRowMessage("cli-row") {
         timestamp: String,
         content: String,
-        presentation: CliPresentation,
+        presentation: Opaque,
         format: CliRowFormat,
         #[serde(skip_serializing_if = "Option::is_none")]
         title: Option<String>,
@@ -232,6 +232,21 @@ pub fn is_tool_use_message(message: &ChatMessage) -> bool {
     matches!(message, ChatMessage::ToolUse(_))
 }
 
+fn durable_cli_presentation_wire(value: &Value) -> Opaque {
+    if is_cli_presentation(value).is_some() {
+        return value.clone().into();
+    }
+    match coerce_durable_cli_presentation(value) {
+        // The fallback rebuilds the outer object but keeps the validated customStyle object.
+        CliPresentation::Custom { .. } => serde_json::json!({
+            "style": "custom",
+            "customStyle": value["customStyle"],
+        })
+        .into(),
+        preset => serde_json::json!(preset).into(),
+    }
+}
+
 pub fn parse_chat_message(data: &Value) -> Result<Option<ChatMessage>, InvalidAsyncQuestionReply> {
     use ChatMessage as Message;
     let Some(raw) = data.as_object() else {
@@ -317,7 +332,7 @@ pub fn parse_chat_message(data: &Value) -> Result<Option<ChatMessage>, InvalidAs
         Some(CliRowMessage::TYPE) => Message::CliRow(CliRowMessage {
             timestamp: timestamp(),
             content: content(),
-            presentation: coerce_durable_cli_presentation(&data["presentation"]),
+            presentation: durable_cli_presentation_wire(&data["presentation"]),
             format: is_cli_row_format(&data["format"]).unwrap_or(CliRowFormat::Plain),
             title: nonempty_string(&data["title"]),
             disclosure: coerce_durable_cli_body_disclosure(&data["disclosure"]),

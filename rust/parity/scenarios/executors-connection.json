@@ -1,0 +1,19 @@
+{
+  "name": "executors-connection",
+  "description": "Authenticated credential export reads private configuration without changing executor state or depending on a preceding API write.",
+  "server": {
+    "basePath": "/tools/garcon",
+    "files": {
+      "workspace/api-provider-assignments.json": "{\"version\":1,\"revision\":0,\"assignments\":{}}",
+      "workspace/workspace-version.json": "{\"version\":10}",
+      "workspace/executors.json": "{\"version\":1,\"executors\":[{\"id\":\"11111111-1111-4111-8111-111111111111\",\"label\":\"Incoming\",\"enabled\":false,\"noTls\":false,\"secret\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQ\",\"connection\":{\"kind\":\"executor-connects\",\"advertisedUrl\":null}},{\"id\":\"22222222-2222-4222-8222-222222222222\",\"label\":\"Outgoing\",\"enabled\":false,\"noTls\":false,\"allowUnverifiedTls\":true,\"secret\":\"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBAQ\",\"connection\":{\"kind\":\"controller-connects\",\"targetUrl\":\"wss://worker.example.invalid/worker?tag=a&tag=b\"}}]}"
+    }
+  },
+  "steps": [
+    {"name":"derive-advertised-url-under-mount","http":{"method":"GET","path":"/api/v1/executors/11111111-1111-4111-8111-111111111111/connection","headers":{"Host":"Controller.Example.Invalid:4100","X-Forwarded-Host":"ignored.example.invalid","X-Forwarded-Proto":"https"}}},
+    {"name":"reject-unreachable-public-host","http":{"method":"GET","path":"/api/v1/executors/11111111-1111-4111-8111-111111111111/connection","headers":{"Host":"example.com"}}},
+    {"name":"preserve-target-url-query-and-tls-policy","http":{"method":"GET","path":"/api/v1/executors/22222222-2222-4222-8222-222222222222/connection","headers":{"Host":"example.com"}}},
+    {"name":"deny-unauthenticated-export","http":{"method":"GET","path":"/api/v1/executors/22222222-2222-4222-8222-222222222222/connection","auth":"none"}},
+    {"name":"no-local-connection","http":{"method":"GET","path":"/api/v1/executors/local/connection"}}
+  ]
+}

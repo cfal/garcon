@@ -1,0 +1,13 @@
+{
+  "module": "server/runtime/gh/pull-request-diff.ts",
+  "tests": [
+    "server/runtime/gh/__tests__/pull-request-diff.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 67,
+  "sha256": "5e622ebaa4c51fa236007d2c1e370761a69452a180c924beecd4eb3912530c44"
+}
