@@ -1,0 +1,3 @@
+{"fn":"revisionFromStat","args":[{"dev":{"$":"bigint","value":"1"},"ino":{"$":"bigint","value":"2"},"size":{"$":"bigint","value":"3"},"mtimeNs":{"$":"bigint","value":"4"},"ctimeNs":{"$":"bigint","value":"5"}}]}
+{"fn":"revisionFromStat","args":[{"dev":{"$":"bigint","value":"18446744073709551615"},"ino":{"$":"bigint","value":"9007199254740993"},"size":{"$":"bigint","value":"4194304"},"mtimeNs":{"$":"bigint","value":"1764619323456999999"},"ctimeNs":{"$":"bigint","value":"1764619323456000000"}}]}
+{"fn":"revisionFromStat","args":[{"dev":{"$":"bigint","value":"0"},"ino":{"$":"bigint","value":"2"},"size":{"$":"bigint","value":"0"},"mtimeNs":{"$":"bigint","value":"-999999"},"ctimeNs":{"$":"bigint","value":"0"}}]}
