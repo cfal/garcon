@@ -10,11 +10,14 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+async-trait.workspace = true
 garcon-js.workspace = true
+indexmap.workspace = true
 regex = "1"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio-util.workspace = true
 url.workspace = true
 
 [dev-dependencies]

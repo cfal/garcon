@@ -1,0 +1,99 @@
+{"fn":"isApiProviderId","args":["ab"]}
+{"fn":"isApiProviderId","args":["custom"]}
+{"fn":"isApiProviderId","args":["alibaba-cloud"]}
+{"fn":"isApiProviderId","args":["a-b_c9"]}
+{"fn":"isApiProviderId","args":["z9_-"]}
+{"fn":"isApiProviderId","args":["a-"]}
+{"fn":"isApiProviderId","args":["a_"]}
+{"fn":"isApiProviderId","args":["abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]}
+{"fn":"isApiProviderId","args":["abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]}
+{"fn":"isApiProviderId","args":["a"]}
+{"fn":"isApiProviderId","args":[""]}
+{"fn":"isApiProviderId","args":["A"]}
+{"fn":"isApiProviderId","args":["Custom"]}
+{"fn":"isApiProviderId","args":["1ab"]}
+{"fn":"isApiProviderId","args":["-ab"]}
+{"fn":"isApiProviderId","args":["_ab"]}
+{"fn":"isApiProviderId","args":["ab.cd"]}
+{"fn":"isApiProviderId","args":["ab/cd"]}
+{"fn":"isApiProviderId","args":["ab cd"]}
+{"fn":"isApiProviderId","args":["ab "]}
+{"fn":"isApiProviderId","args":[" ab"]}
+{"fn":"isApiProviderId","args":["ab\n"]}
+{"fn":"isApiProviderId","args":["é"]}
+{"fn":"isApiProviderId","args":["aé"]}
+{"fn":"isApiProviderId","args":["ı"]}
+{"fn":"isApiProviderId","args":["K"]}
+{"fn":"isApiProviderId","args":["aı"]}
+{"fn":"isApiProviderId","args":["１"]}
+{"fn":"isApiProviderId","args":["a１"]}
+{"fn":"isApiProviderId","args":[" "]}
+{"fn":"isApiProviderId","args":["a "]}
+{"fn":"isApiProviderId","args":["﻿a"]}
+{"fn":"isApiProviderId","args":["😀"]}
+{"fn":"isApiProviderId","args":["a😀"]}
+{"fn":"isApiProviderId","args":["日本語"]}
+{"fn":"isApiProviderId","args":["constructor"]}
+{"fn":"isApiProviderId","args":["toString"]}
+{"fn":"isApiProviderId","args":[null]}
+{"fn":"isApiProviderId","args":[{"$":"undefined"}]}
+{"fn":"isApiProviderId","args":[5]}
+{"fn":"isApiProviderId","args":[true]}
+{"fn":"isApiProviderId","args":[[]]}
+{"fn":"isApiProviderId","args":[{}]}
+{"fn":"isApiProviderId","args":[]}
+{"fn":"isApiProviderTemplateId","args":["alibaba-cloud"]}
+{"fn":"isApiProviderTemplateId","args":["fireworks"]}
+{"fn":"isApiProviderTemplateId","args":["gemini"]}
+{"fn":"isApiProviderTemplateId","args":["ollama"]}
+{"fn":"isApiProviderTemplateId","args":["openrouter"]}
+{"fn":"isApiProviderTemplateId","args":["together"]}
+{"fn":"isApiProviderTemplateId","args":["zai"]}
+{"fn":"isApiProviderTemplateId","args":["custom"]}
+{"fn":"isApiProviderTemplateId","args":["Custom"]}
+{"fn":"isApiProviderTemplateId","args":["CUSTOM"]}
+{"fn":"isApiProviderTemplateId","args":[" custom"]}
+{"fn":"isApiProviderTemplateId","args":["custom "]}
+{"fn":"isApiProviderTemplateId","args":["azure"]}
+{"fn":"isApiProviderTemplateId","args":[""]}
+{"fn":"isApiProviderTemplateId","args":[null]}
+{"fn":"isApiProviderTemplateId","args":[{"$":"undefined"}]}
+{"fn":"isApiProviderTemplateId","args":[5]}
+{"fn":"isApiProviderTemplateId","args":[true]}
+{"fn":"isApiProviderTemplateId","args":[[]]}
+{"fn":"isApiProviderTemplateId","args":[{}]}
+{"fn":"isApiProviderTemplateId","args":["constructor"]}
+{"fn":"isApiProviderTemplateId","args":["toString"]}
+{"fn":"isApiProviderTemplateId","args":["includes"]}
+{"fn":"isApiProviderTemplateId","args":["__proto__"]}
+{"fn":"isApiProviderTemplateId","args":["ı"]}
+{"fn":"isApiProviderTemplateId","args":["K"]}
+{"fn":"isApiProviderTemplateId","args":[" "]}
+{"fn":"isApiProviderTemplateId","args":["日本語雪"]}
+{"fn":"isApiProviderTemplateId","args":["😀"]}
+{"fn":"isApiProviderTemplateId","args":["openrouter-models"]}
+{"fn":"isApiProviderTemplateId","args":["anthropic-messages"]}
+{"fn":"isApiProviderTemplateId","args":[]}
+{"fn":"labelForProtocol","args":["anthropic-messages"]}
+{"fn":"labelForProtocol","args":["openai-compatible"]}
+{"fn":"labelForProtocol","args":[""]}
+{"fn":"labelForProtocol","args":["x"]}
+{"fn":"labelForProtocol","args":["anthropic-messages "]}
+{"fn":"labelForProtocol","args":[" anthropic-messages"]}
+{"fn":"labelForProtocol","args":["Anthropic-Messages"]}
+{"fn":"labelForProtocol","args":["ANTHROPIC-MESSAGES"]}
+{"fn":"labelForProtocol","args":["anthropic-messages"]}
+{"fn":"labelForProtocol","args":["anthropic‑messages"]}
+{"fn":"labelForProtocol","args":["anthropicKmessages"]}
+{"fn":"labelForProtocol","args":["ı"]}
+{"fn":"labelForProtocol","args":["K"]}
+{"fn":"labelForProtocol","args":[" "]}
+{"fn":"labelForProtocol","args":["日本語雪"]}
+{"fn":"labelForProtocol","args":["😀"]}
+{"fn":"labelForProtocol","args":["openai"]}
+{"fn":"labelForProtocol","args":["open-ai-compatible"]}
+{"fn":"labelForProtocol","args":["none"]}
+{"fn":"labelForProtocol","args":["0"]}
+{"fn":"labelForProtocol","args":["constructor"]}
+{"fn":"labelForProtocol","args":["toString"]}
+{"fn":"labelForProtocol","args":["anthropic-messages\n"]}

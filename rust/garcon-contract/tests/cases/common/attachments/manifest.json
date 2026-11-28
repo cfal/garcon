@@ -1,0 +1,10 @@
+{
+  "module": "common/attachments.ts",
+  "tests": [
+    "common/__tests__/attachments.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/attachments.jsonl",
+  "notCaptured": [],
+  "cases": 404,
+  "sha256": "f3607c9aede91756b470ec57513833f65bf1c05f11059416b06e2a1843ac2198"
+}
