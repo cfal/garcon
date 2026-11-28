@@ -7,7 +7,7 @@ use garcon_base::{
 };
 use tokio::sync::oneshot;
 
-type Completion = Shared<LocalBoxFuture<'static, ()>>;
+pub(super) type Completion = Shared<LocalBoxFuture<'static, ()>>;
 
 #[derive(Default)]
 struct Pending {

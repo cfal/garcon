@@ -1,0 +1,26 @@
+{
+  "module": "server-agents/codex/src/agents/codex/usage-format.ts",
+  "tests": [
+    "server-agents/codex/src/agents/codex/__tests__/usage-format.test.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "parseCodexUsageLine",
+      "argument": 1,
+      "guard": "rust/garcon-agent-codex/tests/oracles/usage-format.ts#validUsageState",
+      "dropped": 10,
+      "kept": 55
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "parseCodexUsageLine",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 174,
+  "sha256": "eec26962790cb1b8f0c84bfe8ba42fa94af01ed784c3c8f2e5ab64d89ad72898"
+}

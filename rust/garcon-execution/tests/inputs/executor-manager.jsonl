@@ -1,0 +1,9 @@
+{"fn":"executorManagerTrace","args":["offline"]}
+{"fn":"executorManagerTrace","args":["retain"]}
+{"fn":"executorManagerTrace","args":["disruptive"]}
+{"fn":"executorManagerTrace","args":["grants"]}
+{"fn":"executorManagerTrace","args":["quiesced"]}
+{"fn":"executorManagerTrace","args":["disposed"]}
+{"fn":"executorManagerTrace","args":["deleted"]}
+{"fn":"executorManagerTrace","args":["changing"]}
+{"fn":"executorManagerTrace","args":["revoked"]}
