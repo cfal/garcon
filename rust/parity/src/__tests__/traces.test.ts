@@ -9,9 +9,14 @@ import { traceGroup } from '../trace-unstable.js';
 test('records contract response headers without incidental headers', () => {
   expect(contractHeaders(new Headers({
     'X-Content-Type-Options': 'nosniff',
+    'X-Garcon-Executor-Instance': 'fixture-instance',
     'X-Unrelated': 'ignored',
     'Content-Length': '12',
-  }))).toEqual({ 'content-length': '12', 'x-content-type-options': 'nosniff' });
+  }))).toEqual({
+    'content-length': '12',
+    'x-content-type-options': 'nosniff',
+    'x-garcon-executor-instance': 'fixture-instance',
+  });
 });
 
 test('orders HTTP and replies separately from arrival within each chat and event type', () => {
