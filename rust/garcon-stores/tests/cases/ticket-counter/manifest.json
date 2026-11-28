@@ -1,0 +1,11 @@
+{
+  "module": "server/controller/tickets/errors.ts",
+  "tests": [],
+  "inputs": "rust/garcon-stores/tests/inputs/ticket-counter.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 10,
+  "sha256": "8aec0228e36ce2e4854a99ac7d191a13fbd4ebbbcdb74900012b3d91d561d60c"
+}

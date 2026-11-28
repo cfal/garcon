@@ -1,5 +1,6 @@
 //! Controller-owned transcript storage.
 
+pub mod anchor_page;
 pub mod codec;
 pub mod connection_entry;
 pub mod connection_setup;
