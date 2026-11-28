@@ -3,6 +3,7 @@
 //! Ports `common/`, one module per TypeScript file with the same name.
 
 pub mod agent_auth;
+pub mod agent_cli_update;
 pub mod agent_execution;
 pub mod agent_integration;
 pub mod agent_settings;
