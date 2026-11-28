@@ -374,17 +374,28 @@ runs.
 The six questions of 2026-11-28 are decided in ADR-029, ADR-030, and
 ADR-031. One is open:
 
-1. Raw model arrays in provider converters. The original's Claude converter
-   hands the model's `changes` and `allowedPrompts` arrays to the message
-   unchanged, and the shared parser trims them at the first read (members
-   other than the declared strings are dropped; an array left empty by that
-   becomes absent). The port's message types hold only the trimmed form, so
-   its converter trims at once. The difference shows only when a model sends
-   members the tool does not declare, and only in the bytes of the link
-   message, the stored row, and the live frame of a Local turn; every reader,
-   the browser included, sees the same message. Two of 141 recorded converter
-   cases. Proceeding as accepted (RULES.md, JSON); refusing it means message
-   types that carry the raw array.
+1. Provider output that the shared parser changes or rejects at its first
+   read. The original hands some provider values on unchecked, and its own
+   shared parser trims or refuses them at the first read; the port's typed
+   messages can only hold the checked form, so it applies the check at the
+   provider. Two cases so far. The Claude converter passes the model's
+   `changes` and `allowedPrompts` arrays through unchanged, and the parser
+   drops members other than the declared strings (2 of 141 recorded converter
+   cases). The Codex usage report can carry a token total beyond the safe
+   integer range, which `parseAgentUsageReport` rejects; the port fails the
+   usage read at the provider. The difference shows only for input no real
+   model or account produces, and only in the bytes of the link message, the
+   stored row, and the live frame of a Local turn; every reader, the browser
+   included, sees the same result. Proceeding as accepted (RULES.md, JSON);
+   refusing it means message and report types that carry unchecked values.
+2. A defect of the original the port does not copy. When a fork's target
+   file already exists, the original's writer
+   (`server-agents/common/src/forking/fork-jsonl.ts`, `TargetWriter`) fails
+   to create it and then deletes the existing file in its cleanup. No test
+   covers the path, and the target name is new for every fork, so it should
+   not occur. The port fails the same way and leaves the existing file.
+   Proceeding with that; say if the original should be corrected as well or
+   if the port should delete the file as the original does.
 
 ## Out of scope
 
