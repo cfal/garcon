@@ -55,6 +55,8 @@ pub mod queue_state;
 pub mod server_runtime;
 pub mod settings;
 pub mod slash_commands;
+pub mod snippet_template;
+pub mod snippets;
 pub mod tags;
 pub mod template_tokens;
 pub mod terminal;

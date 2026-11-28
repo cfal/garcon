@@ -1,0 +1,216 @@
+{
+  "module": "common/snippets.ts",
+  "tests": [
+    "common/__tests__/snippets.test.js",
+    "server/controller/snippets/__tests__/contracts.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/snippets.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isSnippetShortName",
+      "argument": 0
+    },
+    {
+      "fn": "isSnippetsInvalidationReason",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeSnippetDefinitionInput",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeSnippet",
+      "argument": 0
+    },
+    {
+      "fn": "sortSnippetsByShortName",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeSnippetsSnapshot",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeSnippetsMutationResponse",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeSnippetArgumentsInput",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeExpandSnippetRequest",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeExpandSnippetResponse",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "common/__tests__/snippets.test.js:18:12",
+      "fn": "matchSnippetTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "common/__tests__/snippets.test.js:19:12",
+      "fn": "matchSnippetTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "common/__tests__/snippets.test.js:23:12",
+      "fn": "matchSnippetTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "common/__tests__/snippets.test.js:24:12",
+      "fn": "matchSnippetTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": null,
+      "fn": "matchSnippetTemplateTokens",
+      "count": 12
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "common/__tests__/snippets.test.js:25:12",
+      "fn": "matchSnippetTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "common/__tests__/snippets.test.js:29:12",
+      "fn": "matchSnippetTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "common/__tests__/snippets.test.js:31:7",
+      "fn": "matchSnippetTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a Object instance",
+      "where": "args",
+      "at": "server/controller/snippets/__tests__/contracts.test.js:61:12",
+      "fn": "normalizeSnippetDefinitionInput",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "common/__tests__/snippets.test.js:56:12",
+      "fn": "matchSnippetTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "common/__tests__/snippets.test.js:57:12",
+      "fn": "matchSnippetTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "common/__tests__/snippets.test.js:58:12",
+      "fn": "matchSnippetTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a Object instance",
+      "where": "args",
+      "at": "server/controller/snippets/__tests__/contracts.test.js:176:12",
+      "fn": "normalizeSnippetsSnapshot",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a Object instance",
+      "where": "args",
+      "at": "native:1:11",
+      "fn": "normalizeSnippet",
+      "count": 1
+    },
+    {
+      "path": "$.args[0]",
+      "type": "a Object instance",
+      "where": "args",
+      "at": "native:1:11",
+      "fn": "normalizeSnippetDefinitionInput",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "server/controller/snippets/__tests__/contracts.test.js:289:12",
+      "fn": "matchSnippetTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "server/controller/snippets/__tests__/contracts.test.js:290:12",
+      "fn": "matchSnippetTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "server/controller/snippets/__tests__/contracts.test.js:291:12",
+      "fn": "matchSnippetTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "server/controller/snippets/__tests__/contracts.test.js:292:12",
+      "fn": "matchSnippetTemplateTokens",
+      "count": 1
+    },
+    {
+      "path": "$.result",
+      "type": "a Generator instance",
+      "where": "result",
+      "at": "server/controller/snippets/__tests__/contracts.test.js:297:12",
+      "fn": "matchSnippetTemplateTokens",
+      "count": 1
+    }
+  ],
+  "cases": 975,
+  "sha256": "c6e0a4b2acaf2bf1236511b91e760ecd1474bfff163314259a20373ceef2a0a6"
+}
