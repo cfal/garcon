@@ -13,6 +13,21 @@ class Thing {
 }
 
 describe('encode', () => {
+  test('keeps an own __proto__ key on plain objects and Errors without changing either prototype', () => {
+    const input = JSON.parse('{"__proto__":{"recorded":true},"a":1}');
+    const error = new Error('fixture');
+    Object.defineProperty(error, '__proto__', { value: input.__proto__, enumerable: true });
+    const object = encode(input);
+    const encodedError = encode(error);
+    if (!object.ok || !encodedError.ok) throw new Error('Expected both values to be encoded');
+    expect(Object.hasOwn(object.value as object, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(object.value as object)).toBe(Object.prototype);
+    const restored = decode(encodedError.value) as Error;
+    expect(Object.hasOwn(restored, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(restored)).toBe(Error.prototype);
+    expect(Object.getOwnPropertyDescriptor(restored, '__proto__')?.value).toEqual({ recorded: true });
+  });
+
   test('keeps JSON values as they are', () => {
     expect(encode({ b: [1, 'x', true, null], a: { c: 0.5, d: 'ü 雪 😀' } })).toEqual({
       ok: true,

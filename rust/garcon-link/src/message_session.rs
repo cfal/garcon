@@ -569,4 +569,26 @@ mod tests {
             })
             .await;
     }
+
+    #[tokio::test(start_paused = true)]
+    async fn defers_backpressured_frames_then_flushes_once_in_socket_order() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let budget = Rc::new(MessageQueueBudget::default());
+                let (session, socket) = session(&budget, RpcLane::Primary, false);
+                session.send("first".to_owned()).unwrap();
+                session.send("second".to_owned()).unwrap();
+                assert_eq!(session.queued_frames(), 2);
+                assert_eq!(session.queued_bytes(), 11);
+                assert!(socket.sent.borrow().is_empty());
+                socket.writable.set(true);
+                tokio::time::advance(Duration::from_millis(11)).await;
+                tokio::task::yield_now().await;
+                assert_eq!(*socket.sent.borrow(), ["first", "second"]);
+                assert_eq!(session.queued_frames(), 0);
+                assert_eq!(budget.queued_bytes(), 0);
+                session.close(None);
+            })
+            .await;
+    }
 }

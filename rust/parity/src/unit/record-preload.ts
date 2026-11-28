@@ -5,7 +5,7 @@
 import { writeSync } from 'node:fs';
 import { relative } from 'node:path';
 import { mock } from 'bun:test';
-import { encodeCall } from './encode.js';
+import { encode, encodeOutcome, INSTANCES_VARIABLE, recordLine, type EncodedValue } from './encode.js';
 
 // The recorder passes its settings in the environment, since a preload has no
 // arguments of its own.
@@ -24,6 +24,7 @@ function required(name: string): string {
 const modulePath = required(MODULE_VARIABLE);
 const streamFd = Number(required(STREAM_VARIABLE));
 const root = required(ROOT_VARIABLE);
+const instances = process.env[INSTANCES_VARIABLE] === '1';
 
 // Calls are numbered in call order. A promise result is written when it
 // settles, so the reader sorts each process's records by this number.
@@ -31,7 +32,7 @@ let sequence = 0;
 
 function write(record: object): void {
   try {
-    writeSync(streamFd, `${JSON.stringify(record)}\n`);
+    writeSync(streamFd, recordLine(record));
   } catch { /* The recorder stopped reading; the tests still run. */ }
 }
 
@@ -49,13 +50,17 @@ function caller(): string | null {
   return null;
 }
 
-function finish(seq: number, fn: string, args: unknown[], kind: 'return' | 'throw', value: unknown): void {
-  const call = encodeCall(args, { kind, value });
-  if (!call.ok) {
-    write({ seq, fn, notCaptured: { ...call.failure, where: call.where, at: caller() } });
+function finish(seq: number, fn: string, args: EncodedValue, kind: 'return' | 'throw', value: unknown): void {
+  if (!args.ok) {
+    write({ seq, fn, notCaptured: { ...args.failure, where: 'args', at: caller() } });
     return;
   }
-  write({ seq, fn, args: call.args, result: call.result });
+  const result = encodeOutcome({ kind, value }, instances);
+  if (!result.ok) {
+    write({ seq, fn, notCaptured: { ...result.failure, where: 'result', at: caller() } });
+    return;
+  }
+  write({ seq, fn, args: args.value, result: result.value });
 }
 
 // `thisArg` is what the caller passed. Through the proxy it is the proxy
@@ -63,18 +68,19 @@ function finish(seq: number, fn: string, args: unknown[], kind: 'return' | 'thro
 // own binding.
 function invoke(fn: string, target: Function, thisArg: unknown, args: unknown[]): unknown {
   const seq = sequence++;
+  const before = encode(args, '$.args');
   let result: unknown;
   try {
     result = Reflect.apply(target, thisArg, args);
   } catch (error) {
-    finish(seq, fn, args, 'throw', error);
+    finish(seq, fn, before, 'throw', error);
     throw error;
   }
   if (result instanceof Promise) {
-    const settled = (kind: 'return' | 'throw') => (value: unknown) => finish(seq, fn, args, kind, value);
+    const settled = (kind: 'return' | 'throw') => (value: unknown) => finish(seq, fn, before, kind, value);
     void result.then(settled('return'), settled('throw'));
   } else {
-    finish(seq, fn, args, 'return', result);
+    finish(seq, fn, before, 'return', result);
   }
   return result;
 }
@@ -93,14 +99,15 @@ function recordingProxy(name: string, target: Function): Function {
     },
     construct(method, args, newTarget) {
       const seq = sequence++;
+      const before = encode(args, '$.args');
       let instance: object;
       try {
         instance = Reflect.construct(method, args, newTarget === proxy ? method : newTarget);
       } catch (error) {
-        finish(seq, `new ${name}`, args, 'throw', error);
+        finish(seq, `new ${name}`, before, 'throw', error);
         throw error;
       }
-      finish(seq, `new ${name}`, args, 'return', instance);
+      finish(seq, `new ${name}`, before, 'return', instance);
       return instance;
     },
     ...(isClass ? {

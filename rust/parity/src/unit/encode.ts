@@ -6,6 +6,12 @@ import { childPath, type Json } from '../wildcard.js';
 // is never ambiguous. The Rust reader knows the same markers (garcon-cases).
 
 const MARKER = '$';
+export const INSTANCES_VARIABLE = 'GARCON_UNIT_RECORD_INSTANCES';
+
+export function recordLine(value: object): string {
+  // Bun's readline sees these as line breaks even inside JSON strings.
+  return JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029') + '\n';
+}
 
 // An Error's `name` and `message` are recorded apart. Its `stack` and the
 // other properties Bun adds for the position it was thrown at are not part of
@@ -18,6 +24,9 @@ export type EncodeFailure = {
   path: string;
   type: string;
 };
+
+export type EncodedValue = { ok: true; value: Json } | { ok: false; failure: EncodeFailure };
+type Outcome = { kind: 'return' | 'throw'; value: unknown };
 
 class NotEncodable extends Error {
   constructor(readonly failure: EncodeFailure) {
@@ -46,6 +55,16 @@ export function encodeNumber(value: number): Json {
   return value;
 }
 
+export function encodeString(value: string): Json {
+  if (value.isWellFormed()) return value;
+  return {
+    [MARKER]: 'utf16',
+    value: Array.from({ length: value.length }, (_, index) => value.charCodeAt(index)),
+    // The Rust text reader borrows this projection without losing the original units.
+    text: value.toWellFormed(),
+  };
+}
+
 function decodeNumber(text: string): number {
   switch (text) {
     case 'NaN': return NaN;
@@ -56,13 +75,38 @@ function decodeNumber(text: string): number {
   }
 }
 
-export function encodeError(error: Error, path: string, seen: Set<object>): Json {
-  const properties: Record<string, Json> = {};
-  for (const key of Object.getOwnPropertyNames(error)) {
-    if (ERROR_KEYS_APART.has(key)) continue;
-    properties[key] = encodeInto((error as unknown as Record<string, unknown>)[key], childPath(`${path}.properties`, key), seen);
+function encodedProperties(entries: readonly (readonly [string, Json])[]): Json {
+  if (entries.some(([key]) => !key.isWellFormed())) {
+    return { [MARKER]: 'object-entries', value: entries.map(([key, value]) => [encodeString(key), value]) };
   }
-  return { [MARKER]: 'error', name: String(error.name), message: String(error.message), properties };
+  const values = Object.fromEntries(entries);
+  return Object.hasOwn(values, MARKER) ? { [MARKER]: 'object', value: values } : values;
+}
+
+// Explicit inputs can spell a string with a raw escaped lone surrogate
+// instead of a marker. Existing markers remain encoded.
+export function normalizeInputStrings(value: Json): Json {
+  if (typeof value === 'string') return encodeString(value);
+  if (Array.isArray(value)) return value.map(normalizeInputStrings);
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value).map(([key, item]) => [key, normalizeInputStrings(item)] as const);
+    if (entries.some(([key]) => !key.isWellFormed())) return encodedProperties(entries);
+    return Object.fromEntries(entries);
+  }
+  return value;
+}
+
+function encodeFields(
+  object: object, keys: string[], path: string, seen: Set<object>, instances: boolean,
+): Json {
+  const record = object as Record<string, unknown>;
+  return encodedProperties(keys.map((key) => [key, encodeInto(record[key], childPath(path, key), seen, instances)]));
+}
+
+export function encodeError(error: Error, path: string, seen: Set<object>, instances = false): Json {
+  const keys = Object.getOwnPropertyNames(error).filter((key) => !ERROR_KEYS_APART.has(key));
+  const properties = encodeFields(error, keys, `${path}.properties`, seen, instances);
+  return { [MARKER]: 'error', name: encodeString(String(error.name)), message: encodeString(String(error.message)), properties };
 }
 
 // A thrown value: an Error with its name, message, and own enumerable
@@ -71,9 +115,10 @@ export function encodeThrown(value: unknown, path: string, seen: Set<object>): J
   return value instanceof Error ? encodeError(value, path, seen) : { [MARKER]: 'throw', value: encodeInto(value, path, seen) };
 }
 
-function encodeInto(value: unknown, path: string, seen: Set<object>): Json {
+function encodeInto(value: unknown, path: string, seen: Set<object>, instances = false): Json {
   if (value === undefined) return { [MARKER]: 'undefined' };
-  if (value === null || typeof value === 'boolean' || typeof value === 'string') return value;
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'string') return encodeString(value);
   if (typeof value === 'number') return encodeNumber(value);
   if (typeof value === 'bigint') return { [MARKER]: 'bigint', value: String(value) };
   if (typeof value === 'function' || typeof value === 'symbol') {
@@ -87,7 +132,7 @@ function encodeInto(value: unknown, path: string, seen: Set<object>): Json {
       if (Number.isNaN(value.getTime())) throw new NotEncodable({ path, type: 'an invalid Date' });
       return { [MARKER]: 'date', value: value.toISOString() };
     }
-    if (value instanceof Error) return encodeError(value, path, seen);
+    if (value instanceof Error) return encodeError(value, path, seen, instances);
     if (value instanceof Uint8Array) {
       const bytes = Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString('base64');
       // A Buffer is a Uint8Array the original can tell apart (`Buffer.isBuffer`).
@@ -99,26 +144,32 @@ function encodeInto(value: unknown, path: string, seen: Set<object>): Json {
       return {
         [MARKER]: 'map',
         value: [...value].map(([key, item], index) => [
-          encodeInto(key, `${path}.entries[${index}].key`, seen),
-          encodeInto(item, `${path}.entries[${index}].value`, seen),
+          encodeInto(key, `${path}.entries[${index}].key`, seen, instances),
+          encodeInto(item, `${path}.entries[${index}].value`, seen, instances),
         ]),
       };
     }
     if (value instanceof Set) {
-      return { [MARKER]: 'set', value: [...value].map((item, index) => encodeInto(item, `${path}[${index}]`, seen)) };
+      return { [MARKER]: 'set', value: [...value].map((item, index) => encodeInto(item, `${path}[${index}]`, seen, instances)) };
     }
     if (Array.isArray(value)) {
-      return value.map((item, index) => encodeInto(item, `${path}[${index}]`, seen));
+      return value.map((item, index) => encodeInto(item, `${path}[${index}]`, seen, instances));
     }
     if (isPlainObject(object)) {
       if (Object.getOwnPropertySymbols(object).length > 0) {
         throw new NotEncodable({ path, type: 'an object with symbol-keyed properties' });
       }
-      const properties: Record<string, Json> = {};
-      for (const key of Object.keys(object)) {
-        properties[key] = encodeInto((object as Record<string, unknown>)[key], childPath(path, key), seen);
+      return encodeFields(object, Object.keys(object), path, seen, instances);
+    }
+    if (instances) {
+      if (Object.getOwnPropertySymbols(object).some((key) => Object.prototype.propertyIsEnumerable.call(object, key))) {
+        throw new NotEncodable({ path, type: 'an instance with enumerable symbol-keyed properties' });
       }
-      return Object.hasOwn(properties, MARKER) ? { [MARKER]: 'object', value: properties } : properties;
+      return {
+        [MARKER]: 'instance',
+        name: encodeString(typeName(object)),
+        fields: encodeFields(object, Object.keys(object), `${path}.fields`, seen, instances),
+      };
     }
     throw new NotEncodable({ path, type: `a ${typeName(object)} instance` });
   } finally {
@@ -127,8 +178,8 @@ function encodeInto(value: unknown, path: string, seen: Set<object>): Json {
 }
 
 function decodeError(marker: Record<string, Json>): Error {
-  const name = String(marker.name);
-  const message = String(marker.message);
+  const name = String(decode(marker.name));
+  const message = String(decode(marker.message));
   const candidate = (globalThis as Record<string, unknown>)[name] as (new (text: string) => unknown) | undefined;
   let error: Error = new Error(message);
   if (typeof candidate === 'function') {
@@ -140,7 +191,10 @@ function decodeError(marker: Record<string, Json>): Error {
   if (error.name !== name) {
     Object.defineProperty(error, 'name', { value: name, writable: true, enumerable: true, configurable: true });
   }
-  Object.assign(error, decode(marker.properties));
+  const properties = decode(marker.properties) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(properties ?? {})) {
+    Object.defineProperty(error, key, { value, writable: true, configurable: true, enumerable: true });
+  }
   return error;
 }
 
@@ -155,6 +209,13 @@ export function decode(value: Json): unknown {
   switch (kind) {
     case 'undefined': return undefined;
     case 'number': return decodeNumber(String(value.value));
+    case 'utf16': {
+      if (!Array.isArray(value.value)) throw new Error('Invalid UTF-16 marker');
+      return value.value.map((unit) => {
+        if (typeof unit !== 'number' || !Number.isInteger(unit) || unit < 0 || unit > 0xffff) throw new Error('Invalid UTF-16 code unit');
+        return String.fromCharCode(unit);
+      }).join('');
+    }
     case 'bigint': return BigInt(String(value.value));
     case 'date': return new Date(String(value.value));
     case 'bytes': {
@@ -168,14 +229,15 @@ export function decode(value: Json): unknown {
     case 'object': return Object.fromEntries(
       Object.entries(value.value as Record<string, Json>).map(([key, item]) => [key, decode(item)]),
     );
+    case 'object-entries': return Object.fromEntries(
+      (value.value as Json[][]).map(([key, item]) => [String(decode(key)), decode(item)]),
+    );
     case 'throw': return decode(value.value);
     default: throw new Error(`Unknown marker: ${kind}`);
   }
 }
 
-export function encode(value: unknown, path = '$'):
-  | { ok: true; value: Json }
-  | { ok: false; failure: EncodeFailure } {
+export function encode(value: unknown, path = '$'): EncodedValue {
   try {
     return { ok: true, value: encodeInto(value, path, new Set()) };
   } catch (error) {
@@ -186,21 +248,26 @@ export function encode(value: unknown, path = '$'):
 
 // Encodes one call: its arguments and what it returned or threw. A throw that
 // is not an Error keeps its value.
-export function encodeCall(args: unknown, outcome: { kind: 'return' | 'throw'; value: unknown }):
+export function encodeCall(args: unknown, outcome: Outcome, instances = false):
   | { ok: true; args: Json; result: Json }
   | { ok: false; where: 'args' | 'result'; failure: EncodeFailure } {
   const encodedArgs = encode(args, '$.args');
   if (!encodedArgs.ok) return { ok: false, where: 'args', failure: encodedArgs.failure };
+  const result = encodeOutcome(outcome, instances);
+  return result.ok ? { ok: true, args: encodedArgs.value, result: result.value } : { ...result, where: 'result' };
+}
+
+export function encodeOutcome(outcome: Outcome, instances = false): EncodedValue {
   const seen = new Set<object>();
   try {
     const result = outcome.kind === 'throw'
       ? encodeThrown(outcome.value, '$.result', seen)
-      : encodeInto(outcome.value, '$.result', seen);
-    return { ok: true, args: encodedArgs.value, result };
+      : encodeInto(outcome.value, '$.result', seen, instances);
+    return { ok: true, value: result };
   } catch (error) {
     const failure = error instanceof NotEncodable
       ? error.failure
       : { path: '$.result', type: `unreadable (${error instanceof Error ? error.message : String(error)})` };
-    return { ok: false, where: 'result', failure };
+    return { ok: false, failure };
   }
 }

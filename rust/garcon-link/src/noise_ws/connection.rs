@@ -14,6 +14,7 @@ use futures::channel::oneshot;
 use futures::future::Shared;
 use tokio::task::{JoinHandle, spawn_local};
 use tokio::time::{Instant, sleep_until};
+use zeroize::Zeroizing;
 
 use super::TypeError;
 use super::crypto::NoiseCrypto;
@@ -209,10 +210,11 @@ impl NoiseConnection {
         options: NoiseOptions,
         on_finish: Option<FinishHandler>,
     ) -> Result<Rc<Self>, TypeError> {
+        let psk = Zeroizing::new(options.psk);
         let limits = resolve_limits(options.limits)?;
         let crypto = NoiseCrypto::new(
             initiator,
-            &options.psk,
+            &psk,
             &connection_prologue(&options.context)?,
             limits.max_records_per_direction as u64,
         )?;

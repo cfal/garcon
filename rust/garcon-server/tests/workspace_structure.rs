@@ -40,6 +40,13 @@ fn may_depend_on(from: Role, to: Role) -> bool {
     }
 }
 
+/// An integration is a unit of its own (ADR-027): besides the shared crates it
+/// may use only the code every integration shares, never another integration,
+/// the runtime services, or the executor that hosts it.
+fn integration_may_depend_on(dependency: &str) -> bool {
+    role(dependency) == Some(Role::Shared) || dependency == "garcon-agents-common"
+}
+
 fn workspace_root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -116,6 +123,11 @@ fn every_workspace_crate_has_a_role_and_respects_it() {
             {
                 violations.push(format!(
                     "{name} ({from:?}) depends on {dependency} ({to:?})"
+                ));
+            }
+            if name.starts_with("garcon-agent-") && !integration_may_depend_on(dependency) {
+                violations.push(format!(
+                    "{name} is an integration and depends on {dependency}"
                 ));
             }
         }

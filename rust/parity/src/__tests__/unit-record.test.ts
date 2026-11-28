@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join, relative, resolve } from 'node:path';
-import { writeCases, type CaptureRecord, type GuardSpec, type JsonArgument, type RecordedCase } from '../unit/cases.js';
+import { sameJson, writeCases, type CaptureRecord, type GuardSpec, type JsonArgument, type RecordedCase } from '../unit/cases.js';
+import { encodeString } from '../unit/encode.js';
 import { askGuards, captureTests, evaluateInputs, recordUnit, type Input } from '../unit/record.js';
 import { replayCases, replayUnit } from '../unit/replay.js';
 import { MAX_VARIANTS_PER_FUNCTION } from '../unit/traps.js';
@@ -13,6 +14,17 @@ const fixture = (name: string) => `rust/parity/src/__tests__/fixtures/unit/${nam
 // A manifest written by hand names the Bun that runs the tests, as the recorder does.
 const bunVersion = Bun.version;
 
+test('records argument snapshots before sync, async and constructor calls mutate them', async () => {
+  const module = fixture('mutations.ts');
+  const recording = await recordUnit({ repoRoot, module, tests: [fixture('mutations.calls.ts')], instances: true });
+  expect(recording.cases.filter((entry) => entry.origin === 'test').map(({ fn, args }) => [fn, args])).toEqual([
+    ['mutate', [{ count: 3 }]],
+    ['mutateLater', [{ count: 4 }]],
+    ['new MutatingConstructor', [{ count: 5 }]],
+  ]);
+  expect((await replayCases(recording.modulePath, recording.cases, module, true)).cases.filter((entry) => entry.difference)).toEqual([]);
+});
+
 test('records a prototype lookup and reports inherited functions as not captured', async () => {
   const recording = await recordUnit({ repoRoot, module: fixture('lookup.ts'), tests: [fixture('lookup.calls.ts')] });
   expect(recording.cases.find((entry) => entry.args[0] === '__proto__')?.result).toEqual({});
@@ -21,6 +33,47 @@ test('records a prototype lookup and reports inherited functions as not captured
   ]);
 });
 
+test('keeps Unicode separators and an ordinary newline framed through capture and replay', async () => {
+  const module = fixture('recorded-values.ts');
+  const recording = await recordUnit({ repoRoot, module, tests: [fixture('recorded-values.calls.ts')] });
+  const marked = encodeString('a\ud800b\udc00');
+  const separators = 'first\u2028second\u2029third\nfourth';
+  expect(recording.cases).toContainEqual(expect.objectContaining({ fn: 'echo', args: [separators], result: separators, origin: 'test' }));
+  expect(recording.cases).toContainEqual(expect.objectContaining({ fn: 'echo', args: [marked], result: marked, origin: 'test' }));
+  expect(recording.cases).toContainEqual(expect.objectContaining({
+    fn: 'echo', args: [{ $: 'object-entries', value: [[marked, marked]] }],
+    result: { $: 'object-entries', value: [[marked, marked]] }, origin: 'test',
+  }));
+  expect(recording.manifest.notCaptured.some((entry) => entry.fn === 'reply' && entry.where === 'result')).toBe(true);
+  expect((await replayCases(recording.modulePath, recording.cases, module)).cases.filter((entry) => entry.difference)).toEqual([]);
+});
+
+test('records exact surrogate units in input-file arguments without wildcarding them', async () => {
+  const directory = await temporary();
+  const inputs = join(directory, 'unicode.jsonl');
+  await writeFile(inputs, JSON.stringify({ fn: 'echo', args: ['\ud800'] }) + '\n');
+  const recording = await recordUnit({ repoRoot, module: fixture('recorded-values.ts'), tests: [], inputs });
+  expect(recording.cases[0]).toMatchObject({
+    args: [{ $: 'utf16', value: [0xd800], text: '\ufffd' }],
+    result: { $: 'utf16', value: [0xd800], text: '\ufffd' },
+  });
+  expect(() => sameJson({ value: encodeString('\ud800') }, { value: encodeString('\ud801') }))
+    .toThrow('UTF-16 code units differ across runs at $.result.value');
+});
+
+test('records returned class instances recursively with the opt-in and replays it from the manifest', async () => {
+  const module = fixture('recorded-values.ts');
+  const directory = await temporary();
+  const recording = await recordUnit({ repoRoot, module, tests: [fixture('recorded-values.calls.ts')], instances: true });
+  expect(recording.cases.find((entry) => entry.fn === 'reply' && entry.origin === 'test')?.result).toEqual({
+    $: 'instance', name: 'Reply', fields: {
+      optional: { $: 'undefined' }, nested: [{ $: 'instance', name: 'Child', fields: { label: encodeString('a\ud800b\udc00') } }],
+    },
+  });
+  expect(recording.manifest.notCaptured.some((entry) => entry.fn === 'classArgument' && entry.where === 'args')).toBe(true);
+  expect(await writeCases(directory, recording.cases, recording.manifest)).toMatchObject({ instances: true });
+  expect((await replayUnit(repoRoot, directory)).cases.filter((entry) => entry.difference)).toEqual([]);
+});
 // The trap cases that change argument `argument` of calls to `fn`.
 function trapsOf(cases: RecordedCase[], fn: string, argument: number): RecordedCase[] {
   return cases.filter((entry) => entry.fn === fn && entry.origin.startsWith('trap:') && entry.origin.includes(`@$.args[${argument}]`));

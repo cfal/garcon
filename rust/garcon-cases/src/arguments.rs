@@ -13,6 +13,8 @@
 //! - A number has its exact recorded value. A function that takes a JavaScript
 //!   number reads it with [`javascript_number`], which keeps NaN and the
 //!   infinities.
+//! - Lone UTF-16 surrogates reach a JSON reader as U+FFFD, the same boundary
+//!   conversion as the server's JSON parser.
 //! - NaN and an infinity have no JSON form, so no port that takes JSON can
 //!   receive them. A JSON reader fails such a case and names the two ways out.
 //!   The recorder makes those traps only for an argument that is a number and
@@ -73,6 +75,9 @@ fn json_of(value: &Value) -> Json<'_> {
             // A plain object with a `$` property of its own, which the
             // recording wraps to tell it from a marker.
             "object" => object_json(&value["value"]),
+            "object-entries" => object_entries_json(&value["value"]),
+            "utf16" => markers::utf16_projection(value)
+                .map_or(Json::Marker, |text| Json::Value(Cow::Borrowed(text))),
             _ => Json::Marker,
         };
     }
@@ -95,6 +100,34 @@ fn json_of(value: &Value) -> Json<'_> {
         Value::Object(_) => object_json(value),
         other => Json::Value(Cow::Borrowed(other)),
     }
+}
+
+fn object_entries_json(value: &Value) -> Json<'_> {
+    let Some(entries) = value.as_array() else {
+        return Json::Marker;
+    };
+    let mut kept = Map::new();
+    for entry in entries {
+        let Some([key, item]) = entry.as_array().map(Vec::as_slice) else {
+            return Json::Marker;
+        };
+        let Some(key) = key
+            .as_str()
+            .or_else(|| markers::utf16_projection(key).and_then(Value::as_str))
+        else {
+            return Json::Marker;
+        };
+        if markers::is_undefined(item) {
+            continue;
+        }
+        match json_of(item) {
+            Json::Value(value) => {
+                kept.insert(key.to_owned(), value.into_owned());
+            }
+            other => return other,
+        }
+    }
+    Json::Value(Cow::Owned(Value::Object(kept)))
 }
 
 // An object as JSON, without the properties whose value was `undefined`. The

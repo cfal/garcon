@@ -559,3 +559,38 @@ the pinned one, and the difference is noted where a port could meet it. When
 the pin moves, the recordings are replayed on the new version before it is
 adopted. Files a remote command writes do not come back, except the lock file,
 so recordings are produced locally and only compiled and tested remotely.
+
+## ADR-027: Each integration is a crate of its own, held to the compatibility suite
+
+Status: accepted (2026-11-28)
+
+Context: The original keeps every provider integration in its own package
+behind `@garcon/server-agent-interface`, with one import point in core, and
+holds them to the Server Agent Compatibility Suite (SACS) at two tiers:
+interface conformance, which runs against every shipped integration, and
+black-box modules under `integration-tests/tests/sacs`, which run unchanged
+against each registered scripted driver in every execution lane.
+
+Decision: Each integration is a crate `garcon-agent-<id>` that implements the
+`AgentIntegration` contract of `garcon-interface`. It may depend on the shared
+crates and on `garcon-agents-common` only: not on another integration, not on
+the runtime services, and not on the executor. `garcon-executor` names the
+shipped integrations in one roster, as `default-agent-integrations.ts` does,
+and nothing else names one. Both tiers of the suite carry over:
+
+- Conformance: `garcon_interface::testing` is the port of the conformance
+  kit. Every integration crate runs it in its own tests, and a roster test in
+  `garcon-executor` fails when a shipped integration does not.
+- Black box: the SACS modules and their scripted drivers stay as they are,
+  since they drive a running server from outside. They run against each
+  integration through the Rust executor under the unmodified TypeScript
+  controller (`GARCON_TEST_WORKER=rust`), which tests an integration without
+  the Rust controller, and again under the Rust controller. The suite gains a
+  way to run the modules for one driver, so one integration can be tested
+  alone.
+
+Consequences: An integration can be built and tested with
+`cargo test -p garcon-agent-<id>` and held to the suite before the others
+exist. `garcon-server/tests/workspace_structure.rs` fails on a dependency an
+integration may not have. An integration unit is done only when conformance
+and every SACS module registered for its driver pass in the worker quadrant.
