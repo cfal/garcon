@@ -24,6 +24,7 @@ use garcon_js::{json::Opaque, number_to_string};
 use indexmap::IndexMap;
 use serde_json::{Map, Value, json};
 use tokio::{sync::oneshot, task::spawn_local};
+use tokio_util::task::TaskTracker;
 
 use super::{
     endpoint_coordinator::{
@@ -101,6 +102,7 @@ pub struct OpenCodeRuntime {
     models: Rc<OpenCodeModelDiscovery>,
     idle: Rc<OpenCodeIdleLifecycle>,
     creations: Rc<OpenCodeInstanceCreationTracker>,
+    processes: TaskTracker,
     unavailable_until: Cell<f64>,
     unavailable_reason: RefCell<String>,
     available: Cell<Option<bool>>,
@@ -120,6 +122,13 @@ fn closed() -> Box<dyn Error> {
 
 impl OpenCodeRuntime {
     pub fn new(options: OpenCodeRuntimeOptions) -> Rc<Self> {
+        Self::new_with_process_tracker(options, TaskTracker::new())
+    }
+
+    pub(super) fn new_with_process_tracker(
+        options: OpenCodeRuntimeOptions,
+        processes: TaskTracker,
+    ) -> Rc<Self> {
         let config = options.config.clone().unwrap_or_default();
         let logger: Rc<dyn AgentLogger> = options
             .logger
@@ -129,7 +138,7 @@ impl OpenCodeRuntime {
             .new_id
             .clone()
             .unwrap_or_else(|| Rc::new(|| uuid::Uuid::new_v4().to_string()));
-        let normalized = normalize_open_code_runtime_options(&options);
+        let normalized = normalize_open_code_runtime_options(&options, &processes);
         Rc::new_cyclic(|weak: &Weak<Self>| {
             let endpoint = OpenCodeEndpointCoordinator::new(OpenCodeEndpointCoordinatorOptions {
                 assert_available: Rc::new({
@@ -346,6 +355,7 @@ impl OpenCodeRuntime {
                     weak,
                     |runtime| runtime.shutting_down.get(),
                 ))),
+                processes,
                 unavailable_until: Cell::new(0.0),
                 unavailable_reason: RefCell::default(),
                 available: Cell::new(None),
@@ -362,6 +372,7 @@ impl OpenCodeRuntime {
             return shutdown.boxed_local();
         }
         self.shutting_down.set(true);
+        self.processes.close();
         self.idle.stop();
         self.reject_all_waiters(shared_error("Error", "OpenCode runtime shutting down"));
         self.sessions.borrow_mut().clear();
@@ -395,6 +406,9 @@ impl OpenCodeRuntime {
                 .wait_for_cleanup(runtime.options.shutdown_startup_grace_ms)
                 .await;
             runtime.close_instance();
+            // Native child teardown outlives endpoint retirement and can begin
+            // before readiness. The worker can drop its LocalSet after stop.
+            runtime.processes.wait().await;
             let _ = send.send(());
         });
         shutdown.boxed_local()

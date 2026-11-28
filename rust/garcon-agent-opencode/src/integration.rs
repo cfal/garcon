@@ -191,31 +191,7 @@ fn create_integration(host: AgentHost) -> AgentIntegration {
             }
         })),
     };
-    let lifecycle = IntegrationLifecycle::new(IntegrationLifecycleOptions {
-        start: Some(Box::new({
-            let runtime = runtime.clone();
-            move || {
-                let runtime = runtime.clone();
-                async move {
-                    runtime.start_purge_timer();
-                    Ok(())
-                }
-                .boxed_local()
-            }
-        })),
-        stop: Some(Box::new({
-            let runtime = runtime.clone();
-            move || {
-                let runtime = runtime.clone();
-                async move {
-                    runtime.shutdown().await;
-                    Ok(())
-                }
-                .boxed_local()
-            }
-        })),
-        migrate_owned_storage: None,
-    });
+    let lifecycle = create_lifecycle(runtime.clone());
     let migration = Version1RecordMigration {
         settings: settings.clone(),
         native_sessions: Some(PathNativeSessionCodec::new("opencode")),
@@ -283,6 +259,34 @@ fn create_integration(host: AgentHost) -> AgentIntegration {
         usage_history: None,
         cli_updates: None,
     }
+}
+
+pub(crate) fn create_lifecycle(runtime: Rc<OpenCodeRuntime>) -> IntegrationLifecycle {
+    IntegrationLifecycle::new(IntegrationLifecycleOptions {
+        start: Some(Box::new({
+            let runtime = runtime.clone();
+            move || {
+                let runtime = runtime.clone();
+                async move {
+                    runtime.start_purge_timer();
+                    Ok(())
+                }
+                .boxed_local()
+            }
+        })),
+        stop: Some(Box::new({
+            let runtime = runtime.clone();
+            move || {
+                let runtime = runtime.clone();
+                async move {
+                    runtime.shutdown().await;
+                    Ok(())
+                }
+                .boxed_local()
+            }
+        })),
+        migrate_owned_storage: None,
+    })
 }
 
 struct Auth(Rc<OpenCodeRuntime>);

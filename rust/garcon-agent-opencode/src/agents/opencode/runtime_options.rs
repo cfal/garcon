@@ -5,6 +5,7 @@ use std::rc::Rc;
 use futures::{FutureExt, future::LocalBoxFuture};
 use garcon_interface::{host::AgentLogger, resources::ExecutorResult};
 use garcon_js::{Clock, SystemClock};
+use tokio_util::task::TaskTracker;
 
 use super::{instance_lifecycle::OpenCodeInstance, server_instance::create_open_code_instance};
 use crate::{config::OpenCodeConfig, js::AbortSignal};
@@ -59,8 +60,9 @@ pub struct NormalizedOpenCodeRuntimeOptions {
     pub create_instance: OpenCodeInstanceFactory,
 }
 
-pub fn normalize_open_code_runtime_options(
+pub(super) fn normalize_open_code_runtime_options(
     options: &OpenCodeRuntimeOptions,
+    processes: &TaskTracker,
 ) -> NormalizedOpenCodeRuntimeOptions {
     NormalizedOpenCodeRuntimeOptions {
         startup_timeout_ms: options
@@ -95,10 +97,12 @@ pub fn normalize_open_code_runtime_options(
             .clone()
             .unwrap_or_else(|| Rc::new(SystemClock)),
         requires_executable: options.create_instance.is_none(),
-        create_instance: options
-            .create_instance
-            .clone()
-            .unwrap_or_else(|| Rc::new(|signal| create_open_code_instance(signal).boxed_local())),
+        create_instance: options.create_instance.clone().unwrap_or_else(|| {
+            let processes = processes.clone();
+            Rc::new(move |signal| {
+                create_open_code_instance(signal, processes.clone()).boxed_local()
+            })
+        }),
     }
 }
 
@@ -110,7 +114,9 @@ mod tests {
 
     #[test]
     fn normalizes_default_timers_and_does_not_require_an_executable_for_an_injected_factory() {
-        let defaults = normalize_open_code_runtime_options(&OpenCodeRuntimeOptions::default());
+        let processes = TaskTracker::new();
+        let defaults =
+            normalize_open_code_runtime_options(&OpenCodeRuntimeOptions::default(), &processes);
         assert_eq!(defaults.startup_timeout_ms, 15_000.0);
         assert_eq!(defaults.model_discovery_timeout_ms, 3_000.0);
         assert_eq!(defaults.request_timeout_ms, 10_000.0);
@@ -121,14 +127,17 @@ mod tests {
         assert_eq!(defaults.shutdown_startup_grace_ms, 100.0);
         assert_eq!(defaults.shutdown_native_fork_grace_ms, 3_000.0);
         assert!(defaults.requires_executable);
-        let overrides = normalize_open_code_runtime_options(&OpenCodeRuntimeOptions {
-            clock: Some(Rc::new(ManualClock::new(32))),
-            create_instance: Some(Rc::new(|_| {
-                panic!("does not start an instance during normalization")
-            })),
-            startup_timeout_ms: Some(0.0),
-            ..Default::default()
-        });
+        let overrides = normalize_open_code_runtime_options(
+            &OpenCodeRuntimeOptions {
+                clock: Some(Rc::new(ManualClock::new(32))),
+                create_instance: Some(Rc::new(|_| {
+                    panic!("does not start an instance during normalization")
+                })),
+                startup_timeout_ms: Some(0.0),
+                ..Default::default()
+            },
+            &processes,
+        );
         assert!(!overrides.requires_executable);
         assert_eq!(overrides.clock.now_ms(), 32);
         assert_eq!(overrides.startup_timeout_ms, 0.0);
