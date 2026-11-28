@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agent-opencode/tests/oracles/node-url.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-opencode/tests/inputs/node-url.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 30,
+  "sha256": "18bf4435c8813202e32c7eea813301d46b9f0678649a3ebd18eb1d3158031f2a"
+}

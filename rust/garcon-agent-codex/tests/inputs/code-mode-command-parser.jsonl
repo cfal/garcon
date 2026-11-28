@@ -1,0 +1,619 @@
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\n"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\n;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(result);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\n{ text(result.output); }"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nif (result.exit_code !== undefined) text(String(result.exit_code)); else text(\"\");"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(JSON.stringify(result));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nconst out = result.output; text(out);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext((result.output, result.exit_code));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext([, result.output]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext({ out: result?.output });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(result?.output?.join(\"\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(false ? \"\" : result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(!result.exit_code && result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(typeof result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(delete result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(result[\"output\"]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(result.#output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(Number(\"0\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(Boolean(result));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext([...result]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext({ [result]: \"x\" });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext({ ...result });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nconst result = 2;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nlet result;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nvar result;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nconst tools = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nconst { tools } = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nconst [, text] = [];"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nconst { nested: [Promise = 1] } = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nconst { ...tools } = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nconst eval = 1;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nconst arguments = 1;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nconst await = 1;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nreturn result;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nbreak;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ncontinue;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nwith ({}) {}"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nif (result) { const out = result.output; const out = \"\"; }"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nfor (const item of result) text(item);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nfor await (const item of result) text(item);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nfor (let item of result) text(item);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nresult.forEach(item => text(item));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nresult?.forEach(item => text(item));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nresult.forEach(function(item) { text(item); });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nresult.forEach(function(item, item) { text(item); });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nresult.forEach(async item => { text(await item); });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nimport value from \"synthetic\";"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\nexport { result };"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(import(\"synthetic\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(new String(\"x\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(/a[b]/gi);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(/a/gg);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(/[/);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(/(?<x>a)\\k<x>/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(/(?<x>a)(?<x>b)/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(/\\p{Letter}/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(/\\p{NotAProperty}/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(/[[a]--[b]]/v);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(/\\u{110000}/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(0xFFn);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(010);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(42_000);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" });\ntext(\"\\1\");"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\n"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\n;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(result);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\n{ text(result.output); }"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nif (result.exit_code !== undefined) text(String(result.exit_code)); else text(\"\");"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(JSON.stringify(result));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nconst out = result.output; text(out);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext((result.output, result.exit_code));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext([, result.output]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext({ out: result?.output });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(result?.output?.join(\"\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(false ? \"\" : result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(!result.exit_code && result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(typeof result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(delete result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(result[\"output\"]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(result.#output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(Number(\"0\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(Boolean(result));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext([...result]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext({ [result]: \"x\" });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext({ ...result });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nconst result = 2;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nlet result;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nvar result;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nconst tools = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nconst { tools } = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nconst [, text] = [];"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nconst { nested: [Promise = 1] } = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nconst { ...tools } = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nconst eval = 1;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nconst arguments = 1;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nconst await = 1;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nreturn result;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nbreak;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ncontinue;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nwith ({}) {}"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nif (result) { const out = result.output; const out = \"\"; }"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nfor (const item of result) text(item);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nfor await (const item of result) text(item);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nfor (let item of result) text(item);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nresult.forEach(item => text(item));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nresult?.forEach(item => text(item));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nresult.forEach(function(item) { text(item); });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nresult.forEach(function(item, item) { text(item); });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nresult.forEach(async item => { text(await item); });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nimport value from \"synthetic\";"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\nexport { result };"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(import(\"synthetic\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(new String(\"x\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(/a[b]/gi);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(/a/gg);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(/[/);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(/(?<x>a)\\k<x>/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(/(?<x>a)(?<x>b)/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(/\\p{Letter}/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(/\\p{NotAProperty}/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(/[[a]--[b]]/v);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(/\\u{110000}/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(0xFFn);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(010);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(42_000);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools.exec_command({ cmd: \"pwd\" }));\ntext(\"\\1\");"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\n"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\n;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(result);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\n{ text(result.output); }"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nif (result.exit_code !== undefined) text(String(result.exit_code)); else text(\"\");"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(JSON.stringify(result));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nconst out = result.output; text(out);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext((result.output, result.exit_code));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext([, result.output]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext({ out: result?.output });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(result?.output?.join(\"\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(false ? \"\" : result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(!result.exit_code && result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(typeof result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(delete result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(result[\"output\"]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(result.#output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(Number(\"0\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(Boolean(result));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext([...result]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext({ [result]: \"x\" });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext({ ...result });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nconst result = 2;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nlet result;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nvar result;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nconst tools = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nconst { tools } = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nconst [, text] = [];"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nconst { nested: [Promise = 1] } = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nconst { ...tools } = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nconst eval = 1;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nconst arguments = 1;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nconst await = 1;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nreturn result;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nbreak;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ncontinue;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nwith ({}) {}"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nif (result) { const out = result.output; const out = \"\"; }"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nfor (const item of result) text(item);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nfor await (const item of result) text(item);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nfor (let item of result) text(item);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nresult.forEach(item => text(item));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nresult?.forEach(item => text(item));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nresult.forEach(function(item) { text(item); });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nresult.forEach(function(item, item) { text(item); });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nresult.forEach(async item => { text(await item); });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nimport value from \"synthetic\";"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\nexport { result };"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(import(\"synthetic\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(new String(\"x\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(/a[b]/gi);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(/a/gg);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(/[/);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(/(?<x>a)\\k<x>/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(/(?<x>a)(?<x>b)/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(/\\p{Letter}/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(/\\p{NotAProperty}/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(/[[a]--[b]]/v);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(/\\u{110000}/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(0xFFn);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(010);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(42_000);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = (await tools.exec_command({ cmd: \"pwd\" }));\ntext(\"\\1\");"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\n"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\n;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(result);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\n{ text(result.output); }"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nif (result.exit_code !== undefined) text(String(result.exit_code)); else text(\"\");"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(JSON.stringify(result));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nconst out = result.output; text(out);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext((result.output, result.exit_code));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext([, result.output]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext({ out: result?.output });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(result?.output?.join(\"\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(false ? \"\" : result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(!result.exit_code && result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(typeof result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(delete result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(result[\"output\"]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(result.#output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(Number(\"0\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(Boolean(result));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext([...result]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext({ [result]: \"x\" });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext({ ...result });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nconst result = 2;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nlet result;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nvar result;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nconst tools = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nconst { tools } = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nconst [, text] = [];"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nconst { nested: [Promise = 1] } = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nconst { ...tools } = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nconst eval = 1;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nconst arguments = 1;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nconst await = 1;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nreturn result;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nbreak;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ncontinue;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nwith ({}) {}"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nif (result) { const out = result.output; const out = \"\"; }"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nfor (const item of result) text(item);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nfor await (const item of result) text(item);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nfor (let item of result) text(item);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nresult.forEach(item => text(item));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nresult?.forEach(item => text(item));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nresult.forEach(function(item) { text(item); });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nresult.forEach(function(item, item) { text(item); });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nresult.forEach(async item => { text(await item); });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nimport value from \"synthetic\";"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\nexport { result };"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(import(\"synthetic\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(new String(\"x\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(/a[b]/gi);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(/a/gg);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(/[/);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(/(?<x>a)\\k<x>/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(/(?<x>a)(?<x>b)/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(/\\p{Letter}/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(/\\p{NotAProperty}/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(/[[a]--[b]]/v);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(/\\u{110000}/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(0xFFn);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(010);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(42_000);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"pwd\" })\n\ntext(\"\\1\");"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\n"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\n;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(result);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\n{ text(result.output); }"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nif (result.exit_code !== undefined) text(String(result.exit_code)); else text(\"\");"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(JSON.stringify(result));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nconst out = result.output; text(out);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext((result.output, result.exit_code));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext([, result.output]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext({ out: result?.output });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(result?.output?.join(\"\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(false ? \"\" : result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(!result.exit_code && result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(typeof result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(delete result.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(result[\"output\"]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(result.#output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(Number(\"0\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(Boolean(result));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext([...result]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext({ [result]: \"x\" });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext({ ...result });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nconst result = 2;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nlet result;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nvar result;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nconst tools = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nconst { tools } = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nconst [, text] = [];"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nconst { nested: [Promise = 1] } = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nconst { ...tools } = {};"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nconst eval = 1;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nconst arguments = 1;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nconst await = 1;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nreturn result;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nbreak;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ncontinue;"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nwith ({}) {}"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nif (result) { const out = result.output; const out = \"\"; }"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nfor (const item of result) text(item);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nfor await (const item of result) text(item);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nfor (let item of result) text(item);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nresult.forEach(item => text(item));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nresult?.forEach(item => text(item));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nresult.forEach(function(item) { text(item); });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nresult.forEach(function(item, item) { text(item); });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nresult.forEach(async item => { text(await item); });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nimport value from \"synthetic\";"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\nexport { result };"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(import(\"synthetic\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(new String(\"x\"));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(/a[b]/gi);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(/a/gg);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(/[/);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(/(?<x>a)\\k<x>/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(/(?<x>a)(?<x>b)/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(/\\p{Letter}/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(/\\p{NotAProperty}/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(/[[a]--[b]]/v);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(/\\u{110000}/u);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(0xFFn);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(010);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(42_000);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await /** synthetic */ tools.exec_command({ cmd: \"pwd\" });\ntext(\"\\1\");"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd:\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({\"cmd\":\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({[\"cmd\"]:\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd:`pwd`});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd:\"\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd: /pwd/u});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd:\"pwd\", extra: /x/});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd:\"pwd\", extra: /x/uu});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd:\"pwd\", cmd:\"ls\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd:\"pwd\", ...extra});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({get cmd(){return \"pwd\"}});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd(){return \"pwd\"}});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd:\"pwd\", extra:[,]});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd:\"pwd\", extra:((1, 2))});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd:\"pwd\", extra:result?.path});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd:\"pwd\", extra:result?.path()});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd:\"pwd\", __proto__:null, __proto__:null});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd:\"pwd\", extra: 010});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd:\"pwd\"} as const);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({cmd:\"pwd\"}, {});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command(...args);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd:\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({\"cmd\":\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({[\"cmd\"]:\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd:`pwd`});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd:\"\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd: /pwd/u});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd:\"pwd\", extra: /x/});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd:\"pwd\", extra: /x/uu});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd:\"pwd\", cmd:\"ls\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd:\"pwd\", ...extra});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({get cmd(){return \"pwd\"}});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd(){return \"pwd\"}});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd:\"pwd\", extra:[,]});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd:\"pwd\", extra:((1, 2))});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd:\"pwd\", extra:result?.path});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd:\"pwd\", extra:result?.path()});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd:\"pwd\", __proto__:null, __proto__:null});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd:\"pwd\", extra: 010});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd:\"pwd\"} as const);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"]({cmd:\"pwd\"}, {});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools[\"exec_command\"](...args);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd:\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({\"cmd\":\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({[\"cmd\"]:\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd:`pwd`});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd:\"\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd: /pwd/u});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd:\"pwd\", extra: /x/});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd:\"pwd\", extra: /x/uu});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd:\"pwd\", cmd:\"ls\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd:\"pwd\", ...extra});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({get cmd(){return \"pwd\"}});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd(){return \"pwd\"}});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd:\"pwd\", extra:[,]});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd:\"pwd\", extra:((1, 2))});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd:\"pwd\", extra:result?.path});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd:\"pwd\", extra:result?.path()});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd:\"pwd\", __proto__:null, __proto__:null});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd:\"pwd\", extra: 010});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd:\"pwd\"} as const);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command({cmd:\"pwd\"}, {});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools?.exec_command(...args);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd:\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({\"cmd\":\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({[\"cmd\"]:\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd:`pwd`});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd:\"\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd: /pwd/u});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd:\"pwd\", extra: /x/});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd:\"pwd\", extra: /x/uu});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd:\"pwd\", cmd:\"ls\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd:\"pwd\", ...extra});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({get cmd(){return \"pwd\"}});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd(){return \"pwd\"}});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd:\"pwd\", extra:[,]});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd:\"pwd\", extra:((1, 2))});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd:\"pwd\", extra:result?.path});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd:\"pwd\", extra:result?.path()});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd:\"pwd\", __proto__:null, __proto__:null});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd:\"pwd\", extra: 010});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd:\"pwd\"} as const);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.({cmd:\"pwd\"}, {});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command?.(...args);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd:\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({\"cmd\":\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({[\"cmd\"]:\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd:`pwd`});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd:\"\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd: /pwd/u});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd:\"pwd\", extra: /x/});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd:\"pwd\", extra: /x/uu});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd:\"pwd\", cmd:\"ls\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd:\"pwd\", ...extra});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({get cmd(){return \"pwd\"}});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd(){return \"pwd\"}});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd:\"pwd\", extra:[,]});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd:\"pwd\", extra:((1, 2))});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd:\"pwd\", extra:result?.path});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd:\"pwd\", extra:result?.path()});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd:\"pwd\", __proto__:null, __proto__:null});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd:\"pwd\", extra: 010});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd:\"pwd\"} as const);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command({cmd:\"pwd\"}, {});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await (tools).exec_command(...args);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd:\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({\"cmd\":\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({[\"cmd\"]:\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd:`pwd`});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd:\"\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd: /pwd/u});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd:\"pwd\", extra: /x/});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd:\"pwd\", extra: /x/uu});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd:\"pwd\", cmd:\"ls\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd:\"pwd\", ...extra});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({get cmd(){return \"pwd\"}});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd(){return \"pwd\"}});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd:\"pwd\", extra:[,]});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd:\"pwd\", extra:((1, 2))});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd:\"pwd\", extra:result?.path});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd:\"pwd\", extra:result?.path()});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd:\"pwd\", __proto__:null, __proto__:null});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd:\"pwd\", extra: 010});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd:\"pwd\"} as const);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command({cmd:\"pwd\"}, {});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await t\\u006fols.exec_command(...args);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd:\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({\"cmd\":\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({[\"cmd\"]:\"pwd\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd:`pwd`});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd:\"\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd: /pwd/u});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd:\"pwd\", extra: /x/});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd:\"pwd\", extra: /x/uu});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd:\"pwd\", cmd:\"ls\"});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd:\"pwd\", ...extra});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({get cmd(){return \"pwd\"}});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd(){return \"pwd\"}});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd:\"pwd\", extra:[,]});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd:\"pwd\", extra:((1, 2))});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd:\"pwd\", extra:result?.path});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd:\"pwd\", extra:result?.path()});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd:\"pwd\", __proto__:null, __proto__:null});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd:\"pwd\", extra: 010});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd:\"pwd\"} as const);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand({cmd:\"pwd\"}, {});"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec\\u005fcommand(...args);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [\"pwd\", \"ls\"]; const results = await Promise.all(entries.map(cmd => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [\"pwd\", \"ls\"]; const results = await Promise.all(entries.map(async cmd => await tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [\"pwd\", \"ls\"]; const results = await Promise.all(entries.map(async function(cmd) { return await tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [\"pwd\", \"ls\"]; const results = await Promise.all(entries.map(async ([cmd, workdir]) => { const row = await tools.exec_command({cmd, workdir}); return row.output; })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [\"pwd\", \"ls\"]; const results = await Promise.all(entries.map(([cmd,]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [\"pwd\", \"ls\"]; const results = await Promise.all(entries.map(([,cmd]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [\"pwd\", \"ls\"]; const results = await Promise.all(entries.map(([cmd = \"pwd\"]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [\"pwd\", \"ls\"]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [\"pwd\", \"ls\"]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [\"pwd\", \"ls\"]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1.2]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [\"pwd\", \"ls\"]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry?.[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [\"pwd\", \"ls\"]; const results = await Promise.all(entries.map(tools => tools.exec_command({cmd:\"pwd\"}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [\"pwd\", \"ls\"]; const results = await Promise.all(entries.map((cmd, cmd) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [\"pwd\", \"ls\"]; const results = await Promise.all(entries.map(cmd => { if (cmd) return tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \".\"], [\"ls\", \".\"]]; const results = await Promise.all(entries.map(cmd => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \".\"], [\"ls\", \".\"]]; const results = await Promise.all(entries.map(async cmd => await tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \".\"], [\"ls\", \".\"]]; const results = await Promise.all(entries.map(async function(cmd) { return await tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \".\"], [\"ls\", \".\"]]; const results = await Promise.all(entries.map(async ([cmd, workdir]) => { const row = await tools.exec_command({cmd, workdir}); return row.output; })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \".\"], [\"ls\", \".\"]]; const results = await Promise.all(entries.map(([cmd,]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \".\"], [\"ls\", \".\"]]; const results = await Promise.all(entries.map(([,cmd]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \".\"], [\"ls\", \".\"]]; const results = await Promise.all(entries.map(([cmd = \"pwd\"]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \".\"], [\"ls\", \".\"]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \".\"], [\"ls\", \".\"]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \".\"], [\"ls\", \".\"]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1.2]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \".\"], [\"ls\", \".\"]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry?.[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \".\"], [\"ls\", \".\"]]; const results = await Promise.all(entries.map(tools => tools.exec_command({cmd:\"pwd\"}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \".\"], [\"ls\", \".\"]]; const results = await Promise.all(entries.map((cmd, cmd) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \".\"], [\"ls\", \".\"]]; const results = await Promise.all(entries.map(cmd => { if (cmd) return tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], [\"ls\"]]; const results = await Promise.all(entries.map(cmd => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], [\"ls\"]]; const results = await Promise.all(entries.map(async cmd => await tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], [\"ls\"]]; const results = await Promise.all(entries.map(async function(cmd) { return await tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], [\"ls\"]]; const results = await Promise.all(entries.map(async ([cmd, workdir]) => { const row = await tools.exec_command({cmd, workdir}); return row.output; })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], [\"ls\"]]; const results = await Promise.all(entries.map(([cmd,]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], [\"ls\"]]; const results = await Promise.all(entries.map(([,cmd]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], [\"ls\"]]; const results = await Promise.all(entries.map(([cmd = \"pwd\"]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], [\"ls\"]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], [\"ls\"]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], [\"ls\"]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1.2]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], [\"ls\"]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry?.[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], [\"ls\"]]; const results = await Promise.all(entries.map(tools => tools.exec_command({cmd:\"pwd\"}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], [\"ls\"]]; const results = await Promise.all(entries.map((cmd, cmd) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], [\"ls\"]]; const results = await Promise.all(entries.map(cmd => { if (cmd) return tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \"ls\"], [\"ls\", \"pwd\"]]; const results = await Promise.all(entries.map(cmd => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \"ls\"], [\"ls\", \"pwd\"]]; const results = await Promise.all(entries.map(async cmd => await tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \"ls\"], [\"ls\", \"pwd\"]]; const results = await Promise.all(entries.map(async function(cmd) { return await tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \"ls\"], [\"ls\", \"pwd\"]]; const results = await Promise.all(entries.map(async ([cmd, workdir]) => { const row = await tools.exec_command({cmd, workdir}); return row.output; })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \"ls\"], [\"ls\", \"pwd\"]]; const results = await Promise.all(entries.map(([cmd,]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \"ls\"], [\"ls\", \"pwd\"]]; const results = await Promise.all(entries.map(([,cmd]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \"ls\"], [\"ls\", \"pwd\"]]; const results = await Promise.all(entries.map(([cmd = \"pwd\"]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \"ls\"], [\"ls\", \"pwd\"]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \"ls\"], [\"ls\", \"pwd\"]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \"ls\"], [\"ls\", \"pwd\"]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1.2]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \"ls\"], [\"ls\", \"pwd\"]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry?.[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \"ls\"], [\"ls\", \"pwd\"]]; const results = await Promise.all(entries.map(tools => tools.exec_command({cmd:\"pwd\"}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \"ls\"], [\"ls\", \"pwd\"]]; const results = await Promise.all(entries.map((cmd, cmd) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\", \"ls\"], [\"ls\", \"pwd\"]]; const results = await Promise.all(entries.map(cmd => { if (cmd) return tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [null, false, 1]; const results = await Promise.all(entries.map(cmd => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [null, false, 1]; const results = await Promise.all(entries.map(async cmd => await tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [null, false, 1]; const results = await Promise.all(entries.map(async function(cmd) { return await tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [null, false, 1]; const results = await Promise.all(entries.map(async ([cmd, workdir]) => { const row = await tools.exec_command({cmd, workdir}); return row.output; })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [null, false, 1]; const results = await Promise.all(entries.map(([cmd,]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [null, false, 1]; const results = await Promise.all(entries.map(([,cmd]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [null, false, 1]; const results = await Promise.all(entries.map(([cmd = \"pwd\"]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [null, false, 1]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [null, false, 1]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [null, false, 1]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1.2]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [null, false, 1]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry?.[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [null, false, 1]; const results = await Promise.all(entries.map(tools => tools.exec_command({cmd:\"pwd\"}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [null, false, 1]; const results = await Promise.all(entries.map((cmd, cmd) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [null, false, 1]; const results = await Promise.all(entries.map(cmd => { if (cmd) return tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], ,[\"ls\"]]; const results = await Promise.all(entries.map(cmd => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], ,[\"ls\"]]; const results = await Promise.all(entries.map(async cmd => await tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], ,[\"ls\"]]; const results = await Promise.all(entries.map(async function(cmd) { return await tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], ,[\"ls\"]]; const results = await Promise.all(entries.map(async ([cmd, workdir]) => { const row = await tools.exec_command({cmd, workdir}); return row.output; })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], ,[\"ls\"]]; const results = await Promise.all(entries.map(([cmd,]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], ,[\"ls\"]]; const results = await Promise.all(entries.map(([,cmd]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], ,[\"ls\"]]; const results = await Promise.all(entries.map(([cmd = \"pwd\"]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], ,[\"ls\"]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], ,[\"ls\"]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], ,[\"ls\"]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1.2]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], ,[\"ls\"]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry?.[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], ,[\"ls\"]]; const results = await Promise.all(entries.map(tools => tools.exec_command({cmd:\"pwd\"}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], ,[\"ls\"]]; const results = await Promise.all(entries.map((cmd, cmd) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [[\"pwd\"], ,[\"ls\"]]; const results = await Promise.all(entries.map(cmd => { if (cmd) return tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...args]; const results = await Promise.all(entries.map(cmd => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...args]; const results = await Promise.all(entries.map(async cmd => await tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...args]; const results = await Promise.all(entries.map(async function(cmd) { return await tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...args]; const results = await Promise.all(entries.map(async ([cmd, workdir]) => { const row = await tools.exec_command({cmd, workdir}); return row.output; })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...args]; const results = await Promise.all(entries.map(([cmd,]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...args]; const results = await Promise.all(entries.map(([,cmd]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...args]; const results = await Promise.all(entries.map(([cmd = \"pwd\"]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...args]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...args]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...args]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1.2]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...args]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry?.[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...args]; const results = await Promise.all(entries.map(tools => tools.exec_command({cmd:\"pwd\"}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...args]; const results = await Promise.all(entries.map((cmd, cmd) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...args]; const results = await Promise.all(entries.map(cmd => { if (cmd) return tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...[]]; const results = await Promise.all(entries.map(cmd => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...[]]; const results = await Promise.all(entries.map(async cmd => await tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...[]]; const results = await Promise.all(entries.map(async function(cmd) { return await tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...[]]; const results = await Promise.all(entries.map(async ([cmd, workdir]) => { const row = await tools.exec_command({cmd, workdir}); return row.output; })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...[]]; const results = await Promise.all(entries.map(([cmd,]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...[]]; const results = await Promise.all(entries.map(([,cmd]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...[]]; const results = await Promise.all(entries.map(([cmd = \"pwd\"]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...[]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...[]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...[]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1.2]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...[]]; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry?.[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...[]]; const results = await Promise.all(entries.map(tools => tools.exec_command({cmd:\"pwd\"}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...[]]; const results = await Promise.all(entries.map((cmd, cmd) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = [...[]]; const results = await Promise.all(entries.map(cmd => { if (cmd) return tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = []; const results = await Promise.all(entries.map(cmd => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = []; const results = await Promise.all(entries.map(async cmd => await tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = []; const results = await Promise.all(entries.map(async function(cmd) { return await tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = []; const results = await Promise.all(entries.map(async ([cmd, workdir]) => { const row = await tools.exec_command({cmd, workdir}); return row.output; })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = []; const results = await Promise.all(entries.map(([cmd,]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = []; const results = await Promise.all(entries.map(([,cmd]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = []; const results = await Promise.all(entries.map(([cmd = \"pwd\"]) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = []; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = []; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = []; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry[1.2]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = []; const results = await Promise.all(entries.map(entry => tools.exec_command({cmd: entry?.[0]}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = []; const results = await Promise.all(entries.map(tools => tools.exec_command({cmd:\"pwd\"}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = []; const results = await Promise.all(entries.map((cmd, cmd) => tools.exec_command({cmd}))); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const entries = []; const results = await Promise.all(entries.map(cmd => { if (cmd) return tools.exec_command({cmd}); })); for (const row of results) text(row.output);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise.all([tools.exec_command({ cmd: \"pwd\" }), tools.exec_command({cmd: \"ls\"})]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise[\"all\"]([tools.exec_command({ cmd: \"pwd\" }), tools.exec_command({cmd: \"ls\"})]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise?.all([tools.exec_command({ cmd: \"pwd\" }), tools.exec_command({cmd: \"ls\"})]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise.all?.([tools.exec_command({ cmd: \"pwd\" }), tools.exec_command({cmd: \"ls\"})]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await dummy.all([tools.exec_command({ cmd: \"pwd\" }), tools.exec_command({cmd: \"ls\"})]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise.all([tools.exec_command({ cmd: \"pwd\" }), await tools.exec_command({cmd: \"ls\"})]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise[\"all\"]([tools.exec_command({ cmd: \"pwd\" }), await tools.exec_command({cmd: \"ls\"})]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise?.all([tools.exec_command({ cmd: \"pwd\" }), await tools.exec_command({cmd: \"ls\"})]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise.all?.([tools.exec_command({ cmd: \"pwd\" }), await tools.exec_command({cmd: \"ls\"})]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await dummy.all([tools.exec_command({ cmd: \"pwd\" }), await tools.exec_command({cmd: \"ls\"})]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise.all([tools.exec_command({ cmd: \"pwd\" }), , tools.exec_command({cmd: \"ls\"})]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise[\"all\"]([tools.exec_command({ cmd: \"pwd\" }), , tools.exec_command({cmd: \"ls\"})]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise?.all([tools.exec_command({ cmd: \"pwd\" }), , tools.exec_command({cmd: \"ls\"})]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise.all?.([tools.exec_command({ cmd: \"pwd\" }), , tools.exec_command({cmd: \"ls\"})]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await dummy.all([tools.exec_command({ cmd: \"pwd\" }), , tools.exec_command({cmd: \"ls\"})]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise.all([tools.exec_command({ cmd: \"pwd\" }), ...other]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise[\"all\"]([tools.exec_command({ cmd: \"pwd\" }), ...other]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise?.all([tools.exec_command({ cmd: \"pwd\" }), ...other]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise.all?.([tools.exec_command({ cmd: \"pwd\" }), ...other]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await dummy.all([tools.exec_command({ cmd: \"pwd\" }), ...other]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise.all([tools.exec_command({ cmd: \"pwd\" })]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise[\"all\"]([tools.exec_command({ cmd: \"pwd\" })]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise?.all([tools.exec_command({ cmd: \"pwd\" })]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise.all?.([tools.exec_command({ cmd: \"pwd\" })]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await dummy.all([tools.exec_command({ cmd: \"pwd\" })]); result.forEach(row => text(row.output));"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise.all([tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" })]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise.all([tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" })]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await Promise.all([tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" }),tools.exec_command({ cmd: \"pwd\" })]);"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"echo \\uD800\" });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: `echo \\uD800` });"]}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"echo \\uD83D\\uDE80\" });"]}

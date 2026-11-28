@@ -1,0 +1,13 @@
+{"fn":"latestTerminal","args":[{"assistantMessageIds":["assistant-visible","assistant-summary"],"automaticCompactionMessageIds":["assistant-summary"],"assistantTerminals":{"assistant-visible":{"outcome":"failed","messageId":"assistant-visible","error":"visible failure"},"assistant-summary":{"outcome":"failed","messageId":"assistant-summary","error":"internal failure"}}}]}
+{"fn":"latestTerminal","args":[{"automaticCompactionMessageIds":["a"],"assistantTerminals":{"a":{"outcome":"finished","messageId":"a"}}}]}
+{"fn":"latestTerminal","args":[{"assistantTerminals":{"b":{"outcome":"finished","messageId":"b"},"a":{"outcome":"aborted","messageId":"a"}}}]}
+{"fn":"latestTerminal","args":[{}]}
+{"fn":"providerFailureRow","args":["control failure",null,{"assistantMessageIds":["assistant-visible","assistant-summary"],"automaticCompactionMessageIds":["assistant-summary"]}]}
+{"fn":"providerFailureRow","args":["control failure","msg_explicit",{}]}
+{"fn":"providerFailureRow","args":["control failure",null,{"assistantMessageIds":["summary"],"automaticCompactionMessageIds":["summary"]}]}
+{"fn":"providerFailureRow","args":["control failure","",{}]}
+{"fn":"providerFailureRow","args":["failed",null,{"assistantMessageIds":["b","a"]}]}
+{"fn":"providerFailureRow","args":["failed",null,{"assistantMessageIds":["a","summary"],"automaticCompactionMessageIds":["summary"]}]}
+{"fn":"providerFailureRow","args":["é 😀","msg_😀",{}]}
+{"fn":"providerFailureRow","args":["failed",null,{"assistantMessageIds":["😀","�","a"]}]}
+{"fn":"latestTerminal","args":[{"automaticCompactionMessageIds":["x"],"assistantTerminals":{"a":{"outcome":"finished","messageId":"x"},"b":{"outcome":"failed","messageId":"b"}}}]}

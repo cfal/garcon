@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agents-common/tests/oracles/usage-pricing.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/usage-model-prices.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 1,
+  "sha256": "65eb25a39cf508ec1cd31367f3882f880e7ecff27f2c08738515b5e5bbae5046"
+}
