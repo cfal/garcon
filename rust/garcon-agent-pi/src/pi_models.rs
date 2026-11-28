@@ -127,6 +127,7 @@ pub fn parse_pi_model_listing(
                 value: format!("{provider}/{id}"),
                 label: format!("{provider}: {short_id}"),
                 supports_images: Some(images == "yes"),
+                thinking_modes: None,
                 is_local: None,
                 api_provider_id: None,
                 endpoint_id: None,

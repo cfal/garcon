@@ -167,6 +167,7 @@ impl AgentIntegrationClass for PiAgentIntegration {
                     value: model.value.to_owned(),
                     label: model.label.to_owned(),
                     supports_images: model.supports_images,
+                    thinking_modes: None,
                     is_local: None,
                     api_provider_id: None,
                     endpoint_id: None,
