@@ -233,7 +233,71 @@ fn self_handoff_keeps_the_fork_validation_and_only_the_continuation_fields() {
 }
 
 #[test]
-fn ws_session_event_recordings() {
+fn ws_protocol_recordings() {
+    use garcon_contract::ws_protocol::*;
+    assert_recording("ws-protocol", |function, args| {
+        let value = unknown(function, args.first())?;
+        match function {
+            "isTerminalStreamClientMessageType" => {
+                Ok(json!(is_terminal_stream_client_message_type(&value)))
+            }
+            "parsePrimaryWsClientMessage" => parse_primary_ws_client_message(&value)
+                .map(|result| {
+                    result.map_or(Value::Null, |message| match message {
+                        PrimaryWsClientMessage::Client(value) => client_ws_message_record(value),
+                        PrimaryWsClientMessage::Terminal(value) => serialized_record(value),
+                    })
+                })
+                .map_err(|error| CaseError::new("TypeError", error.to_string())),
+            "parsePrimaryWsServerMessage" => parse_primary_ws_server_message(&value)
+                .map(|result| {
+                    result.map_or(Value::Null, |message| match message {
+                        PrimaryWsServerMessage::Server(value) => server_ws_record(value),
+                        PrimaryWsServerMessage::Terminal(value) => serialized_record(value),
+                    })
+                })
+                .map_err(server_ws_case_error),
+            _ => Err(CaseError::unhandled(function)),
+        }
+    });
+}
+
+#[test]
+fn ws_protocol_dispatches_terminal_messages_without_changing_attachment_identity() {
+    use garcon_contract::ws_protocol::*;
+    let valid = json!({
+        "type":"terminal-input", "terminalId":"terminal-1", "attachmentId":"attachment-1",
+        "data":"hello\r",
+    });
+    assert!(matches!(
+        parse_primary_ws_client_message(&valid).unwrap(),
+        Some(PrimaryWsClientMessage::Terminal(_)),
+    ));
+    let mut invalid = valid.clone();
+    invalid["data"] = Value::Null;
+    assert!(parse_primary_ws_client_message(&invalid).unwrap().is_none());
+    let expected = pinned_bun_stdout(
+        r#"import { parsePrimaryWsClientMessage, parsePrimaryWsServerMessage } from "./common/ws-protocol.ts";
+           console.log(JSON.stringify(parsePrimaryWsClientMessage(JSON.parse(process.argv[1]))));
+           console.log(JSON.stringify(parsePrimaryWsServerMessage(JSON.parse(process.argv[2]))));"#,
+        &[
+            &garcon_js::json::stringify(&valid),
+            r#"{"type":"agent-run-finished","chatId":" c-1 ","exitCode":1e21,"outcome":"interrupted"}"#,
+        ],
+    );
+    let finished = garcon_js::json::from_str(
+        r#"{"type":"agent-run-finished","chatId":" c-1 ","exitCode":1e21,"outcome":"interrupted"}"#,
+    )
+    .unwrap();
+    let actual = [
+        serde_json::to_string(&parse_primary_ws_client_message(&valid).unwrap()).unwrap(),
+        serde_json::to_string(&parse_primary_ws_server_message(&finished).unwrap()).unwrap(),
+    ];
+    assert_eq!(actual.join("\n"), expected.trim_end());
+}
+
+#[test]
+fn ws_event_recordings() {
     use garcon_contract::ws_events::*;
     #[derive(serde::Deserialize)]
     #[serde(
@@ -250,18 +314,13 @@ fn ws_session_event_recordings() {
     assert_recording("ws-events", |function, args| match function {
         "parseServerWsMessage" => {
             let value = unknown(function, args.first())?;
-            Ok(match parse_session_ws_message(&value) {
-                Some(SessionWsMessage::ReconnectState(value)) => {
-                    instance_record("ReconnectStateMessage", value)
-                }
-                Some(SessionWsMessage::WsFault(value)) => instance_record("WsFaultMessage", value),
-                Some(SessionWsMessage::WsPong(value)) => instance_record("WsPongMessage", value),
-                Some(SessionWsMessage::ClientRequestError(value)) => {
-                    instance_record("ClientRequestErrorMessage", value)
-                }
-                None => Value::Null,
-            })
+            parse_server_ws_message(&value)
+                .map(|result| result.map_or(Value::Null, server_ws_record))
+                .map_err(server_ws_case_error)
         }
+        "isChatListInvalidationReason" => Ok(json!(
+            is_chat_list_invalidation_reason(unknown(function, args.first())?.as_ref()).is_some()
+        )),
         "new ClientRequestErrorMessage" => Ok(instance_record(
             "ClientRequestErrorMessage",
             ClientRequestErrorMessage::new(
@@ -326,14 +385,120 @@ fn ws_session_event_recordings() {
     });
 }
 
+fn server_ws_case_error(error: garcon_contract::ws_events::ServerWsMessageError) -> CaseError {
+    use garcon_contract::ws_events::ServerWsMessageError;
+    let class = match &error {
+        ServerWsMessageError::Null | ServerWsMessageError::InvalidAsyncQuestionReply(_) => {
+            "TypeError"
+        }
+        ServerWsMessageError::InvalidExecutorId(_) => "Error",
+    };
+    CaseError::new(class, error.to_string())
+}
+
+fn server_ws_record(message: garcon_contract::ws_events::ServerWsMessage) -> Value {
+    use garcon_contract::ws_events::EventKey::*;
+    let class = match message.event_key() {
+        ChatMessages => "ChatMessagesMessage",
+        ChatSubscribed => "ChatSubscribedMessage",
+        ChatTranscriptReplaced => "ChatTranscriptReplacedMessage",
+        ChatTransientFeedMutation => "ChatTransientFeedMutationMessage",
+        ChatReloadProgress => "ChatReloadProgressMessage",
+        ChatReloaded => "ChatReloadedMessage",
+        AgentRunFinished => "AgentRunFinishedMessage",
+        AgentRunFailed => "AgentRunFailedMessage",
+        ChatSessionCreated => "ChatSessionCreatedMessage",
+        ChatProjectPathUpdated => "ChatProjectPathUpdatedMessage",
+        ChatSessionStopped => "ChatSessionStoppedMessage",
+        ChatProcessingUpdated => "ChatProcessingUpdatedMessage",
+        ChatActivityUpdated => "ChatActivityUpdatedMessage",
+        ChatExecutionControlUpdated => "ChatExecutionControlUpdatedMessage",
+        ChatOperationalNotice => "ChatOperationalNoticeMessage",
+        ReconnectState => "ReconnectStateMessage",
+        WsFault => "WsFaultMessage",
+        WsPong => "WsPongMessage",
+        ChatTitleUpdated => "ChatTitleUpdatedMessage",
+        ChatSessionDeleted => "ChatSessionDeletedWsMessage",
+        ChatReadUpdatedV1 => "ChatReadUpdatedV1Message",
+        ChatListRefreshRequested => "ChatListRefreshRequestedMessage",
+        ChatBoardsInvalidated => "ChatBoardsInvalidatedMessage",
+        TicketsInvalidated => "TicketsInvalidatedMessage",
+        PullRequestReviewsInvalidated => "PullRequestReviewsInvalidatedMessage",
+        SettingsChanged => "SettingsChangedMessage",
+        ApiProvidersInvalidated => "ApiProvidersInvalidatedMessage",
+        ExecutorsChanged => "ExecutorsChangedMessage",
+        TranscriptSearchStatus => "TranscriptSearchStatusMessage",
+        ScheduledPromptsInvalidated => "ScheduledPromptsInvalidatedMessage",
+        SnippetsInvalidated => "SnippetsInvalidatedMessage",
+        PreamblesInvalidated => "PreamblesInvalidatedMessage",
+        ChatPreamblesInvalidated => "ChatPreamblesInvalidatedMessage",
+        ClientRequestError => "ClientRequestErrorMessage",
+    };
+    let mut fields = serialized_record(message);
+    if let Some(messages) = fields.get_mut("messages").and_then(Value::as_array_mut) {
+        messages.iter_mut().for_each(record_transcript_row);
+    }
+    if let Some(rows) = fields
+        .pointer_mut("/transientFeed/rows")
+        .and_then(Value::as_array_mut)
+    {
+        rows.iter_mut().for_each(record_transcript_row);
+    }
+    if let Some(row) = fields.pointer_mut("/mutation/row") {
+        record_transcript_row(row);
+    }
+    markers::instance(class, fields.as_object_mut().map(std::mem::take).unwrap())
+}
+
+fn record_transcript_row(row: &mut Value) {
+    if let Some(message) = row.get_mut("message") {
+        *message = transcript_message_instance(message.take());
+    }
+}
+
+fn transcript_message_instance(mut message: Value) -> Value {
+    if let Some(tool) = message.get_mut("requestedTool") {
+        *tool = transcript_message_instance(tool.take());
+    }
+    let kind = message["type"].as_str().unwrap();
+    let class = match kind {
+        "transcript-notice" => "TranscriptNoticeMessage".to_owned(),
+        kind => {
+            let mut name = String::new();
+            for word in kind.split('-') {
+                let mut letters = word.chars();
+                if let Some(letter) = letters.next() {
+                    name.extend(letter.to_uppercase());
+                    name.extend(letters);
+                }
+            }
+            if !name.ends_with("Message") {
+                name.push_str("Message");
+            }
+            name
+        }
+    };
+    let Value::Object(fields) = message else {
+        panic!("a serialized transcript message must be an object")
+    };
+    markers::instance(&class, fields)
+}
+
 #[test]
-fn ws_session_event_wire_bytes_match_bun() {
-    use garcon_contract::ws_events::parse_session_ws_message;
+fn ws_event_wire_bytes_match_bun() {
+    use garcon_contract::ws_events::{is_chat_list_invalidation_reason, parse_server_ws_message};
     let inputs = include_str!("inputs/common/ws-events.jsonl");
     let bun = pinned_bun_stdout(
-        r#"import { parseServerWsMessage } from "./common/ws-events.ts";
+        r#"import { parseServerWsMessage, isChatListInvalidationReason } from "./common/ws-events.ts";
            for (const line of process.argv[1].trimEnd().split("\n")) {
-             console.log(JSON.stringify(parseServerWsMessage(JSON.parse(line).args[0])));
+             const {fn, args} = JSON.parse(line);
+             try {
+               const result = fn === "parseServerWsMessage" ? parseServerWsMessage(args[0])
+                 : isChatListInvalidationReason(args[0]);
+               console.log(JSON.stringify(result));
+             } catch (error) {
+               console.log(JSON.stringify({error: error.message}));
+             }
            }"#,
         &[inputs],
     );
@@ -342,8 +507,18 @@ fn ws_session_event_wire_bytes_match_bun() {
     assert_eq!(expected.len(), inputs.len());
     for (input, expected) in inputs.into_iter().zip(expected) {
         let fixture: Value = garcon_js::json::from_str(input).unwrap();
-        let actual = parse_session_ws_message(&fixture["args"][0]);
-        assert_eq!(serde_json::to_string(&actual).unwrap(), expected, "{input}");
+        let value = &fixture["args"][0];
+        let actual = if fixture["fn"] == "parseServerWsMessage" {
+            match parse_server_ws_message(value) {
+                Ok(result) => serde_json::to_string(&result).unwrap(),
+                Err(error) => serde_json::to_string(&json!({"error":error.to_string()})).unwrap(),
+            }
+        } else {
+            is_chat_list_invalidation_reason(value)
+                .is_some()
+                .to_string()
+        };
+        assert_eq!(actual, expected, "{input}");
     }
 }
 

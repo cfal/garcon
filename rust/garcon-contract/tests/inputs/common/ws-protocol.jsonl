@@ -1,0 +1,21 @@
+{"fn":"parsePrimaryWsClientMessage","args":[{"type":"terminal-attach","terminalId":"terminal-1","clientId":"client-1","afterSequence":0,"intent":"restore","attachmentEpoch":"epoch"}]}
+{"fn":"parsePrimaryWsClientMessage","args":[{"type":"terminal-input","terminalId":"terminal-1","data":"ls\r","attachmentId":"attachment-1"}]}
+{"fn":"parsePrimaryWsClientMessage","args":[{"type":"terminal-resize","terminalId":"terminal-1","cols":80,"rows":24}]}
+{"fn":"parsePrimaryWsClientMessage","args":[{"type":"terminal-detach","terminalId":"terminal-1"}]}
+{"fn":"parsePrimaryWsClientMessage","args":[{"type":"terminal-resize","terminalId":"terminal-1","cols":"80","rows":24}]}
+{"fn":"parsePrimaryWsClientMessage","args":[{"type":"terminal-attach","clientRequestId":"req","sentAt":42}]}
+{"fn":"parsePrimaryWsClientMessage","args":[{"type":"chat-subscribe","chatId":"chat","clientRequestId":"req"}]}
+{"fn":"parsePrimaryWsClientMessage","args":[{"type":"unknown"}]}
+{"fn":"parsePrimaryWsClientMessage","args":[null]}
+{"fn":"parsePrimaryWsServerMessage","args":[{"type":"terminal-output","terminalId":"terminal-1","sequence":1,"data":"hi","attachmentId":"attachment-1"}]}
+{"fn":"parsePrimaryWsServerMessage","args":[{"type":"terminal-output","sequence":1,"data":"hi"}]}
+{"fn":"parsePrimaryWsServerMessage","args":[{"type":"terminal-error","code":"terminal-unavailable","message":"Unavailable"}]}
+{"fn":"parsePrimaryWsServerMessage","args":[{"type":"chat-processing-updated","chatId":" c-1 ","phase":null}]}
+{"fn":"parsePrimaryWsServerMessage","args":[{"type":"chat-boards-invalidated","revision":2,"reason":"reordered"}]}
+{"fn":"parsePrimaryWsServerMessage","args":[{"type":"ws-fault","error":"offline"}]}
+{"fn":"parsePrimaryWsServerMessage","args":[{"type":"unknown"}]}
+{"fn":"parsePrimaryWsServerMessage","args":[null]}
+{"fn":"isTerminalStreamClientMessageType","args":["terminal-terminated"]}
+{"fn":"isTerminalStreamClientMessageType","args":["terminal-input "]}
+{"fn":"isTerminalStreamClientMessageType","args":["__proto__"]}
+{"fn":"isTerminalStreamClientMessageType","args":[null]}
