@@ -1,0 +1,22 @@
+{
+  "module": "common/chat-execution-control.ts",
+  "tests": [
+    "common/__tests__/chat-execution-control.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-execution-control.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseExecutionControlServerInstanceId",
+      "argument": 0
+    },
+    {
+      "fn": "parseChatExecutionControlState",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 181,
+  "sha256": "d4451f467d0d6a19df8f25a008518b1a3e455b7c2f6a737992eac8de53a6edb1"
+}

@@ -1,0 +1,22 @@
+{
+  "module": "common/queue-state.ts",
+  "tests": [
+    "common/__tests__/queue-state.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/queue-state.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseChatQueueState",
+      "argument": 0
+    },
+    {
+      "fn": "parseQueuePause",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 90,
+  "sha256": "b27ef22398a326e8fd34e93bc5ead4edfe5f8c35f4dcf9685c76708c08b17ee1"
+}
