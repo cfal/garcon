@@ -4,11 +4,9 @@
 use std::collections::BTreeMap;
 
 use garcon_base::domain_error::DomainError;
-use garcon_base::user_shell::default_user_shell;
 use garcon_contract::base_path::parse_base_path;
-use garcon_contract::config_dir::{
-    ConfigDirectoryEnvironment, resolve_config_directory, resolve_home_directory,
-};
+use garcon_contract::config_dir::{ConfigDirectoryEnvironment, resolve_config_directory};
+use garcon_js::path::native;
 use garcon_js::{Number, is_integer, parse_int, trim};
 use serde::Serialize;
 use url::Url;
@@ -60,7 +58,6 @@ pub struct ConfigEnvironment<'a> {
     pub variables: &'a BTreeMap<String, String>,
     pub server_root: &'a str,
     pub process_home: &'a str,
-    pub user_shell: &'a str,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -85,7 +82,6 @@ pub fn initialize_server_config(
             variables: &variables,
             server_root,
             process_home: &process_home.to_string_lossy(),
-            user_shell: &default_user_shell(),
         },
     )
 }
@@ -95,11 +91,23 @@ pub fn parse_server_config(
     environment: &ConfigEnvironment<'_>,
 ) -> Result<ServerConfig, ConfigError> {
     let explicit_config = cli_value(args, CliValueFlag::ConfigDir)?;
+    let home = if cfg!(windows) {
+        environment.process_home
+    } else {
+        environment
+            .value("HOME")
+            .unwrap_or(environment.process_home)
+    };
+    let config_from_env = environment.value("GARCON_CONFIG_DIR").map(str::to_owned);
+    // Select the fallback from this snapshot before the shared resolver can
+    // consult the live process home.
+    let default_config = (explicit_config.is_none() && config_from_env.is_none())
+        .then(|| native::join(&[home, ".garcon"]));
     let config_dir = resolve_config_directory(
-        explicit_config,
+        explicit_config.or(default_config.as_deref()),
         &ConfigDirectoryEnvironment {
-            garcon_config_dir: environment.value("GARCON_CONFIG_DIR").map(str::to_owned),
-            home: environment.value("HOME").map(str::to_owned),
+            garcon_config_dir: config_from_env,
+            home: None,
         },
         None,
     )
@@ -158,12 +166,8 @@ pub fn parse_server_config(
             || environment.process_home.to_owned(),
             |path| resolve_path(&cwd, path),
         ),
-        home_directory_path: resolve_path(
-            &cwd,
-            &resolve_home_directory(environment.value("HOME"), None)
-                .map_err(|error| ConfigError::Invalid(error.to_string()))?,
-        ),
-        user_shell: environment.user_shell.to_owned(),
+        home_directory_path: resolve_path(&cwd, home),
+        user_shell: environment.user_shell().to_owned(),
         max_request_body_size: environment
             .int("GARCON_MAX_REQUEST_BODY_SIZE", 50.0 * 1024.0 * 1024.0)?,
         max_connections: environment.int("GARCON_MAX_CONNECTIONS", 1024.0)?,
@@ -348,18 +352,8 @@ fn parse_workspace(
     ))
 }
 
-#[cfg(not(windows))]
 fn resolve_path(cwd: &str, path: &str) -> String {
-    garcon_js::path::posix::resolve(cwd, &[path])
-}
-
-#[cfg(windows)]
-fn resolve_path(cwd: &str, path: &str) -> String {
-    let path = std::path::Path::new(cwd).join(path);
-    let normalized = garcon_js::path::win32::normalize(&path.to_string_lossy());
-    let root = garcon_js::path::win32::parse_root(&normalized);
-    let suffix = normalized[root.len()..].trim_end_matches('\\');
-    format!("{root}{suffix}")
+    native::resolve(cwd, &[path])
 }
 
 fn parse_runtime_origin(value: Option<&str>) -> Result<Option<String>, ConfigError> {
@@ -437,6 +431,16 @@ fn parse_auth_disabled(
 }
 
 impl ConfigEnvironment<'_> {
+    fn user_shell(&self) -> &str {
+        if cfg!(windows) {
+            "powershell.exe"
+        } else {
+            self.value("GARCON_TERMINAL_SHELL")
+                .or_else(|| self.value("SHELL"))
+                .unwrap_or("/bin/bash")
+        }
+    }
+
     fn value(&self, name: &str) -> Option<&str> {
         self.variables
             .get(name)
