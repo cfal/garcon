@@ -13,6 +13,8 @@ workspace = true
 garcon-contract.workspace = true
 garcon-interface.workspace = true
 garcon-js.workspace = true
+num-bigint = "0.4"
+num-traits = "0.2"
 serde.workspace = true
 serde_json.workspace = true
 
