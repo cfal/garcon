@@ -2,13 +2,14 @@
 
 Build: `garcon-server`
 
-Passed: 10664/10664 cases
-Served without falling back to the original: 120/10664 (fallback rate 98.9%)
+Passed: 11877/11877 cases
+Served without falling back to the original: 120/11877 (fallback rate 99.0%)
 
 ## Scenarios
 
 | scenario | passed | native |
 | --- | ---: | ---: |
+| agents | 351/351 | 0/351 |
 | api-providers-seeded | 371/371 | 0/371 |
 | api-providers | 458/458 | 0/458 |
 | api-session | 196/196 | 0/196 |
@@ -33,10 +34,13 @@ Served without falling back to the original: 120/10664 (fallback rate 98.9%)
 | executors | 600/600 | 0/600 |
 | folders-seeded | 81/81 | 0/81 |
 | folders | 112/112 | 0/112 |
+| models | 299/299 | 0/299 |
 | preambles-count-limit | 25/25 | 0/25 |
 | preambles-seeded | 102/102 | 0/102 |
 | preambles-size-limits | 100/100 | 0/100 |
 | preambles | 620/620 | 0/620 |
+| projects-seeded | 108/108 | 0/108 |
+| projects | 212/212 | 0/212 |
 | runtime | 155/155 | 0/155 |
 | saved-searches-seeded | 146/146 | 0/146 |
 | saved-searches | 170/170 | 0/170 |
@@ -52,6 +56,7 @@ Served without falling back to the original: 120/10664 (fallback rate 98.9%)
 | static-assets | 367/367 | 111/367 |
 | telegram-seeded | 62/62 | 0/62 |
 | telegram | 87/87 | 0/87 |
+| terminals | 243/243 | 0/243 |
 | tickets-mutations | 857/857 | 0/857 |
 | tickets | 979/979 | 0/979 |
 | usage | 282/282 | 0/282 |

@@ -1,0 +1,8 @@
+{
+  "module": "common/git-error.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/git-error.jsonl",
+  "notCaptured": [],
+  "cases": 133,
+  "sha256": "aeee272ac31722048030f41f3ff7123f0c3eaf7702562abc509f3dfc329ff987"
+}

@@ -1,0 +1,8 @@
+{
+  "module": "server/common/domain-error.ts",
+  "tests": [],
+  "inputs": "rust/garcon-base/tests/inputs/server-common/domain-error.jsonl",
+  "notCaptured": [],
+  "cases": 2,
+  "sha256": "134e3b890512eac539b5a377d7517dc2778aaf2001b9dd21448d08ed9057be06"
+}

@@ -1,0 +1,8 @@
+{
+  "module": "common/api-providers.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/api-providers.jsonl",
+  "notCaptured": [],
+  "cases": 99,
+  "sha256": "70b2cb0421dfd79a183e7e5ff4c18bd91c8089eebc462928e9491dead356cfb5"
+}
