@@ -39,15 +39,20 @@ fn resource_cases_match() {
                     Ok(()) => Ok(markers::undefined()),
                     Err(error) => Err(CaseError::new("AgentCallError", error.message.clone())
                         .with_property("code", error.code.as_str())
-                        .with_property("outcome", error.outcome.as_str())
                         .with_property("retryable", error.retryable)
                         .with_property(
                             "details",
                             error
                                 .details
                                 .as_ref()
-                                .map_or_else(markers::undefined, |value| json!(value)),
-                        )),
+                                .map_or_else(markers::undefined, |value| {
+                                    garcon_js::json::from_str(
+                                        &serde_json::to_string(value).unwrap(),
+                                    )
+                                    .unwrap()
+                                }),
+                        )
+                        .with_property("outcome", error.outcome.as_str())),
                 }
             }
             _ => Err(CaseError::unhandled(function)),
