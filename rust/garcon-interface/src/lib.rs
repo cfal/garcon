@@ -18,5 +18,6 @@ pub mod producer;
 pub mod resources;
 pub mod services;
 pub mod terminals;
+pub mod testing;
 pub mod transcript;
 pub mod usage_history;
