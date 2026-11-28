@@ -19,6 +19,7 @@ garcon-interface.workspace = true
 garcon-js.workspace = true
 indexmap.workspace = true
 ipnet = "2"
+murmur3 = "0.5"
 regress = "0.12"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-no-provider", "stream", "gzip", "brotli", "deflate", "zstd"] }
 serde.workspace = true
@@ -27,6 +28,7 @@ sha2.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+twox-hash = { version = "2", default-features = false, features = ["xxhash32"] }
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
