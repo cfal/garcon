@@ -1,0 +1,401 @@
+{
+  "scenario": "telegram-token-test",
+  "cases": [
+    {
+      "name": "test-without-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "details": "Telegram bot token is not configured",
+            "error": "Telegram token test failed",
+            "errorCode": "telegram_token_test_failed",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/telegram/token/test"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "test-with-blank-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "details": "Telegram bot token is not configured",
+            "error": "Telegram token test failed",
+            "errorCode": "telegram_token_test_failed",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/telegram/token/test"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "test-with-non-string-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "details": "Telegram bot token is not configured",
+            "error": "Telegram token test failed",
+            "errorCode": "telegram_token_test_failed",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/telegram/token/test"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "test-without-token~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/telegram/token/test"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "test-without-token~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/telegram/token/test"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "test-without-token~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/telegram/token/test"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "test-without-token~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "details": "Telegram bot token is not configured",
+            "error": "Telegram token test failed",
+            "errorCode": "telegram_token_test_failed",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/telegram/token/test"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "test-with-blank-token~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/telegram/token/test"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "test-with-blank-token~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/telegram/token/test"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "test-with-blank-token~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/telegram/token/test"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "test-with-blank-token~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "details": "Telegram bot token is not configured",
+            "error": "Telegram token test failed",
+            "errorCode": "telegram_token_test_failed",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/telegram/token/test"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "test-with-non-string-token~unauthenticated",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "none",
+          "method": "POST",
+          "path": "/api/v1/app/telegram/token/test"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "test-with-non-string-token~forged-token",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Invalid token",
+            "errorCode": "AUTH_SESSION_INVALID",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "forged",
+          "method": "POST",
+          "path": "/api/v1/app/telegram/token/test"
+        },
+        "status": 401
+      },
+      "noise": []
+    },
+    {
+      "name": "test-with-non-string-token~malformed-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "error": "Malformed JSON",
+            "errorCode": "VALIDATION_FAILED",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/telegram/token/test"
+        },
+        "status": 400
+      },
+      "noise": []
+    },
+    {
+      "name": "test-with-non-string-token~non-ascii-json",
+      "expected": {
+        "body": {
+          "kind": "json",
+          "value": {
+            "details": "Telegram bot token is not configured",
+            "error": "Telegram token test failed",
+            "errorCode": "telegram_token_test_failed",
+            "retryable": false,
+            "success": false
+          }
+        },
+        "headers": {
+          "content-encoding": "gzip",
+          "content-type": "application/json;charset=utf-8",
+          "vary": "Accept-Encoding"
+        },
+        "request": {
+          "auth": "token",
+          "method": "POST",
+          "path": "/api/v1/app/telegram/token/test"
+        },
+        "status": 400
+      },
+      "noise": []
+    }
+  ]
+}

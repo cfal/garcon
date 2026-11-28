@@ -1,0 +1,10 @@
+{
+  "name": "telegram-token-test",
+  "description": "Testing an omitted, blank, or non-string Telegram token without a saved token fails before any network request.",
+  "traps": true,
+  "steps": [
+    { "name": "test-without-token", "http": { "method": "POST", "path": "/api/v1/app/telegram/token/test", "json": {} } },
+    { "name": "test-with-blank-token", "http": { "method": "POST", "path": "/api/v1/app/telegram/token/test", "json": { "botToken": "  " } } },
+    { "name": "test-with-non-string-token", "http": { "method": "POST", "path": "/api/v1/app/telegram/token/test", "json": { "botToken": 17 } } }
+  ]
+}
