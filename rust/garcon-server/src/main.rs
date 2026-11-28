@@ -2,8 +2,6 @@
 //! TypeScript original behind it, serves the routes that have been ported, and
 //! proxies everything else. See rust/README.md and rust/DECISIONS.md.
 
-mod asset_cache;
-mod compression;
 mod config;
 mod line_log;
 mod native;
@@ -11,12 +9,14 @@ mod original;
 mod proxy;
 mod relay;
 mod shadow;
-mod static_assets;
 
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use garcon_http::asset_cache::{AssetCache, compress_off_runtime};
+use garcon_http::compression::{self, NativeResponse};
+use garcon_http::static_assets;
 use hyper::body::Incoming;
 use hyper::header::HeaderValue;
 use hyper::server::conn::http1;
@@ -26,8 +26,6 @@ use hyper_util::rt::TokioIo;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::signal::unix::{SignalKind, signal};
 
-use crate::asset_cache::{AssetCache, compress_off_runtime};
-use crate::compression::NativeResponse;
 use crate::config::{FrontDoorConfig, LaunchMode, ProcessEnvironment};
 use crate::line_log::LineLog;
 use crate::proxy::{
@@ -217,9 +215,19 @@ async fn run_front_door(config: FrontDoorConfig) -> std::io::Result<ExitCode> {
     Ok(exit_code(status))
 }
 
-#[tokio::main]
-async fn main() -> ExitCode {
+fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if std::env::var_os("GARCON_RS_CONTROLLER").is_some_and(|mode| mode == "native") {
+        return garcon_controller::server::run_native(
+            &args,
+            std::rc::Rc::new(garcon_controller::server::UnavailableLocalExecutor),
+        );
+    }
+    run_front_door_entry(args)
+}
+
+#[tokio::main]
+async fn run_front_door_entry(args: Vec<String>) -> ExitCode {
     let root = ProcessEnvironment;
     match config::launch_mode(&args, &root) {
         LaunchMode::Original(original) => {

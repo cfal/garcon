@@ -10,7 +10,28 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+bytes.workspace = true
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 garcon-base.workspace = true
 garcon-contract.workspace = true
 garcon-js.workspace = true
 garcon-stores.workspace = true
+hashlink = "0.10"
+http = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+indexmap.workspace = true
+regex = "1"
+ruzstd = "0.8"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+tokio-util.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+garcon-cases.workspace = true
+tempfile = "3"
+tokio = { workspace = true, features = ["test-util"] }

@@ -1,0 +1,11 @@
+{"fn":"escapeHtml","args":["A < B & \"C\" > 'D'"]}
+{"fn":"appTitleBootstrapScript","args":[{"title":"Garcon","version":0}]}
+{"fn":"appTitleBootstrapScript","args":[{"title":"Project <name>\u2028two\u2029three","version":42}]}
+{"fn":"injectAppTitleIntoShell","args":["<head>\n\t<title>Before</title>\n\t<meta name=\"apple-mobile-web-app-title\" content=\"Before\" />\n\t</head>",{"title":"Research <Notes>","version":1}]}
+{"fn":"injectAppTitleIntoShell","args":["<head>\n\t<meta\u00a0name=\"apple-mobile-web-app-title\"\tcontent=\"Before\">\n\t</head>",{"title":"A & B","version":2}]}
+{"fn":"injectAppTitleIntoShell","args":["<head><title>Before</title></head>",{"title":"Cost $$","version":3}]}
+{"fn":"injectAppTitleIntoShell","args":["<head></head>",{"title":"Workspace","version":4}]}
+{"fn":"injectAppTitleIntoShell","args":["<div>Headless template</div>",{"title":"Workspace","version":4}]}
+{"fn":"applyManifestTitle","args":["{\"name\":\"Before\",\"display\":\"standalone\",\"short_name\":\"Before\",\"10\":1.0,\"2\":1e-7}",{"title":"After","version":5}]}
+{"fn":"applyManifestTitle","args":["{\"icons\":[{\"sizes\":\"192x192\"}],\"start_url\":\".\"}",{"title":"\u96ea","version":6}]}
+{"fn":"applyManifestTitle","args":["null",{"title":"Garcon","version":0}]}
