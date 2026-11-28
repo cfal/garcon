@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
   "garcon-agent-claude",
+  "garcon-agent-codex",
   "garcon-agent-direct-anthropic-compatible",
   "garcon-agent-direct-openai-compatible",
   "garcon-agent-direct-openai-responses-compatible",
