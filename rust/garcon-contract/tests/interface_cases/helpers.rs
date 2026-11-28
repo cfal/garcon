@@ -1,7 +1,6 @@
 //! What the replay dispatchers share.
 
-use garcon_cases::{CaseError, markers, replay, unknown};
-use garcon_js::Number;
+use garcon_cases::{CaseError, replay, unknown};
 use serde_json::Value;
 
 pub type Dispatcher = fn(&str, &[Value]) -> Result<Value, CaseError>;
@@ -26,18 +25,6 @@ pub fn optional<T>(value: Option<T>, to_json: impl FnOnce(T) -> Value) -> Value 
 /// A result that holds only plain JSON, as the original's `toEqual` sees it.
 pub fn plain<T: serde::Serialize>(value: Option<T>) -> Value {
     value.map_or(Value::Null, |value| serde_json::to_value(&value).unwrap())
-}
-
-/// Adds a property the original leaves out when it has no value.
-pub fn set_text(recorded: &mut Value, key: &str, value: Option<String>) {
-    if let Some(value) = value {
-        recorded[key] = Value::String(value);
-    }
-}
-
-/// A JavaScript number as the recording holds it; negative zero is a marker.
-pub fn number(value: Number) -> Value {
-    markers::number(value.0)
 }
 
 /// The recorded argument as the typed value the original takes, read with

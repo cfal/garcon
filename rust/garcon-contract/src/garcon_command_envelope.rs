@@ -85,6 +85,10 @@ impl GarconEnvelopeScanner {
         String::from_utf16_lossy(&self.content)
     }
 
+    pub(crate) fn content_units(&self) -> &[u16] {
+        &self.content
+    }
+
     pub fn span_at(&mut self, start: f64, end: f64) -> Option<GarconEnvelopeSpan> {
         let boundary = scan_boundary(&self.content, start, limit(&self.content, end))?;
         let mut span = boundary.span;
@@ -108,6 +112,15 @@ impl GarconEnvelopeScanner {
         start: usize,
         end: usize,
         mut is_removed_envelope: impl FnMut(&GarconEnvelopeSpan) -> bool,
+    ) -> GarconEnvelopeSpans {
+        self.spans_with_scanner(start, end, |_, span| is_removed_envelope(span))
+    }
+
+    pub(crate) fn spans_with_scanner(
+        &mut self,
+        start: usize,
+        end: usize,
+        mut is_removed_envelope: impl FnMut(&mut Self, &GarconEnvelopeSpan) -> bool,
     ) -> GarconEnvelopeSpans {
         let end = end.min(self.content.len());
         let mut spans = Vec::new();
@@ -137,7 +150,7 @@ impl GarconEnvelopeScanner {
                         open_fence: false,
                     };
                 };
-                let removed = is_removed_envelope(&span);
+                let removed = is_removed_envelope(self, &span);
                 spans.push(span);
                 if !removed {
                     opaque_through = span_end;
@@ -194,7 +207,7 @@ fn unit_at_number(content: &[u16], index: f64) -> Option<u16> {
     content.get(index as usize).copied()
 }
 
-fn ascii_starts_at(content: &[u16], index: usize, pattern: &str) -> bool {
+pub(crate) fn ascii_starts_at(content: &[u16], index: usize, pattern: &str) -> bool {
     content.get(index..).is_some_and(|units| {
         units.len() >= pattern.len()
             && units
@@ -224,7 +237,7 @@ fn find_ascii(content: &[u16], pattern: &str, start: usize) -> Option<usize> {
     None
 }
 
-fn unit_space(unit: u16) -> bool {
+pub(crate) fn unit_space(unit: u16) -> bool {
     char::from_u32(u32::from(unit)).is_some_and(is_space)
 }
 

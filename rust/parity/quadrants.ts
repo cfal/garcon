@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util';
-import { compareOutcomes, readReports } from './compare-junit.js';
+import { compareOutcomes, describePositionalPairing, readReports } from './compare-junit.js';
 
 const QUADRANTS = ['rust-worker', 'rust-controller', 'rust-both', 'rust-local'] as const;
 const USAGE = 'Usage: bun rust/parity/quadrants.ts --original <junit> [--rust-worker <junit>] [--rust-controller <junit>] [--rust-both <junit>] [--rust-local <junit>]';
@@ -30,7 +30,8 @@ async function run(args: string[]): Promise<number> {
   for (const { quadrant, same, differences, failedBoth } of rows) {
     console.log(`| ${quadrant} | ${same} | ${differences.length} | ${failedBoth} |`);
   }
-  for (const { quadrant, differences } of rows) {
+  for (const { quadrant, differences, positionalPairings } of rows) {
+    for (const pairing of positionalPairings) console.log(`${quadrant}: ${describePositionalPairing(pairing)}`);
     for (const { test, expected, actual } of differences) {
       console.log(`DIFFERS ${quadrant}: ${test}: original=${expected} quadrant=${actual}`);
     }

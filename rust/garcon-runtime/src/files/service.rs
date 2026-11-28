@@ -16,8 +16,8 @@ use garcon_contract::error_codes::ErrorCode;
 use garcon_contract::file_contracts::{
     CanonicalFileIdentity, DirectoryEntry, DirectoryNameProblem, FileRevisionResponse,
     FileSaveConflictResolution, FileTreeDirectory, FileTreeEntry, FileTreeEntryType,
-    FileTreeHomeDirectory, FileTreeResponse, MAX_FILE_SAVE_BYTES, SaveTextResponse,
-    directory_name_problem, is_file_revision,
+    FileTreeHomeDirectory, FileTreeResponse, MAX_FILE_SAVE_BYTES, SaveTextRequest,
+    SaveTextResponse, directory_name_problem, is_file_revision, parse_save_text_request,
 };
 use garcon_interface::files::{
     ExecutionDirectoryCreation, ExecutionDirectoryRequest, ExecutionFileEntry, ExecutionFileList,
@@ -193,6 +193,73 @@ impl FilesService {
             operation.await.map_err(file_operation_error)
         })
         .await?
+    }
+
+    pub async fn save_raw(
+        &self,
+        target: ExecutionFileTarget,
+        request: Value,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<SaveTextResponse> {
+        self.save_with(target, move || parse_save_text_request(&request), options)
+            .await
+    }
+
+    async fn save_with(
+        &self,
+        request_target: ExecutionFileTarget,
+        request: impl FnOnce() -> Option<SaveTextRequest> + 'static,
+        options: Option<ExecutorCallOptions>,
+    ) -> ExecutorResult<SaveTextResponse> {
+        let later = options.clone();
+        self.run_content(options.as_ref(), |this| async move {
+            validate_target(&request_target)?;
+            let request = request().ok_or_else(|| {
+                DomainError::new_validation(
+                    "Content, expectedRevision, and conflictResolution are required",
+                )
+            })?;
+            if request.content.len() > MAX_FILE_SAVE_BYTES {
+                return Err(file_too_large(MAX_FILE_SAVE_BYTES).into());
+            }
+            let root = this.root(&request_target.project_path).await?;
+            let input = to_native_path(&request_target.file_path, None);
+            let target = this.resolve_save_target(&root, &input).await?;
+            let key = get_file_lock_key(&target).await?;
+            let locks = SAVE_LOCKS.with(Rc::clone);
+            locks
+                .run_exclusive(
+                    &key,
+                    || async {
+                        this.available(later.as_ref())?;
+                        let locked = this.resolve_save_target(&root, &input).await?;
+                        if locked != target || get_file_lock_key(&locked).await? != key {
+                            return Err(file_revision_conflict().into());
+                        }
+                        let current = get_file_revision_or_missing(&target).await?;
+                        if request.conflict_resolution == FileSaveConflictResolution::Reject
+                            && current.as_deref() != Some(request.expected_revision.as_str())
+                        {
+                            return Err(file_revision_conflict().into());
+                        }
+                        this.available(later.as_ref())?;
+                        #[cfg(test)]
+                        if let Some(before_write) = &this.options.before_write {
+                            before_write().await;
+                        }
+                        let revision = write_versioned_text_file(&target, &request.content).await?;
+                        Ok(SaveTextResponse {
+                            success: true,
+                            path: to_executor_path(&target, None),
+                            message: "File saved successfully".to_owned(),
+                            revision,
+                        })
+                    },
+                    None,
+                )
+                .await?
+        })
+        .await
     }
 
     async fn tree_home(&self, root: &str) -> Option<FileTreeHomeDirectory> {
@@ -376,59 +443,14 @@ impl ExecutionFilesService for FilesService {
         request: ExecutionFileSave,
         options: Option<ExecutorCallOptions>,
     ) -> ExecutorResult<SaveTextResponse> {
-        let later = options.clone();
-        self.run_content(options.as_ref(), |this| async move {
-            let ExecutionFileSave {
-                target: request_target,
-                request,
-            } = request;
-            validate_target(&request_target)?;
-            if !is_file_revision(&Value::String(request.expected_revision.clone())) {
-                return Err(DomainError::new_validation(
-                    "Content, expectedRevision, and conflictResolution are required",
-                )
-                .into());
-            }
-            if request.content.len() > MAX_FILE_SAVE_BYTES {
-                return Err(file_too_large(MAX_FILE_SAVE_BYTES).into());
-            }
-            let root = this.root(&request_target.project_path).await?;
-            let input = to_native_path(&request_target.file_path, None);
-            let target = this.resolve_save_target(&root, &input).await?;
-            let key = get_file_lock_key(&target).await?;
-            let locks = SAVE_LOCKS.with(Rc::clone);
-            locks
-                .run_exclusive(
-                    &key,
-                    || async {
-                        this.available(later.as_ref())?;
-                        let locked = this.resolve_save_target(&root, &input).await?;
-                        if locked != target || get_file_lock_key(&locked).await? != key {
-                            return Err(file_revision_conflict().into());
-                        }
-                        let current = get_file_revision_or_missing(&target).await?;
-                        if request.conflict_resolution == FileSaveConflictResolution::Reject
-                            && current.as_deref() != Some(request.expected_revision.as_str())
-                        {
-                            return Err(file_revision_conflict().into());
-                        }
-                        this.available(later.as_ref())?;
-                        #[cfg(test)]
-                        if let Some(before_write) = &this.options.before_write {
-                            before_write().await;
-                        }
-                        let revision = write_versioned_text_file(&target, &request.content).await?;
-                        Ok(SaveTextResponse {
-                            success: true,
-                            path: to_executor_path(&target, None),
-                            message: "File saved successfully".to_owned(),
-                            revision,
-                        })
-                    },
-                    None,
-                )
-                .await?
-        })
+        self.save_with(
+            request.target,
+            move || {
+                is_file_revision(&Value::String(request.request.expected_revision.clone()))
+                    .then_some(request.request)
+            },
+            options,
+        )
         .await
     }
 

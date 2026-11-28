@@ -5,7 +5,7 @@ use garcon_contract::api_providers::is_api_provider_id;
 use garcon_contract::error_codes::ErrorCode;
 use garcon_contract::executors::{is_executor_id, is_remote_executor_id};
 use garcon_js::json::{Opaque, as_number, stringify};
-use garcon_js::utf16;
+use garcon_js::{sort_object_keys, utf16};
 use indexmap::IndexMap;
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
@@ -241,17 +241,36 @@ impl Serialize for ControllerCliRequest {
     }
 }
 
-/// The gateway reads the status and Retry-After and writes only the body.
-/// The outer RPC result's property order does not reach the HTTP response.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CliHttpResponse {
     pub status: u16,
     pub body: Opaque,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_after: Option<String>,
-    #[serde(flatten)]
     pub extra: IndexMap<String, Opaque>,
+    wire_order: Vec<String>,
+}
+
+impl Serialize for CliHttpResponse {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(None)?;
+        for key in &self.wire_order {
+            match key.as_str() {
+                "status" => map.serialize_entry(key, &self.status)?,
+                "body" => map.serialize_entry(key, &self.body)?,
+                "retryAfter" => {
+                    if let Some(value) = &self.retry_after {
+                        map.serialize_entry(key, value)?;
+                    }
+                }
+                _ => {
+                    if let Some(value) = self.extra.get(key) {
+                        map.serialize_entry(key, value)?;
+                    }
+                }
+            }
+        }
+        map.end()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -525,6 +544,8 @@ pub fn parse_cli_http_response(value: &Value) -> Result<CliHttpResponse, DomainE
     if stringify(value).len() + CLI_ENVELOPE_BYTES > CLI_REPLY_BYTES {
         return Err(invalid_response());
     }
+    let mut wire_order: Vec<_> = fields.keys().cloned().collect();
+    sort_object_keys(&mut wire_order);
     Ok(CliHttpResponse {
         status: status as u16,
         body: Opaque::from_value(body.clone()),
@@ -534,5 +555,6 @@ pub fn parse_cli_http_response(value: &Value) -> Result<CliHttpResponse, DomainE
             .filter(|(key, _)| !matches!(key.as_str(), "status" | "body" | "retryAfter"))
             .map(|(key, value)| (key.clone(), Opaque::from_value(value.clone())))
             .collect(),
+        wire_order,
     })
 }

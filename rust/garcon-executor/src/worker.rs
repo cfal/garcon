@@ -40,6 +40,7 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 use uuid::Uuid;
 
+use crate::cli_gateway::CliGateway;
 use crate::executor_rpc_server::{ExecutorRpcServer, describe, not_dispatched};
 use crate::listener_secret::load_listener_secret;
 
@@ -74,8 +75,8 @@ pub struct ExecutorOptions {
 
 pub struct ExecutorApi {
     info: ExecutorInfo,
-    projects: ProjectService,
-    files: FilesService,
+    pub(crate) projects: ProjectService,
+    pub(crate) files: FilesService,
     terminals: Rc<TerminalService>,
     disposed: Rc<Cell<bool>>,
 }
@@ -430,6 +431,32 @@ async fn serve_leased(
         },
         EventLoopStallOptions::default(),
     );
+    let gateway = match CliGateway::start(
+        &data_dir,
+        Rc::new({
+            let worker = Rc::downgrade(&worker);
+            move || {
+                worker.upgrade().and_then(|worker| {
+                    worker
+                        .serving
+                        .borrow()
+                        .as_ref()
+                        .map(|serving| Rc::clone(&serving.connection))
+                })
+            }
+        }),
+    )
+    .await
+    {
+        Ok(gateway) => Some(gateway),
+        Err(error) => {
+            warn_frame(
+                "executor-cli-unavailable",
+                serde_json::json!({ "message": error.to_string() }),
+            );
+            None
+        }
+    };
     let _off_error = link.on_error(Rc::new(|failure| {
         if should_log_link_failure(failure) {
             warn_frame("executor-unavailable", failure);
@@ -504,6 +531,10 @@ async fn serve_leased(
     }
     .await;
     stop_monitor();
+    let gateway_cleanup = match gateway {
+        Some(gateway) => gateway.dispose().await,
+        None => Ok(()),
+    };
     link.dispose().await;
     if let Some(serving) = worker.serving.take() {
         serving.server.dispose();
@@ -513,7 +544,7 @@ async fn serve_leased(
     }
     worker.journal.dispose();
     worker.executor.take();
-    result
+    result.and(gateway_cleanup)
 }
 
 fn startup_link_error(error: SessionError) -> Box<dyn Error> {
@@ -601,6 +632,8 @@ fn wire_frame(kind: &str, payload: impl Serialize) -> Result<String, serde_json:
 mod tests {
     use std::time::Duration;
 
+    use garcon_base::domain_error::DomainError;
+    use garcon_contract::error_codes::ErrorCode;
     use garcon_interface::errors::AgentIntegrationErrorCode;
     use garcon_js::json::Opaque;
     use garcon_link::connection_url::create_executor_secret;
@@ -682,6 +715,31 @@ mod tests {
                     .unwrap()
                     .unwrap();
                 assert_eq!(inspected["resolution"]["kind"], "available");
+                for path in [project.path().join("missing"), project.path().parent().unwrap().into()] {
+                    let error = connection.primary.call(
+                        "", "projects.ticketProjectDefault",
+                        Opaque::from_value(json!({"projectPath": path.to_str().unwrap()})),
+                        options(),
+                    ).await.unwrap_err();
+                    let error = error.downcast_ref::<DomainError>().unwrap();
+                    assert_eq!(error.code, ErrorCode::TICKET_PROJECT_UNAVAILABLE);
+                    assert_eq!(error.status, 503);
+                    assert!(error.retryable);
+                    assert_eq!(error.message, "Cannot resolve the project default. Check the context directory, or enter an explicit project.");
+                }
+                for (request, message) in [
+                    (json!({"projectPath": root, "extra": true}), "Unexpected ticket field."),
+                    (json!({}), "projectPath must be well-formed Unicode text."),
+                    (json!({"projectPath": 3}), "projectPath must be well-formed Unicode text."),
+                ] {
+                    let error = connection.primary.call(
+                        "", "projects.ticketProjectDefault", Opaque::from_value(request), options(),
+                    ).await.unwrap_err();
+                    let error = error.downcast_ref::<garcon_interface::errors::AgentIntegrationError>().unwrap();
+                    assert_eq!(error.code, AgentIntegrationErrorCode::PROVIDER_FAILURE);
+                    assert_eq!(error.message, message);
+                    assert!(!error.retryable);
+                }
                 let error = connection
                     .primary
                     .call(
