@@ -1,0 +1,22 @@
+{
+  "module": "common/chat-parent-contracts.ts",
+  "tests": [
+    "common/__tests__/chat-parent-contracts.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseSetChatParentRequest",
+      "argument": 0
+    },
+    {
+      "fn": "parseSetChatParentResponse",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 143,
+  "sha256": "24de6367927e888086f0563bedc8e2df2f7900c23815e078ff8659127103a059"
+}
