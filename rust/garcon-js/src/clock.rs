@@ -101,7 +101,7 @@ pub fn to_iso_string(epoch_ms: i64) -> Result<String, InvalidTimeValue> {
 }
 
 /// Splits a day count since the Unix epoch into a proleptic Gregorian date.
-fn civil_from_days(days: i64) -> (i64, u32, u32) {
+pub(crate) fn civil_from_days(days: i64) -> (i64, u32, u32) {
     // Howard Hinnant's `civil_from_days`.
     let z = days + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
