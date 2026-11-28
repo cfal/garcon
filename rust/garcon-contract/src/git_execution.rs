@@ -1,15 +1,15 @@
 //! Ports `common/git-execution.ts`.
-//!
-//! The requests and results of the Git and GitHub calls are not ported yet;
-//! they are written with the documents of `git.rs` and `gh.rs`.
+use serde::{Deserialize, Serialize};
 
-use serde::Serialize;
-
-use crate::gh::GhMethod;
-use crate::git::GitMethod;
+use crate::gh::{GhMethod, GhResults};
+use crate::git::{
+    GitCalls, GitMethod, GitRequests, GitResults, GitReviewBodyPurpose, StageHunkOptions,
+    StageSelectionOptions,
+};
+use crate::git_diagnostics::GitOperationDiagnostics;
 
 /// The executor and the instance that ran a Git call.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitExecutorScope {
     pub executor_id: String,
@@ -17,7 +17,7 @@ pub struct GitExecutorScope {
 }
 
 /// The executor and the project a Git call runs on.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitProjectTarget {
     pub executor_id: String,
@@ -25,7 +25,7 @@ pub struct GitProjectTarget {
 }
 
 /// A review document an executor holds.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitReviewDocumentRef {
     pub executor_id: String,
@@ -35,13 +35,71 @@ pub struct GitReviewDocumentRef {
 
 /// What a staged selection must repeat: the document the selection was made
 /// on, and the fingerprints of the file body and the patch it was shown in.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitSelectionProof {
     pub document: GitReviewDocumentRef,
     pub body_fingerprint: String,
     pub patch_digest: String,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionGitReviewDocumentFileBodiesOptions {
+    pub project_path: String,
+    pub files: Vec<String>,
+    pub purpose: GitReviewBodyPurpose,
+    pub document: GitReviewDocumentRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionStageSelectionOptions {
+    #[serde(flatten)]
+    pub selection: StageSelectionOptions,
+    #[serde(flatten)]
+    pub proof: GitSelectionProof,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionStageHunkOptions {
+    #[serde(flatten)]
+    pub hunk: StageHunkOptions,
+    #[serde(flatten)]
+    pub proof: GitSelectionProof,
+}
+
+pub type ExecutionGitRequests = GitRequests<
+    ExecutionGitReviewDocumentFileBodiesOptions,
+    ExecutionStageSelectionOptions,
+    ExecutionStageHunkOptions,
+>;
+
+pub type ExecutionGitCalls = GitCalls<
+    ExecutionGitReviewDocumentFileBodiesOptions,
+    ExecutionStageSelectionOptions,
+    ExecutionStageHunkOptions,
+>;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExecutionGitResult<R> {
+    #[serde(flatten)]
+    pub result: R,
+    #[serde(flatten)]
+    pub scope: GitExecutorScope,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<GitOperationDiagnostics>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExecutionGhResult<R> {
+    #[serde(flatten)]
+    pub result: R,
+    #[serde(flatten)]
+    pub scope: GitExecutorScope,
+}
+
+pub type ExecutionGitResults = ExecutionGitResult<GitResults>;
+pub type ExecutionGhResults = ExecutionGhResult<GhResults>;
 
 /// The Git calls that change the repository.
 pub const GIT_MUTATIONS: &[GitMethod] = &[

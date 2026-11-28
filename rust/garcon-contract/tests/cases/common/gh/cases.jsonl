@@ -1,0 +1,6 @@
+{"id":"isGhMutation#0","fn":"isGhMutation","args":["getStatus"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/gh.jsonl:1"}
+{"id":"isGhMutation#1","fn":"isGhMutation","args":["listPullRequests"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/gh.jsonl:2"}
+{"id":"isGhMutation#2","fn":"isGhMutation","args":["getPullRequest"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/gh.jsonl:3"}
+{"id":"isGhMutation#3","fn":"isGhMutation","args":["getPullRequestReviewTarget"],"result":false,"origin":"rust/garcon-contract/tests/inputs/common/gh.jsonl:4"}
+{"id":"isGhMutation#4","fn":"isGhMutation","args":["createPullRequestComment"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/gh.jsonl:5"}
+{"id":"isGhMutation#5","fn":"isGhMutation","args":["minimizePullRequestComment"],"result":true,"origin":"rust/garcon-contract/tests/inputs/common/gh.jsonl:6"}
