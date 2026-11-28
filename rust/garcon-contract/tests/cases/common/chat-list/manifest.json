@@ -1,0 +1,18 @@
+{
+  "module": "common/chat-list.ts",
+  "tests": [
+    "common/__tests__/chat-list.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-list.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "parseChatListResponse",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 166,
+  "sha256": "57c6b9318ac82793fabef39d557509a32acfca85c30d138ba229d9284d87933f"
+}
