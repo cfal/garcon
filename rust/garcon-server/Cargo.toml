@@ -8,8 +8,11 @@ publish.workspace = true
 
 [dependencies]
 bytes = "1"
+garcon-contract.workspace = true
 garcon-controller.workspace = true
+garcon-executor.workspace = true
 garcon-http.workspace = true
+garcon-interface.workspace = true
 http-body-util = "0.1"
 libc = "0.2"
 hyper = { version = "1", features = ["client", "http1", "server"] }

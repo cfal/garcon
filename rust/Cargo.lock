@@ -1458,8 +1458,11 @@ version = "0.0.0"
 dependencies = [
  "bytes",
  "flate2",
+ "garcon-contract",
  "garcon-controller",
+ "garcon-executor",
  "garcon-http",
+ "garcon-interface",
  "http-body-util",
  "hyper",
  "hyper-util",

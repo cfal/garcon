@@ -5,6 +5,7 @@
 mod config;
 mod line_log;
 mod native;
+mod native_controller;
 mod original;
 mod proxy;
 mod relay;
@@ -219,12 +220,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if std::env::var_os("GARCON_RS_CONTROLLER").is_some_and(|mode| mode == "native") {
         // SAFETY: native dispatch runs before either mode starts a runtime or any threads.
-        return unsafe {
-            garcon_controller::server::run_native(
-                &args,
-                std::rc::Rc::new(garcon_controller::server::UnavailableLocalExecutor),
-            )
-        };
+        return unsafe { native_controller::run(&args) };
     }
     run_front_door_entry(args)
 }
