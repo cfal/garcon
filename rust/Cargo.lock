@@ -943,13 +943,23 @@ dependencies = [
 name = "garcon-agent-antigravity"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
+ "futures",
  "garcon-agents-common",
+ "garcon-base",
  "garcon-cases",
  "garcon-contract",
+ "garcon-interface",
  "garcon-js",
  "indexmap",
+ "libc",
  "serde",
  "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "url",
+ "uuid",
 ]
 
 [[package]]
