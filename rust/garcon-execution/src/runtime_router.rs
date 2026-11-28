@@ -1,6 +1,10 @@
 //! Routes provider-facing reads, steering, and permission responses.
 //! Launch, producer binding, and settlement are not assembled here yet.
 
+mod ledger;
+pub mod session_lifecycle;
+pub use ledger::RuntimeTranscriptLedger;
+
 use std::{
     future::Future,
     rc::Rc,
@@ -17,7 +21,7 @@ use garcon_contract::{
 };
 use garcon_interface::{
     errors::{AgentCallError, AgentDeliveryOutcome},
-    producer::{AgentPermissionRespondRequest, AgentPermissions},
+    producer::{AgentPermissionRespondRequest, AgentPermissions, AgentRunFailureDetail},
     resources::{AgentPermissionResponseRef, ExecutorCallOptions},
     services::{
         AgentCommands, AgentSteerRejectionReason, AgentSteerRequest, AgentSteerResult,
@@ -25,6 +29,7 @@ use garcon_interface::{
     },
     transcript::AgentNativeSessionRef,
 };
+use garcon_ledger::producer_lease::ProducerLease;
 use indexmap::IndexMap;
 use serde::Serialize;
 use tokio::sync::oneshot;
@@ -120,6 +125,20 @@ pub trait RouterPermissionClaim {
 pub trait RuntimeRouterLedger {
     fn active_chat_ids(&self) -> Vec<String>;
     fn is_run_active(&self, chat_id: &str) -> bool;
+    fn active_run_id(&self, chat_id: &str) -> Option<String>;
+    fn open_producer(
+        &self,
+        chat_id: &str,
+        agent_id: &str,
+    ) -> ExecutionOperationResult<Rc<ProducerLease>>;
+    fn begin_run(&self, chat_id: &str, turn_id: &str) -> ExecutionOperationResult<String>;
+    fn interrupt_run(&self, chat_id: &str) -> ExecutionOperationResult<()>;
+    fn fail_run(
+        &self,
+        chat_id: &str,
+        run_id: &str,
+        error: AgentRunFailureDetail,
+    ) -> ExecutionOperationResult<()>;
     fn claim_permission_resolution(
         &self,
         control: &ChatTransientControlAction,

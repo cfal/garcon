@@ -15,10 +15,7 @@ use garcon_chats::{
     registry_contracts::CarryOverSegmentRef,
     store::{ChatRegistry, ReferenceLease, RetainReferences},
 };
-use garcon_contract::{
-    agents::AgentExecutionPolicy, chat_command_contracts::PermissionDecisionPayload,
-    chat_transient_feed::ChatTransientControlAction, executors::effective_executor_id,
-};
+use garcon_contract::{agents::AgentExecutionPolicy, executors::effective_executor_id};
 use garcon_execution::{
     accepted_input_transcript::AcceptedInputTranscriptPort,
     agent_registry::{AgentRegistry, AgentRegistryOptions, RegistryCarryOverRevision},
@@ -30,17 +27,14 @@ use garcon_execution::{
     command_ledger::{CommandLedger, CommandLedgerOptions},
     control_state::StoredControlInputEntry,
     directory::AgentDirectory,
-    executor_availability_wiring::{
-        ExecutorAvailabilitySessions, ExecutorAvailabilityWiring, wire_executor_availability,
-    },
+    executor_availability_wiring::{ExecutorAvailabilityWiring, wire_executor_availability},
     executor_config_guards::executor_config_guards,
     executor_manager::{ExecutorManager, ExecutorManagerOptions, ResolveExecutorCredential},
     queued_steer_delivery::QueuedSteerContent,
     reference_writes::RetainExecutorReferences,
     remote_client::RemoteExecutorClientFactory,
     runtime_router::{
-        AgentRuntimeRouterOptions, RouterPermissionClaim, RoutingChat, RuntimeRouterChats,
-        RuntimeRouterLedger,
+        AgentRuntimeRouterOptions, RoutingChat, RuntimeRouterChats, RuntimeTranscriptLedger,
     },
     session_types::{
         PersistedChatExecutionConfig, RunAgentTurnOptions, require_chat_execution_config,
@@ -51,13 +45,10 @@ use garcon_execution::{
         QueuedAttachmentAdmissionPort,
     },
 };
-use garcon_interface::{
-    execution_runtime::ExecutionRuntimeApi, resources::AgentPermissionResponseRef,
-};
+use garcon_interface::execution_runtime::ExecutionRuntimeApi;
 use garcon_js::clock::{SystemClock, performance_now_ms};
 use garcon_ledger::{
-    adoption::TranscriptAdoptionService,
-    service::{PermissionResolutionClaim, TranscriptLedgerService},
+    adoption::TranscriptAdoptionService, service::TranscriptLedgerService,
     store::TranscriptLedgerStore,
 };
 use garcon_stores::executors::config_store::ExecutorConfigStore;
@@ -127,7 +118,6 @@ pub struct ExecutionBindings {
 pub struct ExecutionRuntimeBindings {
     pub turn_runner: Rc<dyn AgentTurnRunnerPort>,
     pub input_transcript: Rc<dyn AcceptedInputTranscriptPort>,
-    pub sessions: Rc<dyn ExecutorAvailabilitySessions>,
     pub commands: Rc<dyn ExecutionCommandBindings>,
     pub project_admission: Rc<dyn ProjectAdmissionPort>,
     pub attachment_admission: Rc<dyn QueuedAttachmentAdmissionPort>,
@@ -229,11 +219,15 @@ fn finish_execution(
         runtime: AgentRuntimeRouterOptions {
             registry: Rc::new(RouterChats(bindings.chats.clone())),
             directory: directory.clone(),
-            ledger: Rc::new(RouterLedger(bindings.ledger.clone())),
+            ledger: Rc::new(RuntimeTranscriptLedger(bindings.ledger.clone())),
             unhandled_rejections: unhandled_rejections.clone(),
         },
         directory: directory.clone(),
         get_carry_over_revision: bindings.get_carry_over_revision,
+        ownership_transfer_pending: Rc::new({
+            let ownership = bindings.ownership.clone();
+            move |chat_id| ownership.has_pending(chat_id)
+        }),
         logger: Rc::new(create_logger("agents")),
     }));
     let clock = Rc::new(SystemClock);
@@ -294,7 +288,7 @@ fn finish_execution(
     ));
     let unsubscribe_availability = wire_executor_availability(ExecutorAvailabilityWiring {
         executors: manager.clone(),
-        sessions: runtime.sessions,
+        sessions: registry.clone(),
         chats: bindings.chats,
         ownership: bindings.ownership,
         queue: coordinator.clone(),
@@ -335,67 +329,6 @@ impl RuntimeRouterChats for RouterChats {
                 agent_settings_by_id: Some(chat.agent_settings_by_id),
             },
         })
-    }
-}
-
-struct RouterLedger(Rc<TranscriptLedgerService>);
-
-struct PermissionClaim {
-    ledger: Rc<TranscriptLedgerService>,
-    claim: Rc<PermissionResolutionClaim>,
-}
-
-impl RouterPermissionClaim for PermissionClaim {
-    fn response(&self) -> &AgentPermissionResponseRef {
-        &self.claim.decision.response
-    }
-
-    fn abandon(self: Box<Self>) -> ExecutionOperationResult<()> {
-        self.ledger.abandon_permission_resolution(&self.claim)
-    }
-
-    fn retire(self: Box<Self>) -> ExecutionOperationResult<()> {
-        self.ledger.retire_permission_resolution(&self.claim);
-        Ok(())
-    }
-
-    fn complete(
-        self: Box<Self>,
-        decision: PermissionDecisionPayload,
-    ) -> ExecutionOperationResult<()> {
-        self.ledger
-            .complete_permission_resolution(&self.claim, decision)?;
-        Ok(())
-    }
-}
-
-impl RuntimeRouterLedger for RouterLedger {
-    fn active_chat_ids(&self) -> Vec<String> {
-        self.0.active_chat_ids()
-    }
-
-    fn is_run_active(&self, chat_id: &str) -> bool {
-        self.0.is_run_active(chat_id, None)
-    }
-
-    fn claim_permission_resolution(
-        &self,
-        control: &ChatTransientControlAction,
-    ) -> ExecutionOperationResult<Box<dyn RouterPermissionClaim>> {
-        let claim = self.0.claim_permission_resolution(control)?;
-        Ok(Box::new(PermissionClaim {
-            ledger: self.0.clone(),
-            claim,
-        }))
-    }
-
-    fn take_prepared_input(
-        &self,
-        chat_id: &str,
-        client_message_id: &str,
-    ) -> ExecutionOperationResult<()> {
-        self.0.take_prepared_input(chat_id, Some(client_message_id));
-        Ok(())
     }
 }
 
