@@ -101,8 +101,8 @@ pub struct ExecutorServices {
 pub struct ExecutorInfo {
     pub executor_id: String,
     pub instance_id: String,
-    pub integration_ids: Vec<String>,
     pub project_base_path: ExecutorPath,
+    pub integration_ids: Vec<String>,
     pub services: ExecutorServices,
 }
 

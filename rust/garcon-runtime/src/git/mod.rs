@@ -14,7 +14,9 @@ pub mod push_branch;
 pub mod quick_summary;
 pub mod ref_validation;
 pub mod repository_coordination;
+pub mod review_diff_batch;
 pub mod review_document_registry;
+pub mod review_document_service;
 pub mod review_patch;
 pub mod review_performance;
 pub mod run;
@@ -41,5 +43,7 @@ mod git_fixture;
 mod mutation_tests;
 #[cfg(test)]
 mod read_tests;
+#[cfg(test)]
+mod review_bodies_tests;
 #[cfg(all(test, unix))]
 mod run_tests;

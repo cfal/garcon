@@ -917,6 +917,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "garcon-execution"
+version = "0.0.0"
+dependencies = [
+ "garcon-base",
+ "garcon-cases",
+ "garcon-contract",
+ "garcon-js",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "garcon-executor"
 version = "0.0.0"
 dependencies = [
@@ -1092,6 +1105,17 @@ dependencies = [
  "tokio-util",
  "uuid",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "garcon-search"
+version = "0.0.0"
+dependencies = [
+ "garcon-cases",
+ "garcon-contract",
+ "garcon-js",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -3,9 +3,11 @@ import type { ExecutorRpcMethods } from '../../../server/remote/transport/rpc-pr
 
 if (Bun.version !== '1.4.3') throw new Error(`Expected Bun 1.4.3, got ${Bun.version}`);
 
+// ExecutionRuntime constructs projectBasePath before integrationIds.
 const info: ExecutorRpcMethods['executor.describe']['result']['info'] = {
-  executorId: 'fixture-executor', instanceId: 'fixture-instance', integrationIds: ['claude', 'codex'],
-  projectBasePath: '/work', services: { files: true, git: true, gh: false, terminals: false, directoryCreation: true },
+  executorId: 'fixture-executor', instanceId: 'fixture-instance', projectBasePath: '/work',
+  integrationIds: ['claude', 'codex'],
+  services: { files: true, git: true, gh: false, terminals: false, directoryCreation: true },
 };
 const availability: ExecutorAvailability[] = ['ready', 'reconnecting', 'offline', 'disposed'];
 const discovery: ExecutorRpcMethods['apiProviders.discoverModels']['request'][] = [
