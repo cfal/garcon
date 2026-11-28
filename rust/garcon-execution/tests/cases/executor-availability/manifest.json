@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-execution/tests/support/executor-availability-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-execution/tests/inputs/executor-availability.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 4,
+  "sha256": "dd256658bfe40d0cd712065d058e4b4126d95a6070ab13ea657e093148ec2540"
+}

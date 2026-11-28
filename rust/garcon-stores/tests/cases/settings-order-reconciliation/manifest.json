@@ -1,0 +1,20 @@
+{
+  "module": "rust/garcon-stores/tests/oracles/settings-order-reconciliation.ts",
+  "tests": [],
+  "inputs": "rust/garcon-stores/tests/inputs/settings-order-reconciliation.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "reconcileOrder",
+      "argument": 0
+    },
+    {
+      "fn": "reconcileOrder",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 11,
+  "sha256": "9edb098f34c590a0fd1abe9d3e488008775cba8c40521245e585fcaf3995a591"
+}

@@ -4,11 +4,13 @@
 //! The registry mutations and runtime lifecycle methods are ported separately.
 
 mod adoption;
+mod transcript_commits;
 mod transcript_source;
 
 pub use adoption::AdoptionChatRegistry;
+pub use transcript_commits::RegistryTranscriptListener;
 
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use garcon_base::log::Logger;
 use garcon_chats::registry_contracts::ChatRegistryEntry;
@@ -16,6 +18,7 @@ use indexmap::IndexMap;
 
 use crate::{
     directory::AgentDirectory,
+    event_bus::AgentEventBus,
     runtime_router::{AgentRuntimeRouter, AgentRuntimeRouterOptions, RunningSession},
     types::ExecutionOperationResult,
 };
@@ -34,6 +37,8 @@ pub struct AgentRegistry {
     directory: Rc<AgentDirectory>,
     get_carry_over_revision: Rc<RegistryCarryOverRevision>,
     logger: Rc<dyn Logger>,
+    events: AgentEventBus,
+    transcript_listeners: RefCell<Vec<Rc<RegistryTranscriptListener>>>,
 }
 
 impl AgentRegistry {
@@ -43,6 +48,8 @@ impl AgentRegistry {
             directory: options.directory,
             get_carry_over_revision: options.get_carry_over_revision,
             logger: options.logger,
+            events: AgentEventBus::new(),
+            transcript_listeners: RefCell::default(),
         }
     }
 

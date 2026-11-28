@@ -19,7 +19,7 @@ pub use clock::{
 };
 pub use js::{
     FractionDigitsOutOfRange, Number, array_index, is_finite_number, is_integer, is_safe_integer,
-    math_round, number_to_string, parse_int, sort_object_keys, to_fixed, trim, trim_end,
-    trim_start,
+    math_round, number_to_string, parse_int, sort_object_keys, string_to_number, to_fixed, trim,
+    trim_end, trim_start,
 };
 pub use optional_nullable::OptionalNullable;

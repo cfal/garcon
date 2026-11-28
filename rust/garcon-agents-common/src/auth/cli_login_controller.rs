@@ -88,12 +88,12 @@ pub type CliLoginPtySpawner = dyn Fn(
 ) -> LocalBoxFuture<'static, ExecutorResult<CliLoginPty>>;
 pub type CliLoginProcessSpawner =
     dyn Fn(CliLoginCommand, CliLoginProcessOptions) -> io::Result<CliLoginProcess>;
-pub type CliLoginEnvironment = dyn Fn() -> IndexMap<OsString, OsString>;
+pub type CliLoginEnvironment = dyn Fn() -> ExecutorResult<IndexMap<OsString, OsString>>;
 pub type ValidateCode = dyn Fn(&str) -> Option<String>;
 pub type ParseOutputError = dyn Fn(&str) -> Option<CliLoginOutputError>;
 
 pub struct CliLoginControllerOptions {
-    pub command: Rc<dyn Fn() -> CliLoginCommand>,
+    pub command: Rc<dyn Fn() -> ExecutorResult<CliLoginCommand>>,
     pub mode: CliLoginMode,
     pub logger: Rc<dyn AgentLogger>,
     pub validate_code: Option<Rc<ValidateCode>>,
@@ -111,7 +111,7 @@ pub struct CliLoginControllerOptions {
 
 impl CliLoginControllerOptions {
     pub fn new(
-        command: impl Fn() -> CliLoginCommand + 'static,
+        command: impl Fn() -> ExecutorResult<CliLoginCommand> + 'static,
         mode: CliLoginMode,
         logger: Rc<dyn AgentLogger>,
     ) -> Self {
@@ -331,8 +331,8 @@ fn launch_result(
 }
 
 impl Inner {
-    fn process_options(&self) -> CliLoginProcessOptions {
-        CliLoginProcessOptions {
+    fn process_options(&self) -> ExecutorResult<CliLoginProcessOptions> {
+        Ok(CliLoginProcessOptions {
             cwd: self
                 .options
                 .cwd
@@ -343,8 +343,8 @@ impl Inner {
                 .options
                 .environment
                 .as_ref()
-                .map_or_else(default_login_environment, |get| get()),
-        }
+                .map_or_else(|| Ok(default_login_environment()), |get| get())?,
+        })
     }
 
     fn is_current(&self, session: &Rc<LoginSession>) -> bool {
@@ -436,8 +436,8 @@ impl Inner {
         self: &Rc<Self>,
         session: Rc<LoginSession>,
     ) -> ExecutorResult<AgentAuthLoginLaunchResult> {
-        let command = (self.options.command)();
-        let options = self.process_options();
+        let command = (self.options.command)()?;
+        let options = self.process_options()?;
         let process = match &self.options.spawn_process {
             Some(spawn) => spawn(command, options)?,
             None => spawn_login_process(command, options)?,
@@ -541,7 +541,7 @@ impl Inner {
             .as_ref()
             .ok_or("Device-code login requires a PTY spawner")?;
         let CliLoginPty { mut events, kill } =
-            spawn((self.options.command)(), self.process_options()).await?;
+            spawn((self.options.command)()?, self.process_options()?).await?;
         if !self.is_current(&session) {
             kill()?;
             return Err(SESSION_EXPIRED_ERROR.into());

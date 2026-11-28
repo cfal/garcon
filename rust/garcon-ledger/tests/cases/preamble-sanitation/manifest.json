@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-ledger/tests/preamble-sanitation-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-ledger/tests/inputs/preamble-sanitation.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 11,
+  "sha256": "a7b834901c79c6cc98caf15db37d6d5962ef1af2323e4fb7c6c8cb86e0c6f0ac"
+}

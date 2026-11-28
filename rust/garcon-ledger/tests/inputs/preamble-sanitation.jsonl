@@ -1,0 +1,11 @@
+{"fn":"sanitizePreambleFixture","args":[[["<garcon-preambles version=\"1\">\nSynthetic"]],[]]}
+{"fn":"sanitizePreambleFixture","args":[[["<garcon-preambles version=\"1\">\nA\ud83d\ude80BBody"]],[["<garcon-preambles version=\"1\">\nA\ud83d\ude80B",true]]]}
+{"fn":"sanitizePreambleFixture","args":[[["<garcon-preambles version=\"2\">\nBody"]],[["<garcon-preambles version=\"1\">\nA",false]]]}
+{"fn":"sanitizePreambleFixture","args":[[["<garcon-preambles version=\"1\">\nOther"]],[["<garcon-preambles version=\"1\">\nA",false]]]}
+{"fn":"sanitizePreambleFixture","args":[[["<garcon-preambles version=\"1\">\nA",true]],[["<garcon-preambles version=\"1\">\nA",true]]]}
+{"fn":"sanitizePreambleFixture","args":[[["<garcon-preambles version=\"1\">\nABCBody"]],[["<garcon-preambles version=\"1\">\nAB",false],["<garcon-preambles version=\"1\">\nABC",false]]]}
+{"fn":"sanitizePreambleFixture","args":[[["<garcon-preambles version=\"1\">\nAFirst"]],[["<garcon-preambles version=\"1\">\nA",false],["<garcon-preambles version=\"1\">\nA",true]]]}
+{"fn":"sanitizePreambleFixture","args":[[["<garcon-preambles version=\"1\">\nAFirst"],["<garcon-preambles version=\"1\">\nASecond"]],[["<garcon-preambles version=\"1\">\nA",true]]]}
+{"fn":"sanitizePreambleFixture","args":[[["<garcon-preambles version=\"1\">\nAFirst"],["<garcon-preambles version=\"1\">\nASecond"]],[["<garcon-preambles version=\"1\">\nA",false],["<garcon-preambles version=\"1\">\nA",true]]]}
+{"fn":"sanitizePreambleFixture","args":[[["<garcon-preambles version=\"1\">\nAFirst"],["Plain second"]],[["<garcon-preambles version=\"1\">\nA",true],["<garcon-preambles version=\"1\">\nA",true]]]}
+{"fn":"sanitizePreambleFixture","args":[[["<garcon-preambles version=\"1\">\nAFirst"],["<garcon-preambles version=\"1\">\nBSecond"]],[["<garcon-preambles version=\"1\">\nB",true],["<garcon-preambles version=\"1\">\nA",true]]]}

@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-execution/tests/support/executor-manager-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-execution/tests/inputs/executor-manager.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 10,
+  "sha256": "9796ee2b07eefa9ffde1e6a858743abcd7fac53596904bf4e2c6fc56229cb2ac"
+}
