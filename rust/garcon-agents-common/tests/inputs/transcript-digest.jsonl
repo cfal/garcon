@@ -1,0 +1,5 @@
+{"fn":"orderedTranscriptDigest","args":[[]]}
+{"fn":"orderedTranscriptDigest","args":[[{"type":"assistant-message","timestamp":"2026-01-01T00:00:01.000Z","content":"First"}]]}
+{"fn":"orderedTranscriptDigest","args":[[{"type":"assistant-message","timestamp":"2026-01-01T00:00:01.000Z","content":"First"},{"type":"assistant-message","timestamp":"2026-01-01T00:00:02.000Z","content":"\u00e9\ud83d\ude00"}]]}
+{"fn":"orderedTranscriptDigest","args":[[{"type":"assistant-message","timestamp":"2026-01-01T00:00:02.000Z","content":"\u00e9\ud83d\ude00"},{"type":"assistant-message","timestamp":"2026-01-01T00:00:01.000Z","content":"First"}]]}
+{"fn":"orderedTranscriptDigest","args":[[{"type":"read-tool-use","timestamp":"2026-01-01T00:00:03.000Z","toolId":"read-1","filePath":"/synthetic/a","offset":100000000000000000000}]]}

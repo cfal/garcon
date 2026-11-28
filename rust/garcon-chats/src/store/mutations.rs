@@ -240,7 +240,7 @@ fn check_binding(entry: &ChatRegistryEntry) -> Result<(), RegistryError> {
     Ok(())
 }
 
-fn validate_json<T, U>(
+fn normalize_json<T, U>(
     value: &T,
     parse: impl FnOnce(&Value) -> Result<U, crate::registry_entry_codec::RegistryCodecError>,
 ) -> Result<U, RegistryError>
@@ -254,35 +254,43 @@ where
 }
 
 impl ChatRegistryPatch {
-    fn validate_related(&self) -> Result<(), RegistryError> {
+    fn normalize_related(&mut self) -> Result<(), RegistryError> {
         use crate::registry_entry_codec::{
             normalize_migration_quarantine, normalize_native_seed_receipt,
             normalize_preamble_selection, parse_carry_over_segment_refs,
             parse_pending_preamble_boundary,
         };
         if let Some(value) = &self.carry_over_segments {
-            validate_json(value, parse_carry_over_segment_refs)?;
+            self.carry_over_segments = Some(normalize_json(value, parse_carry_over_segment_refs)?);
         }
         if let Some(value) = &self.native_seed_receipt {
-            validate_json(value, |v| normalize_native_seed_receipt(Some(v)))?;
+            self.native_seed_receipt = Some(normalize_json(value, |v| {
+                normalize_native_seed_receipt(Some(v))
+            })?);
         }
         if let Some(value) = &self.carry_over_migration_quarantine {
-            validate_json(value, |v| normalize_migration_quarantine(Some(v)))?;
+            self.carry_over_migration_quarantine = Some(normalize_json(value, |v| {
+                normalize_migration_quarantine(Some(v))
+            })?);
         }
         if let Some(value) = &self.pending_preamble_boundary {
-            validate_json(value, |v| parse_pending_preamble_boundary(Some(v)))?;
+            self.pending_preamble_boundary = Some(normalize_json(value, |v| {
+                parse_pending_preamble_boundary(Some(v))
+            })?);
         }
         if let Some(value) = &self.preamble_selection {
-            validate_json(value, |v| normalize_preamble_selection(Some(v)))?;
+            self.preamble_selection = Some(normalize_json(value, |v| {
+                normalize_preamble_selection(Some(v))
+            })?);
         }
         Ok(())
     }
 }
 
-fn check_update(
+fn normalize_update(
     id: &ChatId,
     current: &ChatRegistryEntry,
-    update: &Update,
+    update: &mut Update,
 ) -> Result<(), RegistryError> {
     let future_agent = update
         .patch
@@ -304,7 +312,7 @@ fn check_update(
     {
         return Err(invalid(format!("Invalid agent settings for {id}")));
     }
-    update.patch.validate_related()
+    update.patch.normalize_related()
 }
 
 fn retain<'a>(
@@ -352,17 +360,19 @@ impl ChatRegistry {
             normalize_preamble_selection, parse_carry_over_segment_refs,
             parse_pending_preamble_boundary, require_chat_lineage,
         };
-        validate_json(&entry.carry_over_segments, parse_carry_over_segment_refs)?;
-        validate_json(&entry.native_seed_receipt, |v| {
+        entry.carry_over_segments =
+            normalize_json(&entry.carry_over_segments, parse_carry_over_segment_refs)?;
+        entry.native_seed_receipt = normalize_json(&entry.native_seed_receipt, |v| {
             normalize_native_seed_receipt(Some(v))
         })?;
-        validate_json(&entry.carry_over_migration_quarantine, |v| {
-            normalize_migration_quarantine(Some(v))
-        })?;
-        validate_json(&entry.pending_preamble_boundary, |v| {
+        entry.carry_over_migration_quarantine =
+            normalize_json(&entry.carry_over_migration_quarantine, |v| {
+                normalize_migration_quarantine(Some(v))
+            })?;
+        entry.pending_preamble_boundary = normalize_json(&entry.pending_preamble_boundary, |v| {
             parse_pending_preamble_boundary(Some(v))
         })?;
-        validate_json(&entry.preamble_selection, |v| {
+        entry.preamble_selection = normalize_json(&entry.preamble_selection, |v| {
             normalize_preamble_selection(Some(v))
         })?;
         assert_preamble_boundary_binding(
@@ -373,7 +383,7 @@ impl ChatRegistry {
         if entry.parent_chat_id.as_ref() == Some(&id) {
             return Err(invalid(format!("Chat {id} cannot be its own parent")));
         }
-        validate_json(&entry.lineage, |v| require_chat_lineage(Some(v), &id))?;
+        entry.lineage = normalize_json(&entry.lineage, |v| require_chat_lineage(Some(v), &id))?;
         assert_seed_receipt_binding(
             entry.agent_session_id.as_deref(),
             entry.native_seed_receipt.as_ref(),
@@ -565,7 +575,11 @@ impl ChatRegistry {
         }
     }
 
-    fn update_live(&self, id: &str, update: &Update) -> Result<Option<LiveUpdate>, RegistryError> {
+    fn update_live(
+        &self,
+        id: &str,
+        mut update: Update,
+    ) -> Result<Option<LiveUpdate>, RegistryError> {
         let current = self
             .state
             .borrow()
@@ -576,7 +590,7 @@ impl ChatRegistry {
         let Some((id, old)) = current else {
             return Ok(None);
         };
-        check_update(&id, &old.entry, update)?;
+        normalize_update(&id, &old.entry, &mut update)?;
         let mut candidate = old.clone();
         update.apply(&mut candidate);
         check_binding(&candidate.entry)?;
@@ -615,7 +629,7 @@ impl ChatRegistry {
     ) -> Result<Option<ResolvedChat>, RegistryError> {
         let Some(LiveUpdate { entry, events, .. }) = self.update_live(
             id,
-            &Update {
+            Update {
                 patch,
                 ..Default::default()
             },
@@ -655,7 +669,7 @@ impl ChatRegistry {
             previous,
             revision,
             events,
-        }) = self.update_live(id, &update)?
+        }) = self.update_live(id, update)?
         else {
             return Ok(None);
         };
@@ -827,7 +841,7 @@ impl ChatRegistry {
     async fn write_phased(
         &self,
         id: &str,
-        update: Update,
+        mut update: Update,
     ) -> Result<Option<PhasedChatUpdate>, RegistryError> {
         let _lock = self.write_lock.lock().await;
         let (id, candidate, candidate_snapshot, base, changed) = {
@@ -841,7 +855,7 @@ impl ChatRegistry {
             if let Some(parent) = &update.parent {
                 validate_parent(&state, id, &existing.entry, parent.as_ref())?;
             }
-            check_update(id, &existing.entry, &update)?;
+            normalize_update(id, &existing.entry, &mut update)?;
             let mut candidate = existing.clone();
             update.apply(&mut candidate);
             check_binding(&candidate.entry)?;

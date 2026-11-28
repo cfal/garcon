@@ -1,0 +1,2 @@
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \"echo \\uD800\" });"],"result":{"commands":["echo \ufffd"]},"reason":"unpaired surrogate in a result"}
+{"fn":"projectCodexCodeModeCommands","args":["const result = await tools.exec_command({ cmd: \u0060echo \\uD800\u0060 });"],"result":{"commands":["echo \ufffd"]},"reason":"unpaired surrogate in a result"}

@@ -1,0 +1,13 @@
+{
+  "module": "server-agents/claude/src/agents/claude/claude-auth-login.ts",
+  "tests": [
+    "server-agents/claude/src/agents/claude/__tests__/auth-login.test.ts"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 130,
+  "sha256": "c291cd43f48862056a3db6d92b96f0dee3333fd59800b29ca633a6f3208ff986"
+}

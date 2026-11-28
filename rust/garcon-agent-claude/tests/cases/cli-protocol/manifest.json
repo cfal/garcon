@@ -1,0 +1,11 @@
+{
+  "module": "server-agents/claude/src/agents/claude/cli-protocol.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-claude/tests/inputs/cli-protocol.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 19,
+  "sha256": "fa113a478b0e6740113c14c6cf42c2d27a8c537e111467f8eaa3f4246ac53023"
+}
