@@ -652,6 +652,7 @@ name = "garcon-js"
 version = "0.0.0"
 dependencies = [
  "icu_collator",
+ "icu_properties",
  "ryu-js",
  "serde",
  "serde_json",

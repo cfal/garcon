@@ -1,0 +1,45 @@
+{
+  "module": "common/chat-search.ts",
+  "tests": [
+    "common/__tests__/chat-search.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-search.jsonl",
+  "guards": [
+    {
+      "fn": "parseChatSearchResponse",
+      "argument": 0,
+      "guard": "rust/garcon-contract/tests/inputs/common/chat-search-guards.ts#isSearchRequest",
+      "dropped": 1,
+      "kept": 3
+    },
+    {
+      "fn": "classifyChatSearchFailureRecovery",
+      "argument": 0,
+      "guard": "rust/garcon-contract/tests/inputs/common/chat-search-guards.ts#isSearchFailureStage",
+      "dropped": 86,
+      "kept": 0
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "parseChatSearchResponse",
+      "argument": 1
+    },
+    {
+      "fn": "parseTranscriptSearchStatusResponse",
+      "argument": 0
+    },
+    {
+      "fn": "parseTranscriptSearchRebuildResponse",
+      "argument": 0
+    },
+    {
+      "fn": "isTranscriptSearchStatusV1",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 487,
+  "sha256": "03f5e737adcd04d6b300ac92168794d788e3b7e023efd47b5c7efe5e1a3b215c"
+}

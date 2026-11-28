@@ -2,12 +2,12 @@
 
 Build: `garcon-server`
 
-Passed: 12236/12236 cases
-Matched natively: 120/12236 cases
-Matched via fallback: 12116/12236 cases
-Unported: 0/12236 cases
-Blocked by an unported step: 0/12236 cases
-Mismatching: 0/12236 cases
+Passed: 12238/12238 cases
+Matched natively: 122/12238 cases
+Matched via fallback: 12116/12238 cases
+Unported: 0/12238 cases
+Blocked by an unported step: 0/12238 cases
+Mismatching: 0/12238 cases
 
 ## Scenarios
 
@@ -61,6 +61,7 @@ Mismatching: 0/12236 cases
 | snippets-size-limits | 30/30 | 0/30 | 0 | 0 | 0 |
 | snippets | 663/663 | 0/663 | 0 | 0 | 0 |
 | static-assets-base-path | 77/77 | 9/77 | 0 | 0 | 0 |
+| static-assets-duplicate-encoding | 2/2 | 2/2 | 0 | 0 | 0 |
 | static-assets | 367/367 | 111/367 | 0 | 0 | 0 |
 | telegram-seeded | 62/62 | 0/62 | 0 | 0 | 0 |
 | telegram-token-test | 15/15 | 0/15 | 0 | 0 | 0 |
