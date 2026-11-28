@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agents-common/tests/oracles/read-environment.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/read-environment.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 28,
+  "sha256": "7a0eb9c2a304e5b731a81edaf8b0abfd373f6a8ee061dc32473890c50f193479"
+}

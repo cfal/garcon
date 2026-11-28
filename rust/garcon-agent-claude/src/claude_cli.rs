@@ -7,10 +7,12 @@ use std::{
 
 use futures::FutureExt;
 use garcon_agents_common::execution::runtime_events::{AgentRuntimeEvent, AgentRuntimeOperation};
-use garcon_contract::chat_types::{AssistantMessage, ChatMessage, ErrorMessage};
+use garcon_contract::chat_types::{AssistantMessage, ChatMessage, CompactionMessage, ErrorMessage};
 use garcon_interface::{
     host::AgentLogger,
-    native_message_source::NativeSourced,
+    native_message_source::{
+        NativeMessageSourceInput, NativeSourced, attach_native_message_source,
+    },
     producer::{AgentProviderPermissionLifecycle, AgentTerminalPermission},
     resources::ExecutorResult,
 };
@@ -31,12 +33,14 @@ use crate::{
     },
     cli_protocol::{
         ClaudeProviderSessionState, ClaudeResultCorrelation, ClaudeTurnInputEvent,
-        ClaudeTurnTerminalState, claude_result_failure_message, is_claude_subagent_content, truthy,
+        ClaudeTurnTerminalState, claude_result_failure_message,
+        convert_cli_message_to_chat_messages, is_claude_subagent_content, truthy,
     },
     cli_session_state::{
         ClaudeProviderStateHandlers, flush_deferred_claude_provider_idle,
         handle_claude_provider_lifecycle_message,
     },
+    compaction::{extract_compaction_summary, is_compaction_summary_text, parse_compact_metadata},
     interrupt_receipt::{
         ClaudeInterruptReceiptHandlers, ClaudeInterruptSession, handle_claude_interrupt_receipt,
     },
@@ -379,6 +383,7 @@ impl ClaudeCli {
                 self.handle_permission_control_cancel(session, message)
             }
             Some("system") => return self.handle_system_message(session, message),
+            Some("assistant" | "user") => self.handle_content_message(session, message),
             Some("result") => self.handle_result_message(session, message),
             Some("conversation_reset") => self.handle_conversation_reset(session, message),
             Some(
@@ -488,9 +493,93 @@ impl ClaudeCli {
                     );
                 }
             }
+            Some("compact_boundary") => {
+                if let Some(turn) = turn.filter(|turn| turn.protocol.borrow().input_started()) {
+                    turn.pending_compaction
+                        .set(Some(parse_compact_metadata(&message["compact_metadata"])));
+                }
+            }
             _ => return false,
         }
         true
+    }
+
+    fn handle_content_message(&self, session: &ClaudeRunningSession, message: &Value) {
+        let Some(turn) = session.active_turn.borrow().clone() else {
+            return;
+        };
+        let assistant = message["type"] == "assistant";
+        if !turn.protocol.borrow().input_started() {
+            if assistant {
+                self.logger.info(
+                    "Claude CLI emitted assistant output for an internal turn",
+                    Some(&cli_log_fields([
+                        ("chatId", json!(session.chat_id)),
+                        ("runId", json!(turn.operation.run_id)),
+                        ("sessionId", json!(session_log_id(&session.id))),
+                        ("processId", json!(session.process_id())),
+                    ])),
+                );
+            }
+            return;
+        }
+        let timestamp = match session.now_iso() {
+            Ok(timestamp) => timestamp,
+            Err(error) => {
+                self.fail_session(session, error.to_string());
+                return;
+            }
+        };
+        let rows = convert_cli_message_to_chat_messages(message, &timestamp);
+        if !rows.is_empty() {
+            turn.protocol.borrow_mut().add_output_messages(
+                rows.len(),
+                assistant
+                    && rows
+                        .iter()
+                        .any(|row| matches!(row.value, ChatMessage::Assistant(_))),
+            );
+            self.publisher.messages(&session.id, &turn, rows);
+        }
+        if assistant {
+            return;
+        }
+        let Some(content) = message["message"]["content"]
+            .as_str()
+            .filter(|text| is_compaction_summary_text(text))
+        else {
+            return;
+        };
+        let Some(compaction) = turn.pending_compaction.take() else {
+            return;
+        };
+        let timestamp = match session.now_iso() {
+            Ok(timestamp) => timestamp,
+            Err(error) => {
+                self.fail_session(session, error.to_string());
+                return;
+            }
+        };
+        turn.protocol.borrow_mut().add_output_messages(1, false);
+        let mut row = NativeSourced::new(ChatMessage::Compaction(CompactionMessage {
+            timestamp,
+            trigger: compaction.trigger,
+            summary: extract_compaction_summary(content).to_owned(),
+            pre_tokens: compaction.pre_tokens,
+            post_tokens: compaction.post_tokens,
+        }));
+        if let Some(entry_id) = message["uuid"].as_str().filter(|id| !id.is_empty()) {
+            // The summary UUID and ordinal also identify the imported native row.
+            attach_native_message_source(
+                &mut row,
+                Some(NativeMessageSourceInput {
+                    entry_id: Some(entry_id),
+                    within_source_ordinal: Some(0.0),
+                    ..Default::default()
+                }),
+            );
+        }
+        self.publisher.messages(&session.id, &turn, vec![row]);
     }
 
     // A conversation reset does not change Garcon's native binding.

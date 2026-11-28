@@ -1,0 +1,17 @@
+{"fn":"scopedFields","args":["pi:session-1",{"sessionId":"s-1","attempt":2}]}
+{"fn":"scopedFields","args":["scope",{}]}
+{"fn":"scopedFields","args":["scope",{"scope":"inner","a":null,"b":true,"c":[1,{"d":"e"}]}]}
+{"fn":"scopedFields","args":["",{"message":"x"}]}
+{"fn":"scopedFields","args":["pi",{"1":"a","b":2}]}
+{"fn":"scopedFields","args":["pi",{"10":"a","1":"b","c":3}]}
+{"fn":"scopedFields","args":["pi",{"attempt":0.5,"big":1e21,"none":null}]}
+{"fn":"scopedFieldsWithoutValue","args":["pi:session-1"]}
+{"fn":"scopedFieldsWithoutValue","args":[""]}
+{"fn":"scopedFields","args":["K",{"sessionId":"ı"}]}
+{"fn":"scopedFields","args":["日本😀",{"a":"K"}]}
+{"fn":"scopedFields","args":["__proto__",{"constructor":"toString"}]}
+{"fn":"scopedFieldsWithoutValue","args":[" "]}
+{"fn":"scopedFieldsWithoutValue","args":["Ḱ"]}
+{"fn":"scopedFields","args":["x",{"2":"b","1":"a","10":"c","0":"z"}]}
+{"fn":"scopedFields","args":["x",{"scope":"K"}]}
+{"fn":"scopedFields","args":["x",{"1":"a","b":{"2":2,"1":1}}]}

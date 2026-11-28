@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-execution/tests/support/transcript-source-oracle.ts",
+  "tests": [],
+  "inputs": "rust/garcon-execution/tests/inputs/transcript-source.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 8,
+  "sha256": "6a859875d004a4a1bb79d57665093d4d7904368736362a2467d3b335a0b163da"
+}

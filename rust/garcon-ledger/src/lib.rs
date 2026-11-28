@@ -18,6 +18,7 @@ pub mod input_composition;
 pub mod input_submission;
 pub mod native_activity_query;
 pub mod preamble_application;
+pub mod preamble_history;
 pub mod presentation;
 pub mod producer_lease;
 pub mod projection;
