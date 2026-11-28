@@ -1,0 +1,12 @@
+{"id":"isManualBypassMode#0","fn":"isManualBypassMode","args":[{"$":"undefined"}],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/permission-modes.jsonl:1"}
+{"id":"isManualBypassMode#1","fn":"isManualBypassMode","args":["default"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/permission-modes.jsonl:2"}
+{"id":"isManualBypassMode#2","fn":"isManualBypassMode","args":["manualBypass"],"result":true,"origin":"rust/garcon-agents-common/tests/inputs/permission-modes.jsonl:3"}
+{"id":"isManualBypassMode#3","fn":"isManualBypassMode","args":["acceptEdits"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/permission-modes.jsonl:4"}
+{"id":"isManualBypassMode#4","fn":"isManualBypassMode","args":["bypassPermissions"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/permission-modes.jsonl:5"}
+{"id":"isManualBypassMode#5","fn":"isManualBypassMode","args":["plan"],"result":false,"origin":"rust/garcon-agents-common/tests/inputs/permission-modes.jsonl:6"}
+{"id":"providerStartupPermissionMode#0","fn":"providerStartupPermissionMode","args":[{"$":"undefined"}],"result":"default","origin":"rust/garcon-agents-common/tests/inputs/permission-modes.jsonl:7"}
+{"id":"providerStartupPermissionMode#1","fn":"providerStartupPermissionMode","args":["default"],"result":"default","origin":"rust/garcon-agents-common/tests/inputs/permission-modes.jsonl:8"}
+{"id":"providerStartupPermissionMode#2","fn":"providerStartupPermissionMode","args":["manualBypass"],"result":"default","origin":"rust/garcon-agents-common/tests/inputs/permission-modes.jsonl:9"}
+{"id":"providerStartupPermissionMode#3","fn":"providerStartupPermissionMode","args":["acceptEdits"],"result":"acceptEdits","origin":"rust/garcon-agents-common/tests/inputs/permission-modes.jsonl:10"}
+{"id":"providerStartupPermissionMode#4","fn":"providerStartupPermissionMode","args":["bypassPermissions"],"result":"bypassPermissions","origin":"rust/garcon-agents-common/tests/inputs/permission-modes.jsonl:11"}
+{"id":"providerStartupPermissionMode#5","fn":"providerStartupPermissionMode","args":["plan"],"result":"plan","origin":"rust/garcon-agents-common/tests/inputs/permission-modes.jsonl:12"}

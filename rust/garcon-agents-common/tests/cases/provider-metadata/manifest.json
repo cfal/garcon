@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-agents-common/tests/oracles/provider-metadata.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agents-common/tests/inputs/provider-metadata.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 7,
+  "sha256": "12316fa1655a09b5458b382e249a2da06e6b4f21cc5306aeefbc97231d374bd8"
+}
