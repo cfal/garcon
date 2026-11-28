@@ -29,3 +29,131 @@ pub mod tool_use_converter;
 pub mod turn_publisher;
 pub mod usage_format;
 pub mod user_input;
+
+use std::rc::Rc;
+
+use garcon_agents_common::{
+    catalog::model_catalog::ModelCatalog, settings::versioned_settings::VersionedSettings,
+};
+use garcon_contract::{
+    agent_integration::{
+        AgentConfigurationDescriptor, AgentConfigurationSource, AgentDescriptor, AgentOption,
+        AgentSettingDescriptor, AgentSettingKind, AgentSettingLabelKey,
+        AgentSettingOptionDescriptionKey, AgentSettingOptionLabelKey, AgentSettingsEnvelope,
+    },
+    agents::AgentModelOption,
+    api_providers::ApiProtocol,
+    chat_modes::{PERMISSION_MODE_VALUES, THINKING_MODE_VALUES},
+    models::CLAUDE_MODELS,
+};
+use garcon_interface::{host::AgentLogger, services::AgentGenerationModel};
+use garcon_js::Number;
+use serde_json::json;
+
+pub fn claude_descriptor() -> AgentDescriptor {
+    AgentDescriptor {
+        id: "claude".into(),
+        label: "Claude".into(),
+        icon: None,
+        supported_permission_modes: PERMISSION_MODE_VALUES.to_vec(),
+        supported_thinking_modes: THINKING_MODE_VALUES.to_vec(),
+        supports_images: true,
+        supports_project_path_update: true,
+        requires_native_path_for_project_path_update: false,
+        supported_endpoint_protocols: vec![ApiProtocol::AnthropicMessages],
+        configuration: [
+            ("CLAUDE_BINARY", "Claude CLI binary."),
+            ("ANTHROPIC_API_KEY", "Anthropic API key."),
+            ("ANTHROPIC_BASE_URL", "Anthropic API base URL."),
+            ("CLAUDE_CONFIG_DIR", "Claude configuration directory."),
+        ]
+        .into_iter()
+        .map(|(key, description)| AgentConfigurationDescriptor {
+            key: key.into(),
+            source: AgentConfigurationSource::Environment,
+            description: description.into(),
+        })
+        .collect(),
+    }
+}
+
+pub fn claude_settings() -> VersionedSettings {
+    use AgentSettingOptionDescriptionKey::{ThinkingAutomatic, ThinkingDisabled, ThinkingEnabled};
+    use AgentSettingOptionLabelKey::{Automatic, Disabled, Enabled};
+
+    let options = [
+        (
+            "auto",
+            "Auto",
+            Automatic,
+            "Lets Claude decide when extended thinking is useful.",
+            ThinkingAutomatic,
+        ),
+        (
+            "on",
+            "On",
+            Enabled,
+            "Uses extended thinking for every response.",
+            ThinkingEnabled,
+        ),
+        (
+            "off",
+            "Off",
+            Disabled,
+            "Answers without extended thinking.",
+            ThinkingDisabled,
+        ),
+    ]
+    .into_iter()
+    .map(
+        |(value, label, label_key, description, description_key)| AgentOption {
+            value: value.into(),
+            label: label.into(),
+            label_key: Some(label_key),
+            description: Some(description.into()),
+            description_key: Some(description_key),
+        },
+    )
+    .collect();
+    VersionedSettings::new(
+        AgentSettingsEnvelope {
+            owner_id: "claude".into(),
+            schema_version: 1,
+            values: json!({"claudeThinkingMode":"auto"}).into(),
+        },
+        vec![AgentSettingDescriptor {
+            key: "claudeThinkingMode".into(),
+            label: "Thinking".into(),
+            label_key: Some(AgentSettingLabelKey::Thinking),
+            kind: AgentSettingKind::Enum { options },
+        }],
+        None,
+    )
+}
+
+pub fn claude_catalog(logger: Rc<dyn AgentLogger>) -> ModelCatalog {
+    ModelCatalog {
+        logger,
+        default_model: CLAUDE_MODELS.default.into(),
+        fallback_models: CLAUDE_MODELS
+            .options
+            .iter()
+            .map(|model| AgentModelOption {
+                value: model.value.into(),
+                label: model.label.into(),
+                supports_images: model.supports_images,
+                is_local: None,
+                api_provider_id: None,
+                endpoint_id: None,
+                raw_model: None,
+                protocol: None,
+            })
+            .collect(),
+        requires_strict_model_discovery: false,
+        generation: Some(AgentGenerationModel {
+            priority: Number(10.0),
+            model: "haiku".into(),
+        }),
+        discover: None,
+    }
+}
