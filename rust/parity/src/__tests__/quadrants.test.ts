@@ -57,3 +57,28 @@ test('comparison commands reject empty reports and quadrants requires a candidat
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('both commands report positional pairings and fail on an unmatched occurrence', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'parity-junit-'));
+  try {
+    const original = join(directory, 'original.xml');
+    const shorter = join(directory, 'shorter.xml');
+    await writeFile(original, cases(entry('named=%s'), entry('named=%s')));
+    await writeFile(shorter, cases(entry('named=%s')));
+    for (const [file, args] of [
+      ['compare-junit.ts', (candidate: string) => [original, candidate]],
+      ['quadrants.ts', (candidate: string) => ['--original', original, '--rust-worker', candidate]],
+    ] as const) {
+      const run = (candidate: string) => Bun.spawnSync([process.execPath, join(import.meta.dir, '../..', file), ...args(candidate)]);
+      const same = run(original);
+      expect(same.exitCode).toBe(0);
+      expect(same.stdout.toString()).toContain('named=%s: paired 2 by position (original=2, candidate=2)');
+      const missing = run(shorter);
+      expect(missing.exitCode).toBe(1);
+      expect(missing.stdout.toString()).toContain('named=%s: paired 1 by position (original=2, candidate=1)');
+      expect(missing.stdout.toString()).toMatch(/named=%s \(occurrence 2\): original=pass (front-door|quadrant)=absent/);
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

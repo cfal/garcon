@@ -4,7 +4,7 @@ use std::{collections::HashSet, sync::LazyLock};
 
 use garcon_js::{clock::to_iso_string, date_parse::date_parse, trim};
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
 use serde_json::Value;
 
 use crate::chat_id::parse_chat_id;
@@ -34,7 +34,7 @@ pub struct ChatOrderGroupFilter {
     pub negated: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatFilterSpec {
     pub text_tokens: Vec<String>,
@@ -43,24 +43,101 @@ pub struct ChatFilterSpec {
     pub agents: Vec<String>,
     pub models: Vec<String>,
     pub project: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<ChatFilterStatus>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub order_group: Option<ChatOrderGroupFilter>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ids: Option<Vec<ChatFilterOrGroup>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub parents: Option<Vec<ChatFilterOrGroup>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub sources: Option<Vec<ChatFilterOrGroup>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub created_before: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub created_after: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_before: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_after: Option<Vec<String>>,
+    #[serde(skip)]
+    optional_field_order: Vec<OptionalFilterField>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OptionalFilterField {
+    Status,
+    OrderGroup,
+    Ids,
+    Parents,
+    Sources,
+    CreatedBefore,
+    CreatedAfter,
+    UpdatedBefore,
+    UpdatedAfter,
+}
+
+impl OptionalFilterField {
+    const ALL: [Self; 9] = [
+        Self::Status,
+        Self::OrderGroup,
+        Self::Ids,
+        Self::Parents,
+        Self::Sources,
+        Self::CreatedBefore,
+        Self::CreatedAfter,
+        Self::UpdatedBefore,
+        Self::UpdatedAfter,
+    ];
+
+    fn from_operator(operator: &str) -> Option<Self> {
+        Some(match operator {
+            "status" => Self::Status,
+            "is" => Self::OrderGroup,
+            "id" => Self::Ids,
+            "parent" => Self::Parents,
+            "source" => Self::Sources,
+            "created-before" => Self::CreatedBefore,
+            "created-after" => Self::CreatedAfter,
+            "updated-before" => Self::UpdatedBefore,
+            "updated-after" => Self::UpdatedAfter,
+            _ => return None,
+        })
+    }
+}
+
+impl Serialize for ChatFilterSpec {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("textTokens", &self.text_tokens)?;
+        map.serialize_entry("titles", &self.titles)?;
+        map.serialize_entry("tags", &self.tags)?;
+        map.serialize_entry("agents", &self.agents)?;
+        map.serialize_entry("models", &self.models)?;
+        map.serialize_entry("project", &self.project)?;
+        fn optional<M: SerializeMap, T: Serialize>(
+            map: &mut M,
+            key: &str,
+            value: &Option<T>,
+        ) -> Result<(), M::Error> {
+            if let Some(value) = value {
+                map.serialize_entry(key, value)?;
+            }
+            Ok(())
+        }
+        // The original adds optional keys when the first valid operator sets them.
+        for field in self.optional_field_order.iter().copied().chain(
+            OptionalFilterField::ALL
+                .into_iter()
+                .filter(|field| !self.optional_field_order.contains(field)),
+        ) {
+            use OptionalFilterField::*;
+            match field {
+                Status => optional(&mut map, "status", &self.status),
+                OrderGroup => optional(&mut map, "orderGroup", &self.order_group),
+                Ids => optional(&mut map, "ids", &self.ids),
+                Parents => optional(&mut map, "parents", &self.parents),
+                Sources => optional(&mut map, "sources", &self.sources),
+                CreatedBefore => optional(&mut map, "createdBefore", &self.created_before),
+                CreatedAfter => optional(&mut map, "createdAfter", &self.created_after),
+                UpdatedBefore => optional(&mut map, "updatedBefore", &self.updated_before),
+                UpdatedAfter => optional(&mut map, "updatedAfter", &self.updated_after),
+            }?;
+        }
+        map.end()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -141,7 +218,8 @@ pub fn parse_chat_filter_query(query: &str) -> ChatFilterParseResult {
     let mut text_terms = Vec::new();
     for term in tokenize_chat_filter(trim(query)) {
         let lower = term.text.to_lowercase();
-        let valid = match lower.split_once(':') {
+        let operator = lower.split_once(':');
+        let valid = match operator {
             Some(("status", value)) => match trim(value) {
                 "active" => {
                     spec.status = Some(ChatFilterStatus::Active);
@@ -224,6 +302,11 @@ pub fn parse_chat_filter_query(query: &str) -> ChatFilterParseResult {
         };
         if !valid {
             invalid_tokens.push(term.text);
+        } else if let Some(field) =
+            operator.and_then(|(operator, _)| OptionalFilterField::from_operator(operator))
+            && !spec.optional_field_order.contains(&field)
+        {
+            spec.optional_field_order.push(field);
         }
     }
     ChatFilterParseResult {
