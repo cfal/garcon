@@ -38,5 +38,6 @@ mod terminal;
 mod terminal_error;
 mod tickets;
 mod transcript_projection;
+mod transcript_seed_projection;
 mod transcript_seed_receipts;
 mod usage;

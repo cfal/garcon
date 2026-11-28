@@ -1,0 +1,151 @@
+{
+  "module": "rust/garcon-contract/tests/inputs/common/transcript-seed-projection-oracle.ts",
+  "tests": [
+    "rust/garcon-contract/tests/inputs/common/transcript-seed-projection.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "createCarryoverTranscript",
+      "argument": 0,
+      "guard": "acceptsMessages",
+      "dropped": 22,
+      "kept": 60
+    },
+    {
+      "fn": "createCarryoverTranscriptWithinCost",
+      "argument": 0,
+      "guard": "acceptsMessages",
+      "dropped": 22,
+      "kept": 60
+    },
+    {
+      "fn": "renderCarriedContext",
+      "argument": 0,
+      "guard": "acceptsMessages",
+      "dropped": 25,
+      "kept": 60
+    },
+    {
+      "fn": "renderTranscriptSeed",
+      "argument": 0,
+      "guard": "acceptsMessages",
+      "dropped": 23,
+      "kept": 60
+    },
+    {
+      "fn": "boundProjectedMessage",
+      "argument": 0,
+      "guard": "acceptsMessage",
+      "dropped": 20,
+      "kept": 60
+    },
+    {
+      "fn": "isProjectableMessage",
+      "argument": 0,
+      "guard": "acceptsMessage",
+      "dropped": 16,
+      "kept": 60
+    },
+    {
+      "fn": "isPublicationGapMessage",
+      "argument": 0,
+      "guard": "acceptsMessage",
+      "dropped": 16,
+      "kept": 60
+    },
+    {
+      "fn": "projectToolUseSummary",
+      "argument": 0,
+      "guard": "acceptsTool",
+      "dropped": 13,
+      "kept": 60
+    },
+    {
+      "fn": "sanitizeRecordedCarriedContext",
+      "argument": 0,
+      "guard": "acceptsMessages",
+      "dropped": 20,
+      "kept": 46
+    },
+    {
+      "fn": "sanitizeRecordedCarriedContext",
+      "argument": 1,
+      "guard": "acceptsReceipt",
+      "dropped": 20,
+      "kept": 8
+    },
+    {
+      "fn": "retargetNativeSeedReceiptIfPreserved",
+      "argument": 0,
+      "guard": "acceptsReceipt",
+      "dropped": 20,
+      "kept": 8
+    },
+    {
+      "fn": "retargetNativeSeedReceiptIfPreserved",
+      "argument": 2,
+      "guard": "acceptsMessages",
+      "dropped": 20,
+      "kept": 45
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "createCarryoverTranscript",
+      "argument": 0
+    },
+    {
+      "fn": "createCarryoverTranscriptWithinCost",
+      "argument": 0
+    },
+    {
+      "fn": "renderCarriedContext",
+      "argument": 0
+    },
+    {
+      "fn": "renderTranscriptSeed",
+      "argument": 0
+    },
+    {
+      "fn": "boundProjectedMessage",
+      "argument": 0
+    },
+    {
+      "fn": "isProjectableMessage",
+      "argument": 0
+    },
+    {
+      "fn": "isPublicationGapMessage",
+      "argument": 0
+    },
+    {
+      "fn": "projectToolUseSummary",
+      "argument": 0
+    },
+    {
+      "fn": "projectToolUseSummary",
+      "argument": 1
+    },
+    {
+      "fn": "sanitizeRecordedCarriedContext",
+      "argument": 0
+    },
+    {
+      "fn": "sanitizeRecordedCarriedContext",
+      "argument": 1
+    },
+    {
+      "fn": "retargetNativeSeedReceiptIfPreserved",
+      "argument": 0
+    },
+    {
+      "fn": "retargetNativeSeedReceiptIfPreserved",
+      "argument": 2
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 697,
+  "sha256": "b57a1c9beb77e406189872e5163bd898dad9ae9653367589204fb0b05d40598e"
+}
