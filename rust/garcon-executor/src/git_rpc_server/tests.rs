@@ -147,10 +147,99 @@ async fn validates_the_deadline_before_the_operation_and_uses_the_github_detail_
                 )
                 .await
                 .unwrap_err();
-            assert_eq!(
-                at_limit.to_string(),
-                "Executor GitHub service is not ported yet"
-            );
+            assert_invalid(&at_limit, "Invalid GitHub getPullRequest request");
+        })
+        .await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn serves_github_reads_and_writes_from_the_executor_environment() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    LocalSet::new()
+        .run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let bin = root.path().join("bin");
+            std::fs::create_dir(&bin).unwrap();
+            let path = std::env::var_os("PATH").unwrap();
+            for name in ["bun", "git"] {
+                let tool = std::env::split_paths(&path)
+                    .map(|directory| directory.join(name))
+                    .find(|path| path.is_file())
+                    .unwrap_or_else(|| panic!("test requires {name} on PATH"));
+                symlink(tool.canonicalize().unwrap(), bin.join(name)).unwrap();
+            }
+            let gh = bin.join("gh");
+            std::fs::copy(
+                concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../server/remote/__tests__/fixtures/fake-gh.js"
+                ),
+                &gh,
+            )
+            .unwrap();
+            std::fs::set_permissions(gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let project = root.path().join("project");
+            std::fs::create_dir(&project).unwrap();
+            let status = tokio::process::Command::new(bin.join("git"))
+                .args(["init", "-q", "-b", "fixture"])
+                .current_dir(&project)
+                .status()
+                .await
+                .unwrap();
+            assert!(status.success());
+            std::fs::write(project.join("gh-fixture.json"), br#"{"label":"synthetic"}"#).unwrap();
+            let path = project.to_str().unwrap();
+            let executor = Executor::start(ExecutorOptions {
+                executor_id: "local".into(),
+                project_base_path: path.into(),
+                terminal_runtime_id: None,
+                user_shell: None,
+                child_environment: Some(
+                    vec![
+                        ("PATH".into(), bin.into_os_string()),
+                        ("HOME".into(), root.path().as_os_str().into()),
+                        ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
+                    ]
+                    .into(),
+                ),
+                integrations: None,
+            })
+            .unwrap();
+            let api = executor.api();
+            let info = api.get_info(None).await.unwrap();
+            let server = GitRpcServer::new(api);
+            let invoke = async |method: GhMethod, input: Value| {
+                let reply = server
+                    .handle(
+                        &call(method.rpc_method(), json!({"input":input,"budgetMs":gh_operation_timeout_ms(method)})),
+                        CancellationToken::new(),
+                    )
+                    .await
+                    .unwrap_or_else(|error| panic!("{}: {error}", method.rpc_method()))
+                    .unwrap();
+                assert_eq!(reply["executorId"], info.executor_id);
+                assert_eq!(reply["instanceId"], info.instance_id);
+                reply
+            };
+            let status = invoke(GhMethod::GetStatus, json!({})).await;
+            assert_eq!(status["login"], "synthetic");
+            let list = invoke(GhMethod::ListPullRequests, json!({"projectPath":path})).await;
+            assert_eq!(list["pulls"][0]["number"].as_f64(), Some(1.0));
+            let repository = json!({"host":"git.example.invalid","nameWithOwner":"synthetic/repository"});
+            let actor = json!({"id":"actor:synthetic","login":"synthetic"});
+            let detail = invoke(GhMethod::GetPullRequest, json!({"projectPath":path,"repository":repository,"number":1})).await;
+            assert_eq!(detail["number"].as_f64(), Some(1.0));
+            let marker = "garcon-review synthetic/repository#1 ";
+            let head = "a".repeat(40);
+            let body = format!("Synthetic review\n<!-- {marker}{head} -->");
+            let posted = invoke(GhMethod::CreatePullRequestComment, json!({"projectPath":path,"repository":repository,"actor":actor,"number":1,"body":body,"expected":{"state":"open","headRefOid":head}})).await;
+            assert_eq!(posted["id"], "comment-1");
+            let review = invoke(GhMethod::GetPullRequestReviewTarget, json!({"projectPath":path,"repository":repository,"number":1,"marker":marker})).await;
+            assert_eq!(review["markedComments"][0]["id"], posted["id"]);
+            let minimized = invoke(GhMethod::MinimizePullRequestComment, json!({"projectPath":path,"repository":repository,"actor":actor,"commentId":posted["id"]})).await;
+            assert_eq!(minimized["minimized"], true);
         })
         .await;
 }

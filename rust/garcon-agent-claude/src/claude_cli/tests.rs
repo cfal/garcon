@@ -6,7 +6,7 @@ use garcon_agents_common::execution::runtime_events::{
 use garcon_contract::chat_modes::{PermissionMode, ThinkingMode};
 use garcon_interface::services::{AgentSteerRejectionReason, AgentSteerResult};
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, BufReader, DuplexStream},
     sync::{mpsc, oneshot},
     task::LocalSet,
 };
@@ -166,6 +166,101 @@ fn options(cwd: &Path) -> ClaudeSessionOptions {
     }
 }
 
+#[test]
+fn terminal_before_start_is_not_routed_as_steering_work() {
+    let runtime = ClaudeCli::new(Rc::new(|| "not-spawned".into()), Rc::new(Logger));
+    let session = Rc::new(ClaudeRunningSession::new(options(Path::new("."))));
+    let (publish, mut events) = mpsc::unbounded_channel();
+    let turn = runtime
+        .begin_turn(
+            &session,
+            runtime_operation(
+                "run-1".into(),
+                Rc::new(move |event| publish.send(event).unwrap()),
+            ),
+        )
+        .unwrap();
+    let input = turn.protocol.borrow().input_uuid.clone();
+    turn.steering.mark_submitted(input.clone());
+    let handled = runtime.on_control_or_lifecycle(
+        &session,
+        &json!({
+            "type":"command_lifecycle","state":"discarded","command_uuid":input
+        }),
+    );
+    assert_eq!(turn.steering.settlement_failure_message(), None);
+    assert!(handled);
+    let AgentRuntimeEvent::RunEnded {
+        outcome: ProviderRunOutcome::Failed { error: Some(error) },
+        ..
+    } = events.try_recv().unwrap()
+    else {
+        panic!("expected failed submitted input");
+    };
+    assert_eq!(
+        error.message.as_deref(),
+        Some("Claude CLI discarded the submitted message before it started.")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_second_retirement_does_not_close_its_writer_until_the_first_exits() {
+    fn process() -> (ClaudeSessionProcess, DuplexStream, oneshot::Sender<i32>) {
+        let (stdin, peer) = tokio::io::duplex(64);
+        let (exit, exited) = oneshot::channel();
+        let transport = ClaudeProcessTransport::new(ClaudeProcessTransportOptions {
+            process: ClaudeSubprocess {
+                stdin: Some(Box::pin(stdin)),
+                stdout: None,
+                stderr: None,
+                pid: None,
+                exited: Box::pin(async move { exited.await.map_err(|error| error.to_string()) }),
+                kill: Rc::new(|_| panic!("no signal expected before the test reports exit")),
+            },
+            logger: Rc::new(Logger),
+            session_id: "synthetic-session".into(),
+            on_message: Rc::new(|_| {}),
+            on_failure: Rc::new(|_| {}),
+            on_eof: Rc::new(|| {}),
+            on_exit: Rc::new(|_| {}),
+            max_stdout_frame_bytes: None,
+        });
+        (
+            ClaudeSessionProcess {
+                identity: Rc::new(()),
+                transport,
+            },
+            peer,
+            exit,
+        )
+    }
+    LocalSet::new()
+        .run_until(async {
+            let runtime = ClaudeCli::new(Rc::new(|| "not-spawned".into()), Rc::new(Logger));
+            let session = Rc::new(ClaudeRunningSession::new(options(Path::new("."))));
+            let (first, mut first_peer, first_exit) = process();
+            session.process.replace(Some(first));
+            let first_retirement = runtime.retire_session_process(&session).unwrap().unwrap();
+            let mut byte = [0];
+            assert_eq!(first_peer.read(&mut byte).await.unwrap(), 0);
+
+            let (second, mut second_peer, second_exit) = process();
+            session.process.replace(Some(second));
+            let second_retirement = runtime.retire_session_process(&session).unwrap().unwrap();
+            assert!(
+                tokio::time::timeout(Duration::from_millis(10), second_peer.read(&mut byte))
+                    .await
+                    .is_err()
+            );
+            first_exit.send(0).unwrap();
+            assert_eq!(second_peer.read(&mut byte).await.unwrap(), 0);
+            second_exit.send(0).unwrap();
+            first_retirement.as_ref().clone().await.unwrap();
+            second_retirement.as_ref().clone().await.unwrap();
+        })
+        .await;
+}
+
 const READ_INITIALIZE: &str = r#"
 read -r initialize || exit 1
 case "$initialize" in *'"subtype":"initialize"'*) ;; *) exit 2 ;; esac
@@ -313,6 +408,7 @@ async fn a_real_cli_exit_settles_the_active_turn_once_and_cancels_its_pending_pe
         let script = directory.path().join("fake-claude");
         write_fake_cli(&script, concat!(
             "read -r first || exit 1\n",
+            "printf '%s\\n' '{\"type\":\"user\",\"uuid\":\"synthetic-steer\",\"isReplay\":true,\"parent_tool_use_id\":\"nested-tool\"}'\n",
             "printf '%s\\n' '{\"type\":\"fake-barrier\"}'\n",
             "printf '%s\\n' '{\"type\":\"stale-frame\"}'\n",
             "read -r second || exit 1\n",
@@ -327,6 +423,7 @@ async fn a_real_cli_exit_settles_the_active_turn_once_and_cancels_its_pending_pe
         let input = turn.protocol.borrow().input_uuid.clone();
         turn.protocol.borrow_mut().observe_input(&json!({"type":"command_lifecycle","state":"started","command_uuid":input}));
         turn.protocol.borrow_mut().mark_abort_requested();
+        turn.steering.mark_submitted("synthetic-steer".into());
         runtime.pending_permissions.borrow_mut().push(PendingPermission {
             permission_occurrence_id: "synthetic-permission".into(),
             cli_request_id: Some("synthetic-control".into()),
@@ -351,6 +448,8 @@ async fn a_real_cli_exit_settles_the_active_turn_once_and_cancels_its_pending_pe
         process.transport.write_line("{}".into(), Default::default()).await.unwrap();
         let ready = tokio::time::timeout(Duration::from_secs(5), barrier.recv()).await.unwrap().unwrap();
         assert_eq!(ready["type"], "fake-barrier");
+        assert_eq!(turn.steering.submitted_count(), 1);
+        assert_eq!(turn.steering.settlement_failure_message(), None);
         assert!(session.is_current_turn(&turn));
         process.transport.write_line("{}".into(), Default::default()).await.unwrap();
         tokio::time::timeout(Duration::from_secs(5), turn.completion()).await.unwrap();
