@@ -6,6 +6,7 @@ members = [
   "garcon-agent-direct-anthropic-compatible",
   "garcon-agent-direct-openai-compatible",
   "garcon-agent-direct-openai-responses-compatible",
+  "garcon-agent-opencode",
   "garcon-agents-common",
   "garcon-base",
   "garcon-bench",

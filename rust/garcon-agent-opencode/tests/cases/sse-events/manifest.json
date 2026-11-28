@@ -1,0 +1,11 @@
+{
+  "module": "server-agents/opencode/src/agents/opencode/sse-events.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-opencode/tests/inputs/sse-events.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 230,
+  "sha256": "df679a8b52375fc28569062c59ff2009d4197596c56081174054e4cfff32c452"
+}
