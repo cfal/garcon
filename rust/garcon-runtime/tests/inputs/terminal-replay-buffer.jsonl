@@ -1,0 +1,9 @@
+{"fn":"replayTerminalOutput","args":[1,[],0]}
+{"fn":"replayTerminalOutput","args":[5,[{"sequence":1,"data":"ab"},{"sequence":2,"data":"\u00e9"},{"sequence":3,"data":"cd"}],0]}
+{"fn":"replayTerminalOutput","args":[5,[{"sequence":1,"data":"ab"},{"sequence":2,"data":"\u00e9"},{"sequence":3,"data":"cd"}],2]}
+{"fn":"replayTerminalOutput","args":[4,[{"sequence":1,"data":"oversized"}],0]}
+{"fn":"replayTerminalOutput","args":[4,[{"sequence":1,"data":"a"},{"sequence":2,"data":"oversized"},{"sequence":3,"data":"\ud83d\ude00"}],0]}
+{"fn":"replayTerminalOutput","args":[4,[{"sequence":1,"data":"\ud83d\ude00"},{"sequence":2,"data":""}],1]}
+{"fn":"replayTerminalOutput","args":[1e21,[{"sequence":100,"data":"\u001b[31m\u6f22\u5b57\u001b[m"}],100]}
+{"fn":"replayTerminalOutput","args":[0,[],0]}
+{"fn":"replayTerminalOutput","args":[2.5,[],0]}

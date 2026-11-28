@@ -1,0 +1,11 @@
+{
+  "module": "rust/garcon-runtime/tests/oracles/terminal-replay-buffer.ts",
+  "tests": [],
+  "inputs": "rust/garcon-runtime/tests/inputs/terminal-replay-buffer.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 9,
+  "sha256": "13526145651d586f4a53fd8dfd0336e84aa766d6c8d221c51f9d6bb43dcfd393"
+}
