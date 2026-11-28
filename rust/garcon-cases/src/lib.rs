@@ -5,6 +5,8 @@
 //! `manifest.json` holding the case file's SHA-256. A ported crate's test
 //! hands that directory to [`replay`] with a dispatcher that calls the ported
 //! function for a case's function name and arguments. Every case must match.
+//! Wildcard results require an explicit case count with
+//! [`replay_with_expected_wildcards`].
 //!
 //! Arguments reach the dispatcher as they were recorded, so a value JSON
 //! cannot hold is a marker object. A dispatcher reads an argument with the
@@ -37,4 +39,4 @@ pub mod markers;
 mod replay;
 
 pub use arguments::{bigint, javascript_number, round_tripped, text, unknown};
-pub use replay::{CaseError, Stats, replay};
+pub use replay::{CaseError, Stats, replay, replay_with_expected_wildcards};

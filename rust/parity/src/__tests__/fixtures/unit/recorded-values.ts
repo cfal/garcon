@@ -20,3 +20,9 @@ export function reply(label: string): Reply {
 export function classArgument(value: unknown): string {
   return value instanceof Reply ? 'reply' : 'other';
 }
+
+export function throwWithInstance(label: string, asError: boolean): never {
+  const reply = new Reply([new Child(label)]);
+  if (asError) throw Object.assign(new TypeError('invalid reply'), { reply });
+  throw reply;
+}

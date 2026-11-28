@@ -39,7 +39,7 @@ function dynamicValue(test: TraceTest, kind: string, id: string): string {
   return placeholder;
 }
 
-function traceNormalization(test: TraceTest, value: Json, origin: string, token: string | null): Normalization {
+function traceNormalization(test: TraceTest, value: Json, origin: string, token: string | null, now: Date): Normalization {
   const text = JSON.stringify(value);
   const carried = new Map<string, string>([[origin, '{{origin}}']]);
   if (token) carried.set(token, '{{token}}');
@@ -52,10 +52,9 @@ function traceNormalization(test: TraceTest, value: Json, origin: string, token:
     if (url !== origin) carried.set(url, `${protocol}://{{loopback}}:${dynamicValue(test, 'port', port)}`);
   }
   for (const [id] of text.matchAll(CHAT_ID)) {
-    if (Math.abs(Number(id) / 1000 - Date.now()) < 3_600_000) carried.set(id, dynamicValue(test, 'chatId', id));
+    if (Math.abs(Number(id) / 1000 - now.getTime()) < 3_600_000) carried.set(id, dynamicValue(test, 'chatId', id));
   }
   for (const [id] of text.matchAll(FIXTURE_PROVIDER)) carried.set(id, dynamicValue(test, 'providerId', id));
-  const now = new Date();
   const localDay = [now.getFullYear(), now.getMonth() + 1, now.getDate()].map((part) => String(part).padStart(2, '0')).join('-');
   const days = [...new Set([now.toISOString().slice(0, 10), localDay])].map((day) => [day, '{{today}}'] as const);
   return { carried: [...carried].sort(([left], [right]) => right.length - left.length), days };
@@ -78,8 +77,9 @@ export class ClientTrace {
 
   async http(url: URL, init: RequestInit, headers: Headers, send: (init: RequestInit) => Promise<Response>): Promise<Response> {
     const test = currentTraceTest();
-    if (!test) return send(init);
+    if (!test || test.finished) return send(init);
     const order = test.next++;
+    const now = new Date();
     let bodyToRead = init.body;
     if (init.body instanceof ReadableStream) {
       const [bodyToSend, copy] = init.body.tee();
@@ -87,9 +87,9 @@ export class ClientTrace {
       bodyToRead = copy;
     }
     const sent = bodyToRead == null ? null : new Response(bodyToRead);
-    const result = await send(init);
-    const copy = result.clone();
-    const capture = Promise.all([sent?.bytes(), copy.bytes()]).then(([sentBytes, receivedBytes]) => {
+    const response = send(init);
+    const capture = response.then(async (result) => {
+      const [sentBytes, receivedBytes] = await Promise.all([sent?.bytes(), result.clone().bytes()]);
       const requestBody = sanitize(textOrBytes(sentBytes ?? new Uint8Array(), headers.get('content-type') ?? sent?.headers.get('content-type') ?? ''), this.redact);
       const decoded = 'decompress' in init && init.decompress === false
         ? decodeBody(receivedBytes, result.headers.get('content-encoding'))
@@ -100,16 +100,18 @@ export class ClientTrace {
         status: result.status,
         headers: contractHeaders(result.headers),
       };
-      const extra = traceNormalization(test, { ...payload, requestBody, body, query: [...url.searchParams.values()] }, this.origin, this.token);
-      write(this.directory, test, {
-        order,
-        stream: 'http',
-        value: { ...normalizeValue(payload, extra) as Record<string, Json>, requestBody: normalizeBody(requestBody, extra), body: normalizeBody(body, extra) },
-      });
-    });
+      test.writes[order] = () => {
+        const extra = traceNormalization(test, { ...payload, requestBody, body, query: [...url.searchParams.values()] }, this.origin, this.token, now);
+        write(this.directory, test, {
+          order,
+          stream: 'http',
+          value: { ...normalizeValue(payload, extra) as Record<string, Json>, requestBody: normalizeBody(requestBody, extra), body: normalizeBody(body, extra) },
+        });
+      };
+    }, () => undefined);
     test.pending.push(capture);
     void capture.catch(() => undefined);
-    return result;
+    return response;
   }
 
   reconnect(): void {
@@ -120,22 +122,27 @@ export class ClientTrace {
   send(message: unknown): void {
     const test = currentTraceTest();
     const id = (message as { clientRequestId?: unknown }).clientRequestId;
-    if (test && typeof id === 'string') this.#requestTests.set(id, test);
+    if (test && !test.finished && typeof id === 'string') this.#requestTests.set(id, test);
   }
 
   receive(message: Record<string, unknown>): void {
     const id = message.clientRequestId;
     const replyTest = typeof id === 'string' ? this.#requestTests.get(id) : undefined;
     const test = replyTest ?? currentTraceTest() ?? this.#socketTest;
-    if (!test) return;
+    if (!test || test.finished) return;
     if (!replyTest && typeof id === 'string' && typeof message.type === 'string' && REPLY_TYPES.has(message.type)) return;
     const order = test.next++;
+    const now = new Date();
     const raw = this.redact(message as Json);
-    const extra = traceNormalization(test, raw, this.origin, this.token);
-    const value = normalizeValue(raw, extra);
-    const normalizedChat = typeof message.chatId === 'string' ? normalizeValue(message.chatId, extra) as string : null;
-    write(this.directory, test, replyTest
-      ? { order, stream: 'replies', value }
-      : { order, stream: 'broadcasts', group: traceGroup(normalizedChat, String(message.type)), value });
+    const chatId = typeof message.chatId === 'string' ? message.chatId : null;
+    const type = String(message.type);
+    test.writes[order] = () => {
+      const extra = traceNormalization(test, raw, this.origin, this.token, now);
+      const value = normalizeValue(raw, extra);
+      const normalizedChat = chatId === null ? null : normalizeValue(chatId, extra) as string;
+      write(this.directory, test, replyTest
+        ? { order, stream: 'replies', value }
+        : { order, stream: 'broadcasts', group: traceGroup(normalizedChat, type), value });
+    };
   }
 }

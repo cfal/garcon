@@ -18,6 +18,7 @@ async function run(args: string[]): Promise<number> {
     console.log(USAGE);
     return values.help ? 0 : 2;
   }
+  if (!QUADRANTS.some((quadrant) => values[quadrant])) throw new Error('Supply at least one candidate quadrant');
   const original = await readReports(values.original);
   const rows = [];
   for (const quadrant of QUADRANTS) {

@@ -9,10 +9,12 @@ export interface TraceTest {
   next: number;
   ids: Map<string, string>;
   pending: Promise<void>[];
+  writes: Array<() => void>;
+  finished: boolean;
 }
 
 const tests = new AsyncLocalStorage<TraceTest>();
-const describePath: string[] = [];
+let describePath: ReadonlyArray<{ label: string; suite: string }> = [];
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 let installed = false;
 
@@ -22,7 +24,12 @@ export function currentTraceTest(): TraceTest | undefined {
 
 function registrationFile(): string {
   const path = new Error().stack?.match(/(?:\(|\bat )([^()\n]+\.test\.[cm]?[jt]sx?):\d+(?::\d+)?/)?.[1];
-  if (!path) throw new Error('Cannot identify the suite registering a traced test');
+  if (!path) {
+    // Bun can invoke a conditional or parameterized describe from a native frame.
+    const parent = describePath.at(-1);
+    if (parent) return parent.suite;
+    throw new Error('Cannot identify the suite registering a traced test');
+  }
   const suite = relative(repoRoot, path.startsWith('file:') ? fileURLToPath(path) : path);
   if (suite.startsWith('../')) throw new Error('Traced suites must be inside the repository');
   return suite;
@@ -30,22 +37,35 @@ function registrationFile(): string {
 
 type Call = (...args: any[]) => any;
 
-function wrapDescribe(original: Call): Call {
+function parameterizedName(label: string, index: number, args: unknown[]): string {
+  return format(label.replaceAll('%#', String(index)), ...args);
+}
+
+function wrapDescribe(original: Call, parameterized = false): Call {
   return new Proxy(original, {
     apply(target, receiver, [label, callback, ...options]) {
-      if (typeof callback !== 'function') return Reflect.apply(target, receiver, [label, callback, ...options]);
-      return Reflect.apply(target, receiver, [label, function (this: unknown) {
-        describePath.push(label);
+      if (typeof label !== 'string' || typeof callback !== 'function') return Reflect.apply(target, receiver, [label, callback, ...options]);
+      const suite = registrationFile();
+      const prefix = describePath;
+      let index = 0;
+      return Reflect.apply(target, receiver, [label, function (this: unknown, ...args: unknown[]) {
+        const previous = describePath;
+        describePath = [...prefix, { label: parameterized ? parameterizedName(label, index++, args) : label, suite }];
         try {
-          return callback.call(this);
+          return callback.apply(this, args);
         } finally {
-          describePath.pop();
+          describePath = previous;
         }
       }, ...options]);
     },
     get(target, property, receiver) {
       const fn = Reflect.get(target, property, receiver);
-      return ['only', 'skip', 'todo'].includes(String(property)) && typeof fn === 'function' ? wrapDescribe(fn) : fn;
+      if (typeof fn !== 'function') return fn;
+      if (property === 'each') return (...args: unknown[]) => wrapDescribe(Reflect.apply(fn, target, args), true);
+      if (['if', 'skipIf', 'todoIf'].includes(String(property))) {
+        return (...args: unknown[]) => wrapDescribe(Reflect.apply(fn, target, args), parameterized);
+      }
+      return ['only', 'skip', 'todo'].includes(String(property)) ? wrapDescribe(fn, parameterized) : fn;
     },
   });
 }
@@ -55,12 +75,25 @@ function wrapTest(original: Call, onFinished: (hook: () => Promise<unknown>) => 
     apply(target, receiver, [label, callback, ...options]) {
       if (typeof label !== 'string' || typeof callback !== 'function') return Reflect.apply(target, receiver, [label, callback, ...options]);
       const suite = registrationFile();
-      const prefix = describePath.slice();
+      const prefix = describePath.map((scope) => scope.label);
       let index = 0;
       const wrapped = function (this: unknown, ...args: unknown[]) {
-        const name = parameterized ? format(label.replaceAll('%#', String(index++)), ...args) : label;
-        const test: TraceTest = { suite, name: [...prefix, name].join(' > '), next: 0, ids: new Map(), pending: [] };
-        onFinished(() => Promise.all(test.pending));
+        const name = parameterized ? parameterizedName(label, index++, args) : label;
+        const test: TraceTest = {
+          suite, name: [...prefix, name].join(' > '), next: 0, ids: new Map(), pending: [], writes: [], finished: false,
+        };
+        onFinished(async () => {
+          try {
+            await Promise.all(test.pending);
+            // HTTP bodies can finish out of order; IDs are assigned as the trace is written.
+            for (const write of test.writes) write?.();
+          } finally {
+            test.finished = true;
+            test.writes.length = 0;
+            test.pending.length = 0;
+            test.ids.clear();
+          }
+        });
         return tests.run(test, () => callback.apply(this, args));
       };
       if (!parameterized && callback.length > 0) Object.defineProperty(wrapped, 'length', { value: callback.length });

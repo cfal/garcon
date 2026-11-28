@@ -22,7 +22,9 @@ const CONTRACT_HEADERS = [
   'content-type',
   'etag',
   'last-modified',
+  'link',
   'location',
+  'referrer-policy',
   'retry-after',
   'sec-websocket-protocol',
   'set-cookie',
@@ -31,6 +33,9 @@ const CONTRACT_HEADERS = [
   'x-content-type-options',
   'x-frame-options',
   'x-garcon-executor-instance',
+  'x-garcon-file-list-truncated',
+  'x-garcon-file-revision',
+  'x-robots-tag',
 ];
 
 const DEFAULT_QUIET_MS = 400;

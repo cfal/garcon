@@ -32,3 +32,28 @@ test('reports optional quadrants, distinguishes shared failures, and lists sorte
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('comparison commands reject empty reports and quadrants requires a candidate', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'parity-junit-'));
+  try {
+    const empty = join(directory, 'empty.xml');
+    const original = join(directory, 'original.xml');
+    await writeFile(empty, cases());
+    await writeFile(original, cases(entry('one')));
+    const run = (file: string, args: readonly string[]) => Bun.spawnSync([process.execPath, join(import.meta.dir, '../..', file), ...args]);
+    for (const [file, args] of [
+      ['compare-junit.ts', [empty, empty]],
+      ['quadrants.ts', ['--original', original, '--rust-worker', empty]],
+      ['quadrants.ts', ['--original', empty, '--rust-worker', original]],
+    ] as const) {
+      const result = run(file, args);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr.toString()).toContain('No JUnit test cases');
+    }
+    const absent = run('quadrants.ts', ['--original', original]);
+    expect(absent.exitCode).not.toBe(0);
+    expect(absent.stderr.toString()).toContain('Supply at least one candidate quadrant');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

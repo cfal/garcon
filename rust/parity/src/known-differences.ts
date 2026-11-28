@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { childPath, firstDifference, isObject, type Difference, type Json } from './wildcard.js';
+import { childPath, firstDifference, isObject, WILDCARD, type Difference, type Json } from './wildcard.js';
 
 export interface KnownDifference {
   scope: 'scenario' | 'suite';
@@ -53,13 +53,14 @@ export async function readKnownDifferences(repoRoot: string): Promise<KnownDiffe
   return parseKnownDifferences(JSON.parse(await readFile(join(repoRoot, 'rust/parity/known-differences.json'), 'utf8')) as Json);
 }
 
-function atPath(value: Json | undefined, parts: KnownDifference['parts']): Json | undefined {
+function atPath(value: Json | undefined, parts: KnownDifference['parts']): { value: Json | undefined; wildcardAncestor?: true } {
   for (const key of parts) {
+    if (value === WILDCARD) return { value: undefined, wildcardAncestor: true };
     if (typeof key === 'number' && Array.isArray(value)) value = value[key];
     else if (typeof key === 'string' && isObject(value) && Object.hasOwn(value, key)) value = value[key];
-    else return undefined;
+    else return { value: undefined };
   }
-  return value;
+  return { value };
 }
 
 const describe = (value: Json | undefined) => value === undefined ? '(absent)' : JSON.stringify(value).slice(0, 200);
@@ -78,8 +79,8 @@ export function compareWithKnown(
   const approved = new Set<string>();
   for (const entry of entries) {
     const original = atPath(expected, entry.parts);
-    const candidate = atPath(actual, entry.parts);
-    if (!firstDifference(original, candidate)) return stale(entry);
+    const candidate = atPath(actual, entry.parts).value;
+    if (original.wildcardAncestor || !firstDifference(original.value, candidate)) return stale(entry);
     if (!isDeepStrictEqual(candidate, entry.result)) {
       return { path: entry.path, kind: 'value', expected: describe(entry.result), actual: describe(candidate) };
     }

@@ -1,6 +1,6 @@
 //! Replaying a recording against a port through a dispatcher.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::{Map, Value, json};
 
@@ -149,12 +149,22 @@ fn check_result(
     None
 }
 
-fn check<'a, F>(recording: &'a manifest::Recording, dispatch: &mut F) -> Report<'a>
+fn wildcard_cases(recording: &manifest::Recording) -> impl Iterator<Item = (&str, Vec<String>)> {
+    recording.cases.iter().filter_map(|case| {
+        let paths = compare::wildcard_paths(&case.result, "$.result");
+        (!paths.is_empty()).then_some((case.id.as_str(), paths))
+    })
+}
+
+fn check<'a, F>(
+    recording: &'a manifest::Recording,
+    dispatch: &mut F,
+    with_wildcards: usize,
+) -> Report<'a>
 where
     F: FnMut(&str, &[Value]) -> Result<Value, CaseError>,
 {
     let mut failures: Vec<Failure<'a>> = Vec::new();
-    let mut with_wildcards = 0;
     let mut known_differences = 0;
     for case in &recording.cases {
         let difference = match dispatch(&case.function, &case.args) {
@@ -177,9 +187,6 @@ where
                 }),
             },
         };
-        if !compare::wildcard_paths(&case.result, "$").is_empty() {
-            with_wildcards += 1;
-        }
         if let Some(difference) = difference {
             failures.push(Failure { case, difference });
         }
@@ -280,14 +287,37 @@ fn render(report: &Report<'_>) -> String {
 /// distinct differences grouped by path and kind, then panics unless every
 /// case matches. An approved `known-differences.jsonl` entry must match the
 /// port's result exactly and fails if the result matches the original again.
-/// An edited case file or an unhandled function always fails.
-pub fn replay<F>(cases_dir: impl AsRef<Path>, mut dispatch: F) -> Stats
+/// An edited case file, an unhandled function, or a wildcard result fails.
+pub fn replay<F>(cases_dir: impl AsRef<Path>, dispatch: F) -> Stats
 where
     F: FnMut(&str, &[Value]) -> Result<Value, CaseError>,
 {
-    let directory: PathBuf = cases_dir.as_ref().to_path_buf();
-    let recording = manifest::read(&directory).unwrap_or_else(|message| panic!("{message}"));
-    let report = check(&recording, &mut dispatch);
+    replay_with_expected_wildcards(cases_dir, 0, dispatch)
+}
+
+/// Replays cases only if exactly `expected_wildcards` results contain a
+/// wildcard. Prints every case with a wildcard and its paths before dispatch.
+pub fn replay_with_expected_wildcards<F>(
+    cases_dir: impl AsRef<Path>,
+    expected_wildcards: usize,
+    mut dispatch: F,
+) -> Stats
+where
+    F: FnMut(&str, &[Value]) -> Result<Value, CaseError>,
+{
+    let recording =
+        manifest::read(cases_dir.as_ref()).unwrap_or_else(|message| panic!("{message}"));
+    let mut count = 0;
+    for (case, paths) in wildcard_cases(&recording) {
+        println!("  WILDCARD {case} at {}", paths.join(", "));
+        count += 1;
+    }
+    assert!(
+        count == expected_wildcards,
+        "{}: expected {expected_wildcards} wildcard cases, found {count}",
+        recording.module,
+    );
+    let report = check(&recording, &mut dispatch, count);
     if report.failures.is_empty() {
         println!("{}", summary(&report));
         return report.stats;
@@ -300,6 +330,13 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     use super::*;
+
+    fn check<'a, F>(recording: &'a manifest::Recording, dispatch: &mut F) -> Report<'a>
+    where
+        F: FnMut(&str, &[Value]) -> Result<Value, CaseError>,
+    {
+        super::check(recording, dispatch, wildcard_cases(recording).count())
+    }
 
     // A recording on disk with the given cases of one function.
     fn recording(cases: &[(&str, Value, Value)]) -> (tempfile::TempDir, manifest::Recording) {
@@ -329,6 +366,47 @@ mod tests {
 
     fn echo(_function: &str, args: &[Value]) -> Result<Value, CaseError> {
         Ok(args.to_vec().into())
+    }
+
+    #[test]
+    #[should_panic(expected = "expected 0 wildcard cases, found 2")]
+    fn replay_rejects_unacknowledged_wildcard_cases() {
+        let (directory, _) = recording(&[
+            ("random", json!([]), json!("[..]")),
+            ("shaped", json!([]), json!({"token": "[..hex:2]"})),
+        ]);
+        replay(directory.path(), |_, _| {
+            panic!("must reject before dispatch")
+        });
+    }
+
+    #[test]
+    fn replay_checks_the_exact_wildcard_case_count() {
+        let (directory, _) = recording(&[
+            (
+                "shaped",
+                json!([]),
+                json!({"token": "[..hex:2]", "nested": ["[..]"]}),
+            ),
+            ("plain", json!(["[..]"]), json!(42)),
+        ]);
+        let replay_with_budget = |budget| {
+            replay_with_expected_wildcards(directory.path(), budget, |function, _| {
+                Ok(if function == "shaped" {
+                    json!({"token": "ab", "nested": [null]})
+                } else {
+                    json!(42)
+                })
+            })
+        };
+        assert_eq!(replay_with_budget(1).with_wildcards, 1);
+        let error = std::panic::catch_unwind(|| replay_with_budget(2)).unwrap_err();
+        assert!(
+            error
+                .downcast_ref::<String>()
+                .unwrap()
+                .contains("expected 2 wildcard cases, found 1")
+        );
     }
 
     #[test]

@@ -74,6 +74,21 @@ test('records returned class instances recursively with the opt-in and replays i
   expect(await writeCases(directory, recording.cases, recording.manifest)).toMatchObject({ instances: true });
   expect((await replayUnit(repoRoot, directory)).cases.filter((entry) => entry.difference)).toEqual([]);
 });
+
+test('records thrown instances and Error properties with the opt-in, including traps and replay', async () => {
+  const module = fixture('recorded-values.ts');
+  const directory = await temporary();
+  const recording = await recordUnit({ repoRoot, module, tests: [fixture('recorded-values.calls.ts')], instances: true });
+  const thrown = recording.cases.filter((entry) => entry.fn === 'throwWithInstance');
+  const instance = { $: 'instance', name: 'Reply' };
+  expect(thrown.filter((entry) => entry.origin === 'test').map((entry) => entry.result)).toMatchObject([
+    { $: 'error', name: 'TypeError', message: 'invalid reply', properties: { reply: instance } },
+    { $: 'throw', value: instance },
+  ]);
+  expect(thrown.some((entry) => entry.origin.startsWith('trap:'))).toBe(true);
+  await writeCases(directory, recording.cases, recording.manifest);
+  expect((await replayUnit(repoRoot, directory)).cases.filter((entry) => entry.difference)).toEqual([]);
+});
 // The trap cases that change argument `argument` of calls to `fn`.
 function trapsOf(cases: RecordedCase[], fn: string, argument: number): RecordedCase[] {
   return cases.filter((entry) => entry.fn === fn && entry.origin.startsWith('trap:') && entry.origin.includes(`@$.args[${argument}]`));
