@@ -107,7 +107,7 @@ pub struct AgentAttachments {
 #[async_trait(?Send)]
 pub trait AgentSettings {
     fn describe(&self) -> &[AgentSettingDescriptor];
-    fn defaults(&self) -> AgentSettingsEnvelope;
+    fn defaults(&self) -> ExecutorResult<AgentSettingsEnvelope>;
     fn parse(&self, input: AgentSettingsEnvelope) -> ExecutorResult<AgentSettingsEnvelope>;
     async fn migrate(&self, input: AgentSettingsEnvelope) -> ExecutorResult<AgentSettingsEnvelope>;
     fn apply_patch(
