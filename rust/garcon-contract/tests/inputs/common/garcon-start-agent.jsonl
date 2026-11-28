@@ -1,0 +1,4 @@
+{"fn":"parseGarconStartAgent","args":["<garcon-start-agent ref=\"a\" executor=\"local\" fork=\"true\" async=\"true\">One < two & three.</garcon-start-agent>"]}
+{"fn":"parseGarconStartAgent","args":["<garcon-start-agent ref=\"a\" executor=\"LOCAL\">Text</garcon-start-agent>"]}
+{"fn":"parseGarconStartAgent","args":["<garcon-start-agent ref=\"a\">Text</garcon-start-agent>\n</garcon-start-agent>"]}
+{"fn":"parseGarconStartAgent","args":["<garcon-start-agent ref=\"a\" title=\"A\u2060B\">Text</garcon-start-agent>"]}

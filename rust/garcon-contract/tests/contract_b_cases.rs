@@ -63,6 +63,143 @@ fn ticket_recording_result<T: Serialize>(
 }
 
 #[test]
+fn garcon_start_agent_recordings() {
+    use garcon_contract::garcon_start_agent::parse_garcon_start_agent;
+    assert_recording("garcon-start-agent", |function, args| match function {
+        "parseGarconStartAgent" => Ok(json!(parse_garcon_start_agent(required_text(
+            function,
+            args.first()
+        )?))),
+        _ => Err(CaseError::unhandled(function)),
+    });
+}
+
+#[test]
+fn garcon_start_agent_preserves_literal_body_and_requires_a_model_for_explicit_selection() {
+    use garcon_contract::garcon_start_agent::{
+        GARCON_START_PROMPT_MAX_BYTES, parse_garcon_start_agent,
+    };
+    let command = |selection, body: &str| {
+        format!("<garcon-start-agent ref=\"run\" {selection}>\n{body}\n</garcon-start-agent>")
+    };
+    let body = "  A &amp; B < C\n";
+    let parsed =
+        parse_garcon_start_agent(&command(r#"provider="A &amp; B" model="demo""#, body)).unwrap();
+    assert_eq!(parsed.provider_id.as_deref(), Some("A & B"));
+    assert_eq!(parsed.prompt, body);
+    assert!(parsed.executor_id.is_none());
+    assert!(parse_garcon_start_agent(&command(r#"provider="demo""#, body)).is_none());
+    let allowed = "x".repeat(GARCON_START_PROMPT_MAX_BYTES);
+    assert!(parse_garcon_start_agent(&command("", &allowed)).is_some());
+    assert!(parse_garcon_start_agent(&command("", &(allowed + "x"))).is_none());
+}
+
+#[test]
+fn garcon_resume_agent_recordings() {
+    use garcon_contract::garcon_resume_agent::parse_garcon_resume_agent;
+    assert_recording("garcon-resume-agent", |function, args| match function {
+        "parseGarconResumeAgent" => Ok(json!(parse_garcon_resume_agent(required_text(
+            function,
+            args.first()
+        )?))),
+        _ => Err(CaseError::unhandled(function)),
+    });
+}
+
+#[test]
+fn garcon_resume_agent_keeps_nested_commands_in_literal_prompt() {
+    use garcon_contract::garcon_resume_agent::parse_garcon_resume_agent;
+    let nested = r#"<garcon-stop-agent chat-id="1000000000000001" />"#;
+    let input = format!(
+        "<garcon-resume-agent ref=\"sample\" chat-id=\"1000000000000001\">\n{nested}\n</garcon-resume-agent>"
+    );
+    let parsed = parse_garcon_resume_agent(&input).unwrap();
+    assert_eq!(parsed.prompt, nested);
+    assert!(!parsed.request.asynchronous);
+    assert!(
+        parse_garcon_resume_agent(&input.replace(r#"ref="sample""#, r#"ref="sample" fork="true""#))
+            .is_none()
+    );
+}
+
+#[test]
+fn garcon_stop_agent_recordings() {
+    use garcon_contract::garcon_stop_agent::parse_garcon_stop_agent;
+    assert_recording("garcon-stop-agent", |function, args| match function {
+        "parseGarconStopAgent" => Ok(json!(parse_garcon_stop_agent(required_text(
+            function,
+            args.first()
+        )?))),
+        _ => Err(CaseError::unhandled(function)),
+    });
+}
+
+#[test]
+fn garcon_stop_agent_requires_a_self_closing_command_and_exact_remove_flag() {
+    use garcon_contract::garcon_stop_agent::parse_garcon_stop_agent;
+    let command =
+        |attribute| format!("<garcon-stop-agent chat-id=\"2000000000000000\" {attribute}/>");
+    assert!(!parse_garcon_stop_agent(&command("")).unwrap().remove);
+    assert!(
+        parse_garcon_stop_agent(&command(r#"remove="true""#))
+            .unwrap()
+            .remove
+    );
+    assert!(parse_garcon_stop_agent(&command(r#"remove="True""#)).is_none());
+    assert!(
+        parse_garcon_stop_agent(
+            r#"<garcon-stop-agent chat-id="2000000000000000"></garcon-stop-agent>"#
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn garcon_schedule_recordings() {
+    use garcon_contract::garcon_schedule::*;
+    assert_recording("garcon-schedule", |function, args| {
+        let input = required_text(function, args.first())?;
+        Ok(match function {
+            "parseGarconSchedule" => serialized_record(parse_garcon_schedule(input)),
+            "parseGarconScheduleInstant" => json!(parse_garcon_schedule_instant(input)),
+            "garconScheduleActionContent" => json!(garcon_schedule_action_content(input)),
+            "parseGarconScheduleAction" => json!(parse_garcon_schedule_action(input)),
+            "scheduledPromptLabel" => json!(scheduled_prompt_label(input)),
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+#[test]
+fn garcon_schedule_applies_the_offset_before_comparing_inclusive_ends() {
+    use garcon_contract::garcon_schedule::*;
+    let input = r#"<garcon-schedule at="2030-01-02T09:00:00+02:00" every="1m" until="2030-01-02T07:00:00Z" />"#;
+    let schedule = parse_garcon_schedule(input).unwrap();
+    assert_eq!(schedule.interval_minutes, Some(1));
+    assert_eq!(
+        schedule.end_at_utc.as_deref(),
+        Some("2030-01-02T07:00:00.000Z")
+    );
+    assert!(parse_garcon_schedule(&input.replace("07:00:00Z", "06:59:00Z")).is_none());
+    assert!(parse_garcon_schedule_instant("2030-02-29T00:00:00Z").is_none());
+    assert!(parse_garcon_schedule_instant("0000-01-01T00:00:00+00:01").is_none());
+}
+
+#[test]
+fn garcon_schedule_frames_actions_and_does_not_split_label_surrogates() {
+    use garcon_contract::garcon_schedule::*;
+    use garcon_contract::scheduled_prompts::SCHEDULED_PROMPT_LABEL_MAX_LENGTH;
+    let body = "A & B < C\n</garcon-schedule-action>\n&amp;lt;";
+    let action = garcon_schedule_action_content(body);
+    assert_eq!(parse_garcon_schedule_action(&action).unwrap().body, body);
+    let prefix = "x".repeat(SCHEDULED_PROMPT_LABEL_MAX_LENGTH - 1);
+    assert_eq!(
+        scheduled_prompt_label(&format!("{prefix}\u{1f600} tail")),
+        prefix
+    );
+}
+
+#[test]
 fn garcon_command_envelope_recordings() {
     use garcon_contract::garcon_command_envelope::*;
     assert_recording("garcon-command-envelope", |function, args| {

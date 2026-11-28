@@ -1,0 +1,13 @@
+{
+  "module": "common/garcon-schedule.ts",
+  "tests": [
+    "common/__tests__/garcon-schedule.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/garcon-schedule.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 383,
+  "sha256": "4b76b5d8334bd66146d3d4fe111bc4926f1591652995f2d26d35e7af37f02133"
+}
