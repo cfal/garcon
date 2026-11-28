@@ -6,6 +6,7 @@ pub mod agent_integration;
 pub mod agents;
 pub mod api_providers;
 pub mod attachments;
+pub mod auth;
 pub mod chat_activity;
 pub mod chat_boards;
 pub mod chat_execution_control;
