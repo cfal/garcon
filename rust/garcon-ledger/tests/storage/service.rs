@@ -253,6 +253,7 @@ async fn a_failing_listener_does_not_block_commit_delivery_or_pending_work() {
                     on_listener_error: Some(Rc::new(move |error| {
                         errors.send(error.to_string()).unwrap()
                     })),
+                    ..Default::default()
                 },
             );
             let (settle, wait) = oneshot::channel();
