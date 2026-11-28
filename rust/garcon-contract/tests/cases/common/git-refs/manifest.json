@@ -1,0 +1,26 @@
+{
+  "module": "common/git-refs.ts",
+  "tests": [
+    "common/__tests__/git-refs.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "isGitRefKind",
+      "argument": 0
+    },
+    {
+      "fn": "parseGitRefSort",
+      "argument": 0
+    },
+    {
+      "fn": "parseGitRefSort",
+      "argument": 1
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 137,
+  "sha256": "2f36dfe418b6f6852c1b05d0a78ea6319cd4313ae02d4d9cef5d6c9d286effd6"
+}
