@@ -205,22 +205,22 @@ async fn recorded_queue_and_limits_cases_match() {
                 ),
                 |function, _| match function {
                     "transportLimits" => Ok(json!({
-                        "EXECUTOR_RECONNECT_GRACE_MS": EXECUTOR_RECONNECT_GRACE_MS,
-                        "RPC_CALL_LIMIT": RPC_CALL_LIMIT,
-                        "BULK_RPC_CALL_LIMIT": BULK_RPC_CALL_LIMIT,
-                        "RPC_INSTALLATION_CALL_LIMIT": RPC_INSTALLATION_CALL_LIMIT,
-                        "RPC_QUEUE_BYTES": RPC_QUEUE_BYTES,
-                        "RPC_QUEUE_MESSAGES": RPC_QUEUE_MESSAGES,
-                        "BULK_QUEUE_BYTES": BULK_QUEUE_BYTES,
-                        "BULK_QUEUE_MESSAGES": BULK_QUEUE_MESSAGES,
+                        "BULK_ACQUIRE_TIMEOUT_MS": BULK_ACQUIRE_TIMEOUT_MS,
                         "BULK_CONTROL_BYTES": BULK_CONTROL_BYTES,
                         "BULK_CONTROL_RESERVE_BYTES": BULK_CONTROL_RESERVE_BYTES,
                         "BULK_CONTROL_RESERVE_MESSAGES": BULK_CONTROL_RESERVE_MESSAGES,
-                        "PRIMARY_SMALL_RPC_BYTES": PRIMARY_SMALL_RPC_BYTES,
-                        "BULK_ACQUIRE_TIMEOUT_MS": BULK_ACQUIRE_TIMEOUT_MS,
-                        "BULK_SETUP_TIMEOUT_MS": BULK_SETUP_TIMEOUT_MS,
-                        "RPC_JOURNAL_BYTES": RPC_JOURNAL_BYTES,
                         "BULK_JOURNAL_BYTES": BULK_JOURNAL_BYTES,
+                        "BULK_QUEUE_BYTES": BULK_QUEUE_BYTES,
+                        "BULK_QUEUE_MESSAGES": BULK_QUEUE_MESSAGES,
+                        "BULK_RPC_CALL_LIMIT": BULK_RPC_CALL_LIMIT,
+                        "BULK_SETUP_TIMEOUT_MS": BULK_SETUP_TIMEOUT_MS,
+                        "EXECUTOR_RECONNECT_GRACE_MS": EXECUTOR_RECONNECT_GRACE_MS,
+                        "PRIMARY_SMALL_RPC_BYTES": PRIMARY_SMALL_RPC_BYTES,
+                        "RPC_CALL_LIMIT": RPC_CALL_LIMIT,
+                        "RPC_INSTALLATION_CALL_LIMIT": RPC_INSTALLATION_CALL_LIMIT,
+                        "RPC_JOURNAL_BYTES": RPC_JOURNAL_BYTES,
+                        "RPC_QUEUE_BYTES": RPC_QUEUE_BYTES,
+                        "RPC_QUEUE_MESSAGES": RPC_QUEUE_MESSAGES,
                     })),
                     "queueBudget" => Ok(queue_budget()),
                     _ => Err(CaseError::unhandled(function)),
@@ -374,6 +374,14 @@ fn validated_cli_request_serializes_in_its_original_key_order() {
     let original = r#"{"http":{"body":null,"query":[["executorId","local"]],"operation":"GET /api/v1/models"},"expectedServerInstanceId":"synthetic"}"#;
     let value = garcon_js::json::parse(original).unwrap();
     let parsed = parse_controller_cli_request(&value).unwrap();
+    assert_eq!(serde_json::to_string(&parsed).unwrap(), original);
+}
+
+#[test]
+fn validated_cli_reply_serializes_in_its_original_key_order() {
+    let original = r#"{"1":true,"extra":1,"body":null,"status":200}"#;
+    let value = garcon_js::json::parse(original).unwrap();
+    let parsed = parse_cli_http_response(&value).unwrap();
     assert_eq!(serde_json::to_string(&parsed).unwrap(), original);
 }
 

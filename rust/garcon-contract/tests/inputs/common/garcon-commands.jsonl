@@ -1,0 +1,10 @@
+{"fn":"extractGarconCommands","args":[{"type":"assistant-message","timestamp":"now","content":"\ud83d\ude00 Keep\r\n<garcon-get-chat-id />\n\u00a0"}]}
+{"fn":"extractGarconCommands","args":[{"type":"assistant-message","timestamp":"now","content":"\u00a0<garcon-stop-agent chat-id=\"1787974832309199\" />\nKeep"}]}
+{"fn":"extractGarconCommands","args":[{"type":"assistant-message","timestamp":"now","content":"<garcon-send-message to=\"1787974832309199\" hide-sender=\"false\">\ud800</garcon-send-message>"}]}
+{"fn":"extractGarconCommands","args":[{"type":"assistant-message","timestamp":"now","content":"<garcon-send-message to=\"1787974832309199\" hide-sender=\"false\">\ufffd</garcon-send-message>"}]}
+{"fn":"parseGarconMessage","args":["<garcon-message>\ud800</garcon-message>"]}
+{"fn":"parseGarconMessage","args":["\ufeff<garcon-message>\r\n\r\n\ufffd \r\n\r\n</garcon-message>\u00a0"]}
+{"fn":"parseGarconMessage","args":["<garcon-message from=\"1787974832309199\">\r\n\r\n x\r\n\r\n</garcon-message>"]}
+{"fn":"parseGarconMessage","args":["<garcon-message from=\"1787974832309199 \">message</garcon-message>"]}
+{"fn":"parseGarconMessage","args":["<garcon-message>\u00a0\r\n\t</garcon-message>"]}
+{"fn":"parseGarconMessage","args":["<garcon-message>\nembedded </garcon-message> is literal\n</garcon-message>"]}

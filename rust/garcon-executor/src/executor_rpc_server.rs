@@ -4,11 +4,9 @@ use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use garcon_base::domain_error::DomainError;
-use garcon_contract::file_contracts::{FileSaveConflictResolution, SaveTextRequest};
 use garcon_interface::errors::{AgentCallError, AgentDeliveryOutcome, AgentIntegrationErrorCode};
 use garcon_interface::execution_runtime::ExecutorInfo;
-use garcon_interface::files::{ExecutionFileEntry, ExecutionFileSave, ExecutionFileTarget};
+use garcon_interface::files::{ExecutionFileEntry, ExecutionFileTarget};
 use garcon_interface::resources::{ExecutorCallOptions, ExecutorResult};
 use garcon_js::json::Opaque;
 use garcon_link::file_protocol::{decode_file_text, invalid_file_data, validate_file_rpc_request};
@@ -128,12 +126,10 @@ impl ExecutorRpcServer {
                 if !call.integration_id.is_empty() {
                     return Err(rejected("Project operations are executor services"));
                 }
-                let request = decode(request)
-                    .map_err(|_| rejected("Invalid ticket project default request"))?;
                 reply(
                     self.api
-                        .projects()
-                        .ticket_project_default(request, options(signal))
+                        .projects
+                        .ticket_project_default_raw(request, options(signal))
                         .await,
                 )
             }
@@ -237,35 +233,22 @@ impl ExecutorRpcServer {
             "files.save" => {
                 let target: ExecutionFileTarget = decode(request).map_err(invalid)?;
                 let content = decode_file_text(&request["data"]).map_err(shared_error)?;
-                let invalid_request = || {
-                    shared_error(DomainError::new_validation(
-                        "Content, expectedRevision, and conflictResolution are required",
-                    ))
-                };
-                let expected_revision = request["expectedRevision"]
-                    .as_str()
-                    .ok_or_else(invalid_request)?
-                    .to_owned();
-                let conflict_resolution = match request["conflictResolution"].as_str() {
-                    Some("reject") => FileSaveConflictResolution::Reject,
-                    Some("overwrite") => FileSaveConflictResolution::Overwrite,
-                    _ => return Err(invalid_request()),
-                };
-                reply(
-                    files
-                        .save(
-                            ExecutionFileSave {
-                                target,
-                                request: SaveTextRequest {
-                                    content,
-                                    expected_revision,
-                                    conflict_resolution,
-                                },
-                            },
-                            options,
-                        )
-                        .await,
-                )
+                let request = Value::Object(
+                    [
+                        ("content".to_owned(), Value::String(content)),
+                        (
+                            "expectedRevision".to_owned(),
+                            request["expectedRevision"].clone(),
+                        ),
+                        (
+                            "conflictResolution".to_owned(),
+                            request["conflictResolution"].clone(),
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                );
+                reply(self.api.files.save_raw(target, request, options).await)
             }
             "files.createDirectory" => reply(
                 files

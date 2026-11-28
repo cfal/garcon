@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use futures::channel::oneshot;
 use futures::future::LocalBoxFuture;
-use garcon_base::domain_error::DomainError;
+use garcon_base::domain_error::{DomainError, as_domain_error};
 use garcon_base::event_loop_stalls::ActivityTracker;
 use garcon_base::executor_disconnect::{ExecutorSessionLostError, reconnect_timed_out};
 use garcon_base::log::{Logger, ScopedLogger, create_logger};
@@ -150,7 +150,7 @@ fn encode_failure(error: &(dyn Error + 'static)) -> Failure {
             error.status >= 500,
         );
     }
-    if let Some(error) = error.downcast_ref::<DomainError>() {
+    if let Some(error) = as_domain_error(error) {
         return failure(
             Some("executor"),
             error.code.as_str(),

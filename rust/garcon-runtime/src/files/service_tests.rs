@@ -218,13 +218,30 @@ async fn content_admission_survives_lost_replies_and_does_not_gate_metadata() {
                 ErrorCode::FILE_SERVICE_BUSY
             );
             let busy = ordinary
-                .save(fixture.save("file.txt", "extra", &revision), None)
+                .save_raw(
+                    fixture.target.clone(),
+                    serde_json::json!({"content":"extra"}),
+                    None,
+                )
                 .await
                 .unwrap_err();
             assert_eq!(
                 busy.downcast_ref::<DomainError>().unwrap().code,
                 ErrorCode::FILE_SERVICE_BUSY
             );
+            let unavailable = fixture.service(FilesServiceOptions {
+                assert_available: Some(Rc::new(|_| Err(std::io::Error::other("Disposed").into()))),
+                ..Default::default()
+            });
+            let error = unavailable
+                .save_raw(
+                    fixture.target.clone(),
+                    serde_json::json!({"content":"extra"}),
+                    None,
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.to_string(), "Disposed");
             let identity = ordinary
                 .identity(fixture.target.clone(), None)
                 .await
