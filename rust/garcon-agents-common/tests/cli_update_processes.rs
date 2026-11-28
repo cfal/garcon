@@ -29,10 +29,12 @@ use garcon_contract::agent_cli_update::{
 use garcon_interface::{
     cli_updates::{AgentCliUpdateStatusRequest, AgentCliUpdates},
     errors::{AgentIntegrationError, AgentIntegrationErrorCode},
-    host::AgentLogger,
+    host::{AgentEnvironmentReader, AgentLogger},
+    resources::ExecutorResult,
 };
 use garcon_js::{clock::ManualClock, json::Opaque};
 use indexmap::IndexMap;
+use serde_json::json;
 use tempfile::{TempDir, tempdir};
 use tokio::{
     task::LocalSet,
@@ -142,17 +144,21 @@ impl Fixture {
     }
 
     fn service_for(&self, command: &str, bundled: bool) -> CliUpdateService {
+        CliUpdateService::new(self.options_for(command, bundled))
+    }
+
+    fn options_for(&self, command: &str, bundled: bool) -> CliUpdateServiceOptions {
         let command = command.to_owned();
         let env = self.env.clone();
         let updated = self.updated.clone();
-        CliUpdateService::new(CliUpdateServiceOptions {
+        CliUpdateServiceOptions {
             label: "Synthetic CLI".into(),
             definition: definition(),
             target: Rc::new(move || {
                 let command = command.clone();
                 async move { Ok(CliUpdateTarget { command, bundled }) }.boxed_local()
             }),
-            environment: Rc::new(move || env.clone()),
+            environment: Rc::new(move || Ok(env.clone())),
             native_release: Rc::new(|| {
                 async {
                     Ok(NativeReleaseSource {
@@ -167,8 +173,90 @@ impl Fixture {
             clock: Some(Rc::new(ManualClock::new(
                 garcon_js::date_parse::date_parse(TIMESTAMP).unwrap(),
             ))),
-        })
+        }
     }
+}
+
+#[tokio::test]
+async fn a_failed_environment_read_rejects_status_and_update_before_target_resolution() {
+    use garcon_agents_common::environment::read_environment::read_environment;
+
+    struct Reader {
+        fail: Cell<bool>,
+        reads: Cell<usize>,
+    }
+    impl AgentEnvironmentReader for Reader {
+        fn get(&self, name: &str) -> ExecutorResult<Option<String>> {
+            assert_eq!(name, "CLAUDE_CONFIG_DIR");
+            self.reads.set(self.reads.get() + 1);
+            if self.fail.get() {
+                return Err(AgentIntegrationError::new(
+                    AgentIntegrationErrorCode::UNAVAILABLE,
+                    "synthetic environment read failed",
+                    true,
+                    None,
+                )
+                .into());
+            }
+            Ok(None)
+        }
+    }
+
+    LocalSet::new().run_until(async {
+        let fixture = Fixture::new();
+        let reader = Rc::new(Reader { fail: Cell::new(true), reads: Cell::new(0) });
+        let target_reads = Rc::new(Cell::new(0));
+        let mut options = fixture.options_for(pathstr(&fixture.launcher), true);
+        let environment = options.environment;
+        options.environment = {
+            let reader = reader.clone();
+            Rc::new(move || {
+                read_environment(reader.as_ref(), "CLAUDE_CONFIG_DIR")?;
+                environment()
+            })
+        };
+        let target = options.target;
+        options.target = {
+            let target_reads = target_reads.clone();
+            Rc::new(move || {
+                target_reads.set(target_reads.get() + 1);
+                target()
+            })
+        };
+        let service = CliUpdateService::new(options);
+        assert_eq!(reader.reads.get(), 0);
+        let status_request = AgentCliUpdateStatusRequest { refresh: false, signal: None };
+        let failure = |result: ExecutorResult<AgentCliUpdateStatus>| {
+            let failure = result.unwrap_err();
+            let error = failure.downcast_ref::<AgentIntegrationError>().expect("typed environment error");
+            assert_eq!(error.code, AgentIntegrationErrorCode::UNAVAILABLE);
+            assert_eq!(error.message, "synthetic environment read failed");
+            assert!(error.retryable);
+            json!({"code":error.code.as_str(),"message":error.message,"retryable":error.retryable})
+        };
+        let inspection = failure(service.status(status_request).await);
+        let update = failure(service.start_update().await);
+        assert_eq!(target_reads.get(), 0);
+        reader.fail.set(false);
+        let recovery = status(&service, false).await;
+        assert_eq!(recovery.run.state, State::Idle);
+        assert_eq!(reader.reads.get(), 3);
+        assert_eq!(target_reads.get(), 1);
+
+        let oracle = tokio::process::Command::new("bun")
+            .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/oracles/cli-update.ts"))
+            .arg(fixture.root.path())
+            .arg("environment-error")
+            .output()
+            .await
+            .unwrap();
+        assert!(oracle.status.success(), "{}", String::from_utf8_lossy(&oracle.stderr));
+        let actual = json!({
+            "inspection":inspection,"update":update,"recovery":recovery.run.state,
+            "environmentReads":reader.reads.get(),"targetReads":target_reads.get()
+        });
+        assert_eq!(serde_json::to_vec(&actual).unwrap(), oracle.stdout);
+    }).await;
 }
 
 fn definition() -> CliInstallDefinition {

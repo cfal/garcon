@@ -4,6 +4,9 @@
 //! durable writers use `retain_references` through publication.
 
 mod remote;
+mod snapshot_wire;
+
+pub use snapshot_wire::ExecutorSnapshotWire;
 
 use std::{
     cell::{Cell, RefCell},

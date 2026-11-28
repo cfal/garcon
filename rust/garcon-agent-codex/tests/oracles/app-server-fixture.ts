@@ -90,6 +90,18 @@ for await (const line of input) {
       write({ id, result: {} });
       break;
     }
+    case 'send-approval': {
+      const { requestId, threadId, turnId } = params;
+      write({ id: requestId, method: 'item/commandExecution/requestApproval', params: {
+        itemId: 'command', threadId, turnId, command: 'pwd',
+      } });
+      write({ id, result: {} });
+      break;
+    }
+    case 'resolve-approval':
+      write({ method: 'serverRequest/resolved', params });
+      write({ id, result: {} });
+      break;
     case 'bad':
       write({ id, error: { code: -32001, message: 'Synthetic RPC error', data: { reason: 'synthetic' } } });
       break;

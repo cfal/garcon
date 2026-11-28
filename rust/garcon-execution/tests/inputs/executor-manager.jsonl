@@ -7,3 +7,4 @@
 {"fn":"executorManagerTrace","args":["deleted"]}
 {"fn":"executorManagerTrace","args":["changing"]}
 {"fn":"executorManagerTrace","args":["revoked"]}
+{"fn":"executorManagerTrace","args":["wire"]}
