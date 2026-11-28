@@ -1,0 +1,37 @@
+{
+  "module": "common/tickets.ts",
+  "tests": [
+    "common/__tests__/tickets.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/tickets.jsonl",
+  "guards": [
+    {
+      "fn": "ticketAssigneeQuery",
+      "argument": 0,
+      "guard": "common/ticket-validation.ts#ticketOwner",
+      "dropped": 104,
+      "kept": 21
+    },
+    {
+      "fn": "ticketOwnerKey",
+      "argument": 0,
+      "guard": "common/ticket-validation.ts#ticketOwner",
+      "dropped": 79,
+      "kept": 21
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "ticketAssigneeQuery",
+      "argument": 0
+    },
+    {
+      "fn": "ticketOwnerKey",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 49,
+  "sha256": "986d953ebbccb4cddf9bcc59bf1a82d9ec3b100340a2bb523da4545890d857e1"
+}

@@ -14,6 +14,8 @@ mod git_refs;
 mod git_request_validation;
 mod git_wire;
 mod helpers;
+mod tags;
 mod terminal;
 mod terminal_error;
+mod tickets;
 mod transcript_projection;

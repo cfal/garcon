@@ -1,0 +1,26 @@
+{
+  "module": "common/tags.ts",
+  "tests": [
+    "common/__tests__/chat-tag-mutations.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/tags.jsonl",
+  "guards": [],
+  "jsonArguments": [
+    {
+      "fn": "appendNormalizedUniqueTag",
+      "argument": 0
+    },
+    {
+      "fn": "finalizeNormalizedTags",
+      "argument": 0
+    },
+    {
+      "fn": "normalizeTags",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 143,
+  "sha256": "1cf01b6a982abf5ce015cf9921a416d64611a42782334735b291374d71d2a6f7"
+}
