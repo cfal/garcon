@@ -1,0 +1,53 @@
+import { expect, test } from 'bun:test';
+import { compareWithKnown, parseKnownDifferences } from '../known-differences.js';
+import { compareScenario } from '../report.js';
+import { compareTraces, type Traces } from '../traces.js';
+
+const example = { scenario: 'fixture', case: 'sample', path: '$.body.status', result: 'rust-[..]', reason: 'synthetic approval' };
+
+test('only the exact approved value is accepted and unrelated drift still fails', () => {
+  const golden = { body: { status: 'original', untouched: true } };
+  const approvals = parseKnownDifferences([example]);
+  expect(compareWithKnown(golden, { body: { status: 'rust-[..]', untouched: true } }, approvals)).toBeNull();
+  expect(compareWithKnown(golden, { body: { status: 'rust-anything', untouched: true } }, approvals)?.path).toBe('$.body.status');
+  expect(compareWithKnown(golden, { body: { status: 'rust-[..]', untouched: false } }, approvals)?.path).toBe('$.body.untouched');
+  expect(compareWithKnown(golden, golden, approvals)).toMatchObject({
+    path: '$.body.status', actual: 'matches the original recording',
+  });
+  expect(compareWithKnown({ body: '[..]' }, { body: { status: 'rust-[..]' } }, approvals)?.actual)
+    .toBe('matches the original recording');
+});
+
+test('handles quoted keys and array elements without matching inherited properties', () => {
+  const approvals = parseKnownDifferences([{ ...example, path: '$["odd key"][0].constructor', result: null }]);
+  expect(compareWithKnown({ 'odd key': [{}] }, { 'odd key': [{ constructor: null }] }, approvals)).toBeNull();
+  expect(() => parseKnownDifferences([{ ...example, path: '$.invalid[01]' }])).toThrow('Invalid JSON path');
+  expect(() => parseKnownDifferences([example, example])).toThrow('Duplicate known difference');
+  expect(() => parseKnownDifferences([{ ...example, suite: 'conflicts.test.ts' }])).toThrow('exactly one scenario or suite');
+});
+
+test('edge replay uses approvals only when the build comparison supplies them', () => {
+  const golden = { scenario: 'fixture', cases: [{ name: 'sample', expected: { body: { status: 'original' } }, noise: [] }] };
+  const known = parseKnownDifferences([example]);
+  const original = [{ name: 'sample', capture: golden.cases[0]!.expected, fallbacks: [] }];
+  const rust = [{ name: 'sample', capture: { body: { status: 'rust-[..]' } }, fallbacks: [] }];
+  expect(compareScenario(golden, original, 'fixture').cases[0]?.difference).toBeNull();
+  expect(compareScenario(golden, original, 'fixture', known).cases[0]?.difference?.actual).toBe('matches the original recording');
+  expect(compareScenario(golden, rust, 'fixture').cases[0]?.difference?.path).toBe('$.body.status');
+  expect(compareScenario(golden, rust, 'fixture', known).cases[0]?.difference).toBeNull();
+  expect(compareScenario({ scenario: 'fixture', cases: [] }, [], 'fixture', known).cases[0]?.difference?.actual)
+    .toBe('(case no longer recorded)');
+});
+
+test('the trace comparer uses only the approvals for the requested suite and test', () => {
+  const suite = 'integration-tests/tests/server/fixture.test.ts';
+  const format = (body: string): Traces => new Map([[suite, { sample: { http: [{ body }] } }]]);
+  const golden = format('original');
+  const rust = format('rust');
+  const { scenario: _scenario, ...entry } = example;
+  const known = parseKnownDifferences([{ ...entry, suite, path: '$.http[0].body', result: 'rust' }]);
+  expect(compareTraces(golden, rust, known)).toEqual({ total: 1, problems: [], excludedBroadcasts: 0, excludedTests: 0 });
+  expect(compareTraces(golden, format('unapproved'), known).problems[0]?.difference.path).toBe('$.http[0].body');
+  expect(compareTraces(golden, golden, known).problems[0]?.difference.actual).toBe('matches the original recording');
+  expect(compareTraces(golden, rust, parseKnownDifferences([{ ...entry, suite: 'other.test.ts' }])).problems).toHaveLength(1);
+});

@@ -213,11 +213,15 @@ pub fn wildcard_paths(value: &Value, path: &str) -> Vec<String> {
 /// The first position where `actual` departs from `expected`, walking object
 /// keys in sorted order so reports are stable.
 pub fn first_difference(expected: &Value, actual: &Value) -> Option<Difference> {
-    difference(expected, actual, "$")
+    difference(expected, actual, "$", true)
 }
 
-fn difference(expected: &Value, actual: &Value, path: &str) -> Option<Difference> {
-    if expected.as_str() == Some(WILDCARD) {
+pub fn first_difference_exact(expected: &Value, actual: &Value) -> Option<Difference> {
+    difference(expected, actual, "$", false)
+}
+
+fn difference(expected: &Value, actual: &Value, path: &str, wildcards: bool) -> Option<Difference> {
+    if wildcards && expected.as_str() == Some(WILDCARD) {
         return None;
     }
     // A port's negative zero is the recording's `-0` marker.
@@ -231,10 +235,15 @@ fn difference(expected: &Value, actual: &Value, path: &str) -> Option<Difference
         return Some(Difference::new(path, "type", expected, actual));
     }
     match (expected, actual) {
-        (Value::String(pattern), Value::String(text)) => (!wildcard_matches(pattern, text))
-            .then(|| Difference::new(path, "value", expected, actual)),
-        (Value::Number(left), Value::Number(right)) => (left.as_f64() != right.as_f64())
-            .then(|| Difference::new(path, "value", expected, actual)),
+        (Value::String(pattern), Value::String(text)) => (!(pattern == text
+            || wildcards && wildcard_matches(pattern, text)))
+        .then(|| Difference::new(path, "value", expected, actual)),
+        (Value::Number(left), Value::Number(right)) => (if wildcards {
+            left.as_f64() != right.as_f64()
+        } else {
+            left != right
+        })
+        .then(|| Difference::new(path, "value", expected, actual)),
         (Value::Array(items), Value::Array(others)) => {
             if items.len() != others.len() {
                 return Some(Difference {
@@ -249,10 +258,12 @@ fn difference(expected: &Value, actual: &Value, path: &str) -> Option<Difference
                 .zip(others)
                 .enumerate()
                 .find_map(|(index, (item, other))| {
-                    difference(item, other, &array_path(path, index))
+                    difference(item, other, &array_path(path, index), wildcards)
                 })
         }
-        (Value::Object(entries), Value::Object(others)) => object_difference(entries, others, path),
+        (Value::Object(entries), Value::Object(others)) => {
+            object_difference(entries, others, path, wildcards)
+        }
         _ => (expected != actual).then(|| Difference::new(path, "value", expected, actual)),
     }
 }
@@ -261,13 +272,16 @@ fn object_difference(
     entries: &Map<String, Value>,
     others: &Map<String, Value>,
     path: &str,
+    wildcards: bool,
 ) -> Option<Difference> {
     let mut keys: Vec<&String> = entries.keys().chain(others.keys()).collect();
     keys.sort();
     keys.dedup();
     keys.into_iter()
         .find_map(|key| match (entries.get(key), others.get(key)) {
-            (Some(expected), Some(actual)) => difference(expected, actual, &child_path(path, key)),
+            (Some(expected), Some(actual)) => {
+                difference(expected, actual, &child_path(path, key), wildcards)
+            }
             (Some(expected), None) => Some(Difference {
                 path: child_path(path, key),
                 kind: "missing",

@@ -9,10 +9,12 @@ import { parseArgs } from 'node:util';
 import { bunCheck, pinnedBunVersion } from './src/bun-version.js';
 import { commandBuild, originalBuild, type ServerBuild } from './src/environment.js';
 import { mergeRuns, readGolden, writeGolden } from './src/golden.js';
+import { readKnownDifferences } from './src/known-differences.js';
 import { compareScenario, renderReport, replaySummary, type ScenarioResult } from './src/report.js';
 import { runScenario } from './src/runner.js';
 import { loadScenarios } from './src/scenario.js';
 import { unitCli, UNIT_USAGE } from './src/unit/cli.js';
+import { tracesCli, TRACES_USAGE } from './src/traces-cli.js';
 
 const repoRoot = resolve(import.meta.dir, '../..');
 
@@ -28,6 +30,9 @@ record   Runs the original twice per scenario and writes rust/parity/golden/.
 replay   Runs a build (default: the original) against the recordings, writes
          the report when --report is given, and exits non-zero on any
          mismatch. On another Bun than the pinned one it warns.
+
+Suite traces (ADR-020):
+${TRACES_USAGE}
 
 Unit cases (ADR-020):
 ${UNIT_USAGE.split('\n').slice(1).join('\n')}`;
@@ -45,12 +50,19 @@ async function record(scenarioName: string | undefined): Promise<void> {
   }
 }
 
-async function replay(build: ServerBuild, label: string, scenarioName: string | undefined, reportPath: string | undefined): Promise<boolean> {
+async function replay(build: ServerBuild, label: string, scenarioName: string | undefined, reportPath: string | undefined, compareKnown: boolean): Promise<boolean> {
   const results: ScenarioResult[] = [];
-  for (const scenario of await loadScenarios(repoRoot, scenarioName)) {
+  const known = compareKnown ? await readKnownDifferences(repoRoot) : [];
+  const scenarios = await loadScenarios(repoRoot, scenarioName);
+  if (!scenarioName) {
+    const names = new Set(scenarios.map((scenario) => scenario.name));
+    const stale = known.find((entry) => entry.scope === 'scenario' && !names.has(entry.name));
+    if (stale) throw new Error(`Stale known difference for unknown scenario ${stale.name}`);
+  }
+  for (const scenario of scenarios) {
     const golden = await readGolden(repoRoot, scenario.name);
     const runs = golden ? await runScenario(repoRoot, build, scenario) : [];
-    results.push(compareScenario(golden, runs, scenario.name));
+    results.push(compareScenario(golden, runs, scenario.name, known));
   }
   const measuresFallback = build.label !== 'original';
   const report = renderReport(label, results, measuresFallback);
@@ -61,6 +73,7 @@ async function replay(build: ServerBuild, label: string, scenarioName: string | 
 
 const args = Bun.argv.slice(2);
 if (args[0] === 'unit') process.exit(await unitCli(args.slice(1), repoRoot));
+if (args[0] === 'traces') process.exit(await tracesCli(args.slice(1), repoRoot));
 
 const { positionals, values } = parseArgs({
   args,
@@ -93,6 +106,6 @@ if (command === 'record') {
 } else {
   const build = values.build ? commandBuild(values.build) : originalBuild();
   const label = values.label ?? build.label;
-  const passed = await replay(build, label, values.scenario, values.report);
+  const passed = await replay(build, label, values.scenario, values.report, Boolean(values.build));
   process.exit(passed ? 0 : 1);
 }

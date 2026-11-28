@@ -176,7 +176,9 @@ the calls that were not captured. Use the repository's pinned Bun (1.4.3):
 - Trap variants follow the recorded calls. Each string leaf of a call's
   arguments is replaced in turn by an empty string, accented text, CJK, an
   astral emoji, a combining sequence, the dotless i, the Kelvin sign, a
-  no-break space, and a 10,000-unit string, and each number leaf by 0, -0, -1,
+  no-break space, a 10,000-unit string, and the object keys `__proto__`,
+  `constructor`, `toString`, and `hasOwnProperty`. Object keys are only
+  whole-leaf replacements. Each number leaf is replaced by 0, -0, -1,
   0.5, 1e21, 1e-7, and 2^53. An argument that is itself a number, which a
   port receives as the exact JavaScript number, is replaced by NaN and the two
   infinities as well. A nested number or an argument declared with
@@ -337,6 +339,47 @@ Use JUnit reports from corresponding runs of the same tests and lanes. The
 quadrant report lists outcome mismatches, including missing tests, and counts
 shared failures separately within the matching outcomes. It exits 1 on any
 mismatch.
+
+## Suite traces
+
+`GARCON_TEST_TRACE_DIR` writes one private JSONL file per test file. The
+test client records its HTTP exchanges, replies to its own WebSocket
+requests, and broadcasts in arrival order within each chat and event type.
+Trace recording is off unless that variable is set.
+
+```bash
+bun rust/parity/cli.ts traces record --suite integration-tests/tests/server/tickets.test.ts --out "$HOME/tmp/golden"
+(cd integration-tests && GARCON_TEST_TRACE_DIR="$HOME/tmp/run" bun test --max-concurrency=1 tests/server/tickets.test.ts)
+bun rust/parity/cli.ts traces compare "$HOME/tmp/golden" "$HOME/tmp/run"
+```
+
+Recordings use two sequential runs with the pinned Bun and the original
+controller and worker; use `--runs <N>` to sample more. Review every printed
+wildcard. `rust/parity/trace-unstable.json` declares original nondeterminism by
+suite and either full test name or normalized chat ID (or `null`) and event
+type. Declarations include a reason and are counted separately. HTTP and
+reply structure and order otherwise block recording on change. Broadcast
+groups that disagree across recording runs are also reported and saved as
+exclusions in the golden, not replaced with wildcards. Comparison reports the
+first difference per test and groups differences by JSON path and kind.
+
+## Known differences
+
+Only user-approved exceptions under ADR-015 go into
+`rust/parity/known-differences.json`. An entry names either a `scenario` or
+a repo-relative `suite`, and includes `case`, `path`, the exact Rust
+`result` at that JSON path, and a `reason`. For example, a scenario case
+named `range` would use a path such as `$.headers["content-range"]`.
+Use the containing object's path when the approved result omits a field.
+The edge replay uses these entries only with `--build`. The trace comparer
+checks entries for the suites it compares.
+
+For a recorded unit, use `known-differences.jsonl` beside its manifest.
+Each line has `fn`, the recorded `args`, the exact encoded Rust `result`,
+and a `reason`. The Rust replay counts approved results separately; the
+original's replay ignores this file. Approved results are literal, without
+wildcards. A case fails if it differs in another way or matches the original
+again, so obsolete entries must be removed.
 
 ## Benchmarks
 

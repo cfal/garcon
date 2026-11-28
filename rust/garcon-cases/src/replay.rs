@@ -102,6 +102,7 @@ pub struct Stats {
     pub passed: usize,
     // Cases whose recorded result has a wildcard, which match less than exactly.
     pub with_wildcards: usize,
+    pub known_differences: usize,
 }
 
 struct Failure<'a> {
@@ -124,18 +125,43 @@ fn in_case(difference: Difference) -> Difference {
     }
 }
 
+fn check_result(
+    case: &RecordedCase,
+    actual: &Value,
+    known_differences: &mut usize,
+) -> Option<Difference> {
+    let original = compare::first_difference(&case.result, actual).map(in_case);
+    let Some(known) = &case.known else {
+        return original;
+    };
+    if original.is_none() {
+        return Some(Difference {
+            path: "$.result".to_owned(),
+            kind: "stale-known-difference",
+            expected: format!("a difference still present ({})", known.reason),
+            actual: "matches the original recording".to_owned(),
+        });
+    }
+    if let Some(difference) = compare::first_difference_exact(&known.result, actual) {
+        return Some(in_case(difference));
+    }
+    *known_differences += 1;
+    None
+}
+
 fn check<'a, F>(recording: &'a manifest::Recording, dispatch: &mut F) -> Report<'a>
 where
     F: FnMut(&str, &[Value]) -> Result<Value, CaseError>,
 {
     let mut failures: Vec<Failure<'a>> = Vec::new();
     let mut with_wildcards = 0;
+    let mut known_differences = 0;
     for case in &recording.cases {
         let difference = match dispatch(&case.function, &case.args) {
-            Ok(value) => compare::first_difference(&case.result, &value).map(in_case),
+            Ok(value) => check_result(case, &value, &mut known_differences),
             Err(error) => match &error.outcome {
                 Outcome::Error { .. } | Outcome::Thrown(_) => {
-                    compare::first_difference(&case.result, &error.recorded()).map(in_case)
+                    check_result(case, &error.recorded(), &mut known_differences)
                 }
                 Outcome::Unhandled => Some(Difference {
                     path: "$".to_owned(),
@@ -165,6 +191,7 @@ where
             total,
             passed: total - failures.len(),
             with_wildcards,
+            known_differences,
         },
         failures,
     }
@@ -172,8 +199,12 @@ where
 
 fn summary(report: &Report<'_>) -> String {
     format!(
-        "{}: {}/{} unit cases match ({} with wildcards)",
-        report.module, report.stats.passed, report.stats.total, report.stats.with_wildcards
+        "{}: {}/{} unit cases match ({} with wildcards, {} known differences)",
+        report.module,
+        report.stats.passed - report.stats.known_differences,
+        report.stats.total,
+        report.stats.with_wildcards,
+        report.stats.known_differences,
     )
 }
 
@@ -247,8 +278,9 @@ fn render(report: &Report<'_>) -> String {
 /// function name and arguments, and compares what it returns with the
 /// recorded result. Prints the first difference of each failing case and the
 /// distinct differences grouped by path and kind, then panics unless every
-/// case matches. A case file that differs from its recording, a function the
-/// dispatcher does not handle, and a result that differs all fail.
+/// case matches. An approved `known-differences.jsonl` entry must match the
+/// port's result exactly and fails if the result matches the original again.
+/// An edited case file or an unhandled function always fails.
 pub fn replay<F>(cases_dir: impl AsRef<Path>, mut dispatch: F) -> Stats
 where
     F: FnMut(&str, &[Value]) -> Result<Value, CaseError>,
@@ -313,8 +345,100 @@ mod tests {
             Stats {
                 total: 3,
                 passed: 3,
-                with_wildcards: 0
+                with_wildcards: 0,
+                known_differences: 0,
             }
+        );
+    }
+
+    fn approval(directory: &Path, line: &Value) -> manifest::Recording {
+        std::fs::write(
+            directory.join("known-differences.jsonl"),
+            format!("{line}\n"),
+        )
+        .expect("the known difference file");
+        manifest::read(directory).expect("the known difference applies to a recorded case")
+    }
+
+    #[test]
+    fn an_approved_result_must_match_exactly_and_is_counted_apart() {
+        let (directory, _) = recording(&[
+            ("f", json!([1]), json!({"source": "original"})),
+            ("f", json!([2]), json!([2])),
+        ]);
+        let recording = approval(
+            directory.path(),
+            &json!({
+                "fn": "f", "args": [1], "result": {"source": "[..]"}, "reason": "synthetic fixture"
+            }),
+        );
+        let report = check(&recording, &mut |_, args| {
+            if args == [json!(1)] {
+                Ok(json!({"source": "[..]"}))
+            } else {
+                echo("f", args)
+            }
+        });
+        assert_eq!(
+            (report.stats.passed, report.stats.known_differences),
+            (2, 1)
+        );
+        assert_eq!(
+            summary(&report),
+            "fixture.ts: 1/2 unit cases match (0 with wildcards, 1 known differences)"
+        );
+        let changed = check(&recording, &mut |_, args| {
+            if args == [json!(1)] {
+                Ok(json!({"source": "different"}))
+            } else {
+                echo("f", args)
+            }
+        });
+        assert_eq!(changed.failures[0].difference.path, "$.result.source");
+        assert_eq!(changed.stats.known_differences, 0);
+        let stale = check(&recording, &mut |_, args| {
+            if args == [json!(1)] {
+                Ok(json!({"source": "original"}))
+            } else {
+                echo("f", args)
+            }
+        });
+        assert_eq!(stale.failures[0].difference.kind, "stale-known-difference");
+    }
+
+    #[test]
+    fn an_approval_of_an_error_never_accepts_an_unhandled_call() {
+        let (directory, _) = recording(&[("f", json!([]), json!("original"))]);
+        let recording = approval(
+            directory.path(),
+            &json!({
+                "fn": "f", "args": [], "result": {"$": "error", "name": "Error", "message": "approved", "properties": {"status": 409}},
+                "reason": "synthetic fixture"
+            }),
+        );
+        let approved = check(&recording, &mut |_, _| {
+            Err(CaseError::new("Error", "approved").with_property("status", 409))
+        });
+        assert_eq!(
+            (approved.stats.passed, approved.stats.known_differences),
+            (1, 1)
+        );
+        let absent = check(&recording, &mut |fn_name, _| {
+            Err(CaseError::unhandled(fn_name))
+        });
+        assert_eq!(absent.failures[0].difference.kind, "unhandled");
+    }
+
+    #[test]
+    fn an_approval_without_a_recorded_case_fails_to_load() {
+        let (directory, _) = recording(&[("f", json!([1]), json!("original"))]);
+        std::fs::write(
+            directory.path().join("known-differences.jsonl"),
+            r#"{"fn":"f","args":[2],"result":null,"reason":"synthetic fixture"}"#,
+        )
+        .expect("the known difference file");
+        assert!(
+            matches!(manifest::read(directory.path()), Err(error) if error.contains("stale known difference"))
         );
     }
 
@@ -496,7 +620,8 @@ mod tests {
             Stats {
                 total: 3,
                 passed: 2,
-                with_wildcards: 2
+                with_wildcards: 2,
+                known_differences: 0,
             }
         );
     }

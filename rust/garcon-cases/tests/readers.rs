@@ -31,7 +31,7 @@ fn recording(directory: &Path, origin: &str) {
 
 #[test]
 #[should_panic(
-    expected = "fixture.ts: 0/1 unit cases match (0 with wildcards)\n  FAIL f#0 at $ (undeliverable): expected an argument the port can receive, got `f` received NaN, which JSON cannot carry. Read the argument with `javascript_number` if the port takes a number there, or record the module again with `--json f:<argument index>`, which keeps the recorder from making that trap."
+    expected = "fixture.ts: 0/1 unit cases match (0 with wildcards, 0 known differences)\n  FAIL f#0 at $ (undeliverable): expected an argument the port can receive, got `f` received NaN, which JSON cannot carry. Read the argument with `javascript_number` if the port takes a number there, or record the module again with `--json f:<argument index>`, which keeps the recorder from making that trap."
 )]
 fn an_argument_a_port_cannot_receive_as_json_fails_the_case() {
     let directory = tempfile::tempdir().expect("a temporary directory");

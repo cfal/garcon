@@ -18,6 +18,8 @@ function generate(calls: Json[][], jsonArguments: number[] = []) {
 
 const finite = ['zero', 'negative-zero', 'negative-one', 'half', '1e21', '1e-7', '2^53'];
 const nonFinite = ['nan', 'infinity', 'negative-infinity'];
+const objectKeys = ['__proto__', 'constructor', 'toString', 'hasOwnProperty'];
+const objectKeyTraps = ['object-proto', 'object-constructor', 'object-to-string', 'object-own-property'];
 
 const empty = (path: string) => `trap:empty@${path}`;
 const trapOf = (origin: string) => origin.slice('trap:'.length, origin.indexOf('@')).split('+')[0]!;
@@ -40,15 +42,15 @@ describe('trapVariants', () => {
       [{ a: 'x', b: [0, 'y'], c: true }],
       [{ a: 'x', b: [1, ''], c: true }],
     ]);
-    // Two string leaves with nine traps each and a nested number leaf with
+    // Two string leaves with thirteen traps each and a nested number leaf with
     // the seven a JSON value can carry.
-    expect(origins.slice(0, 25).every((origin) => how(origin) === 'replace')).toBe(true);
-    expect(origins.slice(25).every((origin) => how(origin) !== 'replace')).toBe(true);
-    expect(origins[25]).toBe(`trap:accented+after-first@$.args[0].a`);
-    expect(args[25]).toEqual([{ a: `x${accented}`, b: [1, 'y'], c: true }]);
+    expect(origins.slice(0, 33).every((origin) => how(origin) === 'replace')).toBe(true);
+    expect(origins.slice(33).every((origin) => how(origin) !== 'replace')).toBe(true);
+    expect(origins[33]).toBe(`trap:accented+after-first@$.args[0].a`);
+    expect(args[33]).toEqual([{ a: `x${accented}`, b: [1, 'y'], c: true }]);
     expect(new Set(origins.map(trapOf))).toEqual(new Set([
       'empty', 'accented', 'cjk', 'astral', 'combining', 'dotless-i', 'kelvin', 'nbsp', 'long',
-      'zero', 'negative-zero', 'negative-one', 'half', '1e21', '1e-7', '2^53',
+      ...objectKeyTraps, 'zero', 'negative-zero', 'negative-one', 'half', '1e21', '1e-7', '2^53',
     ]));
     // Each variant names the argument whose leaf it changes.
     const both = generate([[{ a: 'x' }, 'y']]).variants;
@@ -68,6 +70,12 @@ describe('trapVariants', () => {
     expect(nbsp.trim()).toBe('');
     expect(dotless.toUpperCase()).toBe('I');
     expect(dotless).not.toBe('i');
+  });
+
+  test('probes inherited object names only as whole strings', () => {
+    const variants = generate([['abc']]).variants.filter((variant) => objectKeyTraps.includes(trapOf(variant.origin)));
+    expect(variants.map((variant) => variant.args[0])).toEqual(objectKeys);
+    expect(variants.map((variant) => how(variant.origin))).toEqual(Array(4).fill('replace'));
   });
 
   test('uses every trap number for an argument that is a number, and embeds nothing in a number', () => {
@@ -122,7 +130,7 @@ describe('trapVariants', () => {
 
   test('embeds a trap after the first character of the leaf and at its end, once the replacements are had', () => {
     const { origins, args } = generate([['abc']]);
-    expect(origins.slice(9, 15)).toEqual([
+    expect(origins.slice(13, 19)).toEqual([
       `trap:accented+after-first@$.args[0]`,
       `trap:accented+append@$.args[0]`,
       `trap:cjk+after-first@$.args[0]`,
@@ -130,12 +138,12 @@ describe('trapVariants', () => {
       `trap:astral+after-first@$.args[0]`,
       `trap:astral+append@$.args[0]`,
     ]);
-    expect(args.slice(9, 15)).toEqual([
+    expect(args.slice(13, 19)).toEqual([
       [`a${accented}bc`], [`abc${accented}`],
       [`a${cjk}bc`], [`abc${cjk}`],
       [`a${astral}bc`], [`abc${astral}`],
     ]);
-    expect(origins.slice(0, 9).every((origin) => how(origin) === 'replace')).toBe(true);
+    expect(origins.slice(0, 13).every((origin) => how(origin) === 'replace')).toBe(true);
   });
 
   test('keeps an astral first character whole', () => {
@@ -162,7 +170,7 @@ describe('trapVariants', () => {
 
   test('is bounded per function and spends the whole budget on replacements before any embedded trap', () => {
     // A trap in `id` gives the same variant for every call, since `a` is the same;
-    // a trap in `a` gives one per call: 9 and 63.
+    // a trap in `a` gives one per call.
     const calls = ['one', 'two', 'three', 'four', 'five', 'six', 'seven'].map((id): Json[] => [{ id, a: 'x' }]);
     const { variants, origins } = generate(calls);
     expect(variants).toHaveLength(MAX_VARIANTS_PER_FUNCTION);
@@ -181,10 +189,10 @@ describe('trapVariants', () => {
     const { variants, origins } = generate([['ab'], ['cd'], ['ef'], ['gh']]);
     expect(variants).toHaveLength(MAX_VARIANTS_PER_FUNCTION);
     const count = (kind: string) => origins.filter((origin) => how(origin) === kind).length;
-    // Nine replacements: one leaf, so a trap gives every call the same variant.
-    expect(count('replace')).toBe(9);
-    expect(count('after-first')).toBe(26);
-    expect(count('append')).toBe(25);
+    // Thirteen replacements: one leaf, so a trap gives every call the same variant.
+    expect(count('replace')).toBe(13);
+    expect(count('after-first')).toBe(24);
+    expect(count('append')).toBe(23);
   });
 
   test('skips a variant equal to a case already recorded', () => {
@@ -194,7 +202,7 @@ describe('trapVariants', () => {
     expect(origins.filter((origin) => origin === `trap:accented@$.args[0]`)).toHaveLength(1);
     // Embedded in the one-character 'x', after the first character and at the end are the same string.
     expect(origins.filter((origin) => trapOf(origin) === 'accented' && how(origin) !== 'replace')).toHaveLength(1);
-    expect(variants).toHaveLength(16);
+    expect(variants).toHaveLength(20);
   });
 
   test('walks into maps, sets, and wrapped objects, and not into other markers', () => {
