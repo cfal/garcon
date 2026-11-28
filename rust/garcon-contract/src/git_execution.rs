@@ -88,6 +88,8 @@ pub struct ExecutionGitResult<R> {
     pub scope: GitExecutorScope,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diagnostics: Option<GitOperationDiagnostics>,
+    #[serde(rename = "outputTruncated", skip_serializing_if = "Option::is_none")]
+    pub output_truncated: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
