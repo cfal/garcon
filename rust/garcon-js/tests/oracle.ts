@@ -110,6 +110,15 @@ if (request.win32Relative) {
 if (request.jsonRoundTrip) {
   reply.jsonRoundTrip = bits(request.jsonRoundTrip).map((text) => outcome(() => JSON.stringify(JSON.parse(text))));
 }
+if (request.jsonUnpairedSurrogate) {
+  if (Bun.version !== '1.4.3') throw new Error(`Expected Bun 1.4.3, got ${Bun.version}`);
+  const containsUnpaired = (value: unknown): boolean => {
+    if (typeof value === 'string') return !value.isWellFormed();
+    if (value === null || typeof value !== 'object') return false;
+    return Object.entries(value).some(([key, item]) => !key.isWellFormed() || containsUnpaired(item));
+  };
+  reply.jsonUnpairedSurrogate = bits(request.jsonUnpairedSurrogate).map((text) => containsUnpaired(JSON.parse(text)));
+}
 if (request.defaultSort) {
   reply.defaultSort = (request.defaultSort as string[][]).map((values) => [...values].sort());
 }
