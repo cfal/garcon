@@ -1,0 +1,31 @@
+{
+  "name": "projects",
+  "description": "Project resolution on the empty workspace: path and chat target parsing, canonical paths, project boundaries, and unavailable targets.",
+  "traps": true,
+  "steps": [
+    { "name": "resolve-project-root", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath={{projectDir}}" } },
+    { "name": "resolve-relative-root-on-local", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath=.&executorId=local" } },
+    { "name": "resolve-missing-project", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath={{projectDir}}/missing/nested" } },
+    { "name": "resolve-outside-project-base", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath={{workspaceDir}}" } },
+    { "name": "resolve-relative-path-outside-base", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath=.." } },
+    { "name": "resolve-no-target", "http": { "method": "GET", "path": "/api/v1/projects/resolve" } },
+    { "name": "resolve-path-empty", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath=" } },
+    { "name": "resolve-path-blank", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath=%20%20" } },
+    { "name": "resolve-path-duplicated", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath=.&projectPath=missing" } },
+    { "name": "resolve-path-unexpected-query-field", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath=.&extra=1" } },
+    { "name": "resolve-executor-invalid", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath=.&executorId=remote" } },
+    { "name": "resolve-executor-empty", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath=.&executorId=" } },
+    { "name": "resolve-executor-duplicated", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath=.&executorId=local&executorId=local" } },
+    { "name": "resolve-executor-unavailable", "http": { "method": "GET", "path": "/api/v1/projects/resolve?projectPath=.&executorId=33333333-3333-4333-8333-333333333333" } },
+    { "name": "resolve-both-chat-and-path-targets", "http": { "method": "GET", "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&projectPath=." } },
+    { "name": "resolve-chat-id-missing", "http": { "method": "GET", "path": "/api/v1/projects/resolve?expectedProjectPath=." } },
+    { "name": "resolve-chat-id-empty", "http": { "method": "GET", "path": "/api/v1/projects/resolve?chatId=&expectedProjectPath=." } },
+    { "name": "resolve-chat-id-invalid", "http": { "method": "GET", "path": "/api/v1/projects/resolve?chatId=not-a-chat&expectedProjectPath=." } },
+    { "name": "resolve-chat-id-duplicated", "http": { "method": "GET", "path": "/api/v1/projects/resolve?chatId=1000000000000001&chatId=1000000000000002&expectedProjectPath=." } },
+    { "name": "resolve-chat-expected-path-missing", "http": { "method": "GET", "path": "/api/v1/projects/resolve?chatId=1000000000000001" } },
+    { "name": "resolve-chat-expected-path-blank", "http": { "method": "GET", "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=%20" } },
+    { "name": "resolve-chat-expected-path-duplicated", "http": { "method": "GET", "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=.&expectedProjectPath=missing" } },
+    { "name": "resolve-chat-not-found", "http": { "method": "GET", "path": "/api/v1/projects/resolve?chatId=1000000000000001&expectedProjectPath=." } },
+    { "name": "resolve-wrong-method", "http": { "method": "POST", "path": "/api/v1/projects/resolve?projectPath=.", "json": {} } }
+  ]
+}
