@@ -4,10 +4,14 @@
 //! tests/cases/common/<module>` writes each recording, and every case must
 //! match here. One file per recorded module.
 
+mod bun;
+mod domain_wire;
 mod file_contracts;
 mod gh_identity;
 mod git_error;
+mod git_refs;
 mod git_request_validation;
 mod helpers;
 mod terminal;
 mod terminal_error;
+mod transcript_projection;
