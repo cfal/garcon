@@ -1,0 +1,30 @@
+{
+  "module": "server/runtime/git/worktree-porcelain.ts",
+  "tests": [
+    "server/runtime/git/__tests__/worktree-porcelain.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [
+    {
+      "path": "$.args[2]",
+      "type": "a function",
+      "where": "args",
+      "at": null,
+      "fn": "readPorcelainWorktreeRecords",
+      "count": 2
+    },
+    {
+      "path": "$.args[2]",
+      "type": "a function",
+      "where": "args",
+      "at": "server/runtime/git/__tests__/worktree-porcelain.test.js:142:34",
+      "fn": "readPorcelainWorktreeRecords",
+      "count": 1
+    }
+  ],
+  "cases": 93,
+  "sha256": "52fe847f97a36cb64c59ae2e973845d369a02f9195f3ff7bf3cd33d681ceac42"
+}

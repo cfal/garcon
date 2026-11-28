@@ -23,6 +23,8 @@ pub mod chat_id;
 pub mod chat_list;
 pub mod chat_message_coercion;
 pub mod chat_modes;
+pub mod chat_order_contracts;
+pub mod chat_order_sort;
 pub mod chat_parentage;
 pub mod chat_plan;
 pub mod chat_preamble_selection_contracts;
