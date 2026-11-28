@@ -1,0 +1,12 @@
+{"fn":"sessionSettingsTrace","args":["conversation"]}
+{"fn":"sessionSettingsTrace","args":["literal"]}
+{"fn":"sessionSettingsTrace","args":["public-input"]}
+{"fn":"sessionSettingsTrace","args":["control-input"]}
+{"fn":"sessionSettingsTrace","args":["late-input"]}
+{"fn":"sessionSettingsTrace","args":["validate-fails"]}
+{"fn":"sessionSettingsTrace","args":["apply-fails"]}
+{"fn":"sessionSettingsTrace","args":["save-fails"]}
+{"fn":"sessionSettingsTrace","args":["stale"]}
+{"fn":"sessionSettingsTrace","args":["assignment"]}
+{"fn":"sessionSettingsTrace","args":["thinking"]}
+{"fn":"sessionSettingsTrace","args":["reference-fails"]}

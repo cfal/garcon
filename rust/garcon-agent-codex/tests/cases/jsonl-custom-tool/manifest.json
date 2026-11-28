@@ -1,0 +1,12 @@
+{
+  "module": "rust/garcon-agent-codex/tests/oracles/jsonl-custom-tool.ts",
+  "tests": [],
+  "inputs": "rust/garcon-agent-codex/tests/inputs/jsonl-custom-tool.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "instances": true,
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 8,
+  "sha256": "b19a62980a772ef352b17e4b352220a9cd796bbc3ebcdba113fccf2fe63bba60"
+}

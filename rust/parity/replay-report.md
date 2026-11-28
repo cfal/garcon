@@ -2,13 +2,13 @@
 
 Build: `garcon-server`
 
-Passed: 12257/12257 cases
-Matched natively: 122/12257 cases
-Matched via fallback: 12135/12257 cases
-Unported: 0/12257 cases
-Blocked by an unported step: 0/12257 cases
-After an unported write: 0/12257 cases
-Mismatching: 0/12257 cases
+Passed: 12263/12263 cases
+Matched natively: 122/12263 cases
+Matched via fallback: 12141/12263 cases
+Unported: 0/12263 cases
+Blocked by an unported step: 0/12263 cases
+After an unported write: 0/12263 cases
+Mismatching: 0/12263 cases
 
 ## Scenarios
 
@@ -29,6 +29,8 @@ Mismatching: 0/12257 cases
 | auth-register | 10/10 | 0/10 | 0 | 0 | 0 | 0 |
 | auth-seeded | 18/18 | 0/18 | 0 | 0 | 0 | 0 |
 | auth-setup | 32/32 | 0/32 | 0 | 0 | 0 | 0 |
+| auth-surrogate-register | 2/2 | 0/2 | 0 | 0 | 0 | 0 |
+| auth-surrogate-username | 2/2 | 0/2 | 0 | 0 | 0 | 0 |
 | auth-username | 14/14 | 0/14 | 0 | 0 | 0 | 0 |
 | chat-boards-count-limit | 43/43 | 0/43 | 0 | 0 | 0 | 0 |
 | chat-boards-seeded | 142/142 | 0/142 | 0 | 0 | 0 | 0 |
@@ -71,7 +73,7 @@ Mismatching: 0/12257 cases
 | telegram | 87/87 | 0/87 | 0 | 0 | 0 | 0 |
 | terminals | 243/243 | 0/243 | 0 | 0 | 0 | 0 |
 | tickets-mutations | 857/857 | 0/857 | 0 | 0 | 0 | 0 |
-| tickets-surrogates | 11/11 | 0/11 | 0 | 0 | 0 | 0 |
+| tickets-surrogates | 13/13 | 0/13 | 0 | 0 | 0 | 0 |
 | tickets | 979/979 | 0/979 | 0 | 0 | 0 | 0 |
 | usage | 282/282 | 0/282 | 0 | 0 | 0 | 0 |
 | websocket-session | 32/32 | 0/32 | 0 | 0 | 0 | 0 |

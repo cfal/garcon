@@ -1,0 +1,8 @@
+{"fn":"convertCodexCustomToolCall","args":["at",{"name":"apply_patch","call_id":"patch","input":"synthetic patch"}]}
+{"fn":"convertCodexCustomToolCall","args":["at",{"name":"apply_patch","input":{"invalid":true}}]}
+{"fn":"convertCodexCustomToolCall","args":["at",{"name":"exec","call_id":"exec","input":"const value = 1; text(value);"}]}
+{"fn":"convertCodexCustomToolCall","args":["at",{"name":"exec","call_id":"malformed","input":{"code":"text(\"ok\")"}}]}
+{"fn":"convertCodexCustomToolCall","args":["at",{"name":"custom_fixture","call_id":"custom","input":"some input"}]}
+{"fn":"convertCodexCustomToolCall","args":["at",{"name":"custom_fixture","call_id":"custom","input":"{\"10\":1,\"2\":2}"}]}
+{"fn":"convertCodexCustomToolCall","args":["at",null]}
+{"fn":"convertCodexCustomToolCall","args":["at",{"name":{"bad":true},"input":"some input"}]}
