@@ -39,10 +39,10 @@ use crate::ws_value_parsing::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReconnectControlResult {
+pub enum ReconnectControlResult<Control = ChatExecutionControlState> {
     Snapshot {
         chat_id: String,
-        control: Box<ChatExecutionControlState>,
+        control: Box<Control>,
     },
     NotFound {
         chat_id: String,
@@ -52,7 +52,7 @@ pub enum ReconnectControlResult {
     },
 }
 
-impl Serialize for ReconnectControlResult {
+impl<Control: Serialize> Serialize for ReconnectControlResult<Control> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let (chat_id, outcome, control) = match self {
             Self::Snapshot { chat_id, control } => (chat_id, "snapshot", Some(control)),
@@ -81,9 +81,9 @@ pub enum ChatProcessingSnapshotResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ReconnectStateMessage {
+pub struct ReconnectStateMessage<Control = ChatExecutionControlState> {
     pub processing: ChatProcessingSnapshotResult,
-    pub control_results: Vec<ReconnectControlResult>,
+    pub control_results: Vec<ReconnectControlResult<Control>>,
     pub server_instance_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_request_id: Option<String>,
@@ -100,12 +100,28 @@ impl ReconnectStateMessage {
         server_instance_id: String,
         client_request_id: Option<String>,
     ) -> Self {
+        Self::with_control_results(
+            processing,
+            control_results,
+            server_instance_id,
+            client_request_id,
+        )
+    }
+}
+
+impl<Control> ReconnectStateMessage<Control> {
+    pub fn with_control_results(
+        processing: ChatProcessingSnapshotResult,
+        control_results: Vec<ReconnectControlResult<Control>>,
+        server_instance_id: String,
+        client_request_id: Option<String>,
+    ) -> Self {
         Self {
             processing,
             control_results,
             server_instance_id,
             client_request_id,
-            message_type: Self::TYPE,
+            message_type: ReconnectStateMessage::TYPE,
         }
     }
 }

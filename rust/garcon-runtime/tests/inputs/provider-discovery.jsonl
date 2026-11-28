@@ -16,3 +16,6 @@
 {"fn":"discoverModels","args":[{"protocol":"openai-compatible","path":"","modelDiscovery":"ollama-tags"},[{"body":null}]]}
 {"fn":"discoverModels","args":[{"protocol":"openai-compatible","path":"","modelDiscovery":"ollama-tags"},[{"body":{"models":{}}}]]}
 {"fn":"discoverModels","args":[{"protocol":"openai-compatible","path":"","modelDiscovery":"ollama-tags"},[{"body":{"models":[null]}}]]}
+{"fn":"discoverAtZeroTimeout","args":["none"]}
+{"fn":"discoverAtZeroTimeout","args":["openai-models"]}
+{"fn":"discoverApiProviderModels","args":[{"protocol":"openai-compatible","baseUrl":"http://[","modelDiscovery":"ollama-tags"}]}

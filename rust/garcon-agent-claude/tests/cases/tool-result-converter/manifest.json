@@ -1,0 +1,14 @@
+{
+  "module": "server-agents/claude/src/agents/claude/tool-result-converter.ts",
+  "tests": [
+    "server-agents/claude/src/agents/claude/__tests__/tool-result-converter.test.js",
+    "server-agents/claude/src/agents/claude/__tests__/cli.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 64,
+  "sha256": "30f6cc4e8fb299666c89d8aee8437a4d7bf6f7aa6a207cecff194ace0ece22d0"
+}

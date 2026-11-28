@@ -1,0 +1,49 @@
+{"id":"resolveExecutableOverride#0","fn":"resolveExecutableOverride","args":["pi","linux"],"result":"pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:1"}
+{"id":"resolveExecutableOverride#1","fn":"resolveExecutableOverride","args":["pi",null],"result":"pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:2"}
+{"id":"resolveExecutableOverride#2","fn":"resolveExecutableOverride","args":["bin/pi","linux"],"result":"/bin/pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:3"}
+{"id":"resolveExecutableOverride#3","fn":"resolveExecutableOverride","args":["bin/pi","win32"],"result":"\\bin\\pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:4"}
+{"id":"resolveExecutableOverride#4","fn":"resolveExecutableOverride","args":["bin/pi",null],"result":"/bin/pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:5"}
+{"id":"resolveExecutableOverride#5","fn":"resolveExecutableOverride","args":["./bin/pi","linux"],"result":"/bin/pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:6"}
+{"id":"resolveExecutableOverride#6","fn":"resolveExecutableOverride","args":["./bin/pi","win32"],"result":"\\bin\\pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:7"}
+{"id":"resolveExecutableOverride#7","fn":"resolveExecutableOverride","args":["/usr/bin/pi","linux"],"result":"/usr/bin/pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:8"}
+{"id":"resolveExecutableOverride#8","fn":"resolveExecutableOverride","args":["/usr/bin/pi","win32"],"result":"/usr/bin/pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:9"}
+{"id":"resolveExecutableOverride#9","fn":"resolveExecutableOverride","args":["C:\\bin\\pi.exe","win32"],"result":"C:\\bin\\pi.exe","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:10"}
+{"id":"resolveExecutableOverride#10","fn":"resolveExecutableOverride","args":["C:pi.exe","win32"],"result":"C:\\pi.exe","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:11"}
+{"id":"resolveExecutableOverride#11","fn":"resolveExecutableOverride","args":["\\\\server\\share\\pi.exe","win32"],"result":"\\\\server\\share\\pi.exe","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:12"}
+{"id":"resolveExecutableOverride#12","fn":"resolveExecutableOverride","args":["..\\pi","win32"],"result":"\\pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:13"}
+{"id":"resolveExecutableOverride#13","fn":"resolveExecutableOverride","args":["dir/","linux"],"result":"/dir","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:14"}
+{"id":"resolveExecutableOverride#14","fn":"resolveExecutableOverride","args":["dir/pi/..","linux"],"result":"/dir","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:15"}
+{"id":"resolveExecutableOverride#15","fn":"resolveExecutableOverride","args":["dir/pi/.","linux"],"result":"/dir/pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:16"}
+{"id":"resolveExecutableOverride#16","fn":"resolveExecutableOverride","args":["","linux"],"result":"","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:17"}
+{"id":"resolveExecutableOverride#17","fn":"resolveExecutableOverride","args":["","win32"],"result":"","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:18"}
+{"id":"resolveExecutableOverride#18","fn":"resolveExecutableOverride","args":["dir/pi","darwin"],"result":"/dir/pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:19"}
+{"id":"resolveExecutableOverride#19","fn":"resolveExecutableOverride","args":["a\\b","linux"],"result":"a\\b","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:20"}
+{"id":"resolveExecutableOverride#20","fn":"resolveExecutableOverride","args":["a/b","win32"],"result":"\\a\\b","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:21"}
+{"id":"resolveExecutableOverride#21","fn":"resolveExecutableOverride","args":["a\\b/","win32"],"result":"\\a\\b","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:22"}
+{"id":"resolveExecutableOverride#22","fn":"resolveExecutableOverride","args":["/","linux"],"result":"/","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:23"}
+{"id":"resolveExecutableOverride#23","fn":"resolveExecutableOverride","args":[".","linux"],"result":".","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:24"}
+{"id":"resolveExecutableOverride#24","fn":"resolveExecutableOverride","args":["..","linux"],"result":"..","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:25"}
+{"id":"resolveExecutableOverride#25","fn":"resolveExecutableOverride","args":["dir/.hidden","linux"],"result":"/dir/.hidden","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:26"}
+{"id":"resolveExecutableOverride#26","fn":"resolveExecutableOverride","args":["pi.exe","win32"],"result":"pi.exe","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:27"}
+{"id":"resolveExecutableOverride#27","fn":"resolveExecutableOverride","args":["dir/pi ","linux"],"result":"/dir/pi ","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:28"}
+{"id":"resolveExecutableOverride#28","fn":"resolveExecutableOverride","args":[" ","linux"],"result":" ","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:29"}
+{"id":"resolveExecutableOverride#29","fn":"resolveExecutableOverride","args":["~/bin/pi","linux"],"result":"/~/bin/pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:30"}
+{"id":"resolveExecutableOverride#30","fn":"resolveExecutableOverride","args":["日本/語","linux"],"result":"/日本/語","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:31"}
+{"id":"resolveExecutableOverride#31","fn":"resolveExecutableOverride","args":["\\bin\\pi","win32"],"result":"\\bin\\pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:32"}
+{"id":"resolveExecutableOverride#32","fn":"resolveExecutableOverride","args":["/bin/pi","win32"],"result":"/bin/pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:33"}
+{"id":"resolveExecutableOverride#33","fn":"resolveExecutableOverride","args":["Kbin/pi","linux"],"result":"/Kbin/pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:34"}
+{"id":"resolveExecutableOverride#34","fn":"resolveExecutableOverride","args":["bin/ pi","linux"],"result":"/bin/ pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:35"}
+{"id":"resolveExecutableOverride#35","fn":"resolveExecutableOverride","args":["日本/語 pi","win32"],"result":"\\日本\\語 pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:36"}
+{"id":"resolveExecutableOverride#36","fn":"resolveExecutableOverride","args":["bin\\pí","win32"],"result":"\\bin\\pí","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:37"}
+{"id":"resolveExecutableOverride#37","fn":"resolveExecutableOverride","args":["__proto__","linux"],"result":"__proto__","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:38"}
+{"id":"resolveExecutableOverride#38","fn":"resolveExecutableOverride","args":["constructor","__proto__"],"result":"constructor","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:39"}
+{"id":"resolveExecutableOverride#39","fn":"resolveExecutableOverride","args":[".","__proto__"],"result":".","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:40"}
+{"id":"resolveExecutableOverride#40","fn":"resolveExecutableOverride","args":["..","constructor"],"result":"..","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:41"}
+{"id":"resolveExecutableOverride#41","fn":"resolveExecutableOverride","args":["pi.exe","linux"],"result":"pi.exe","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:42"}
+{"id":"resolveExecutableOverride#42","fn":"resolveExecutableOverride","args":["dir//pi","linux"],"result":"/dir/pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:43"}
+{"id":"resolveExecutableOverride#43","fn":"resolveExecutableOverride","args":["./","linux"],"result":"/","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:44"}
+{"id":"resolveExecutableOverride#44","fn":"resolveExecutableOverride","args":["C:\\","win32"],"result":"C:\\","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:45"}
+{"id":"resolveExecutableOverride#45","fn":"resolveExecutableOverride","args":["C:","win32"],"result":"C:\\","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:46"}
+{"id":"resolveExecutableOverride#46","fn":"resolveExecutableOverride","args":["\\\\?\\C:\\bin\\pi.exe","win32"],"result":"\\\\?\\C:\\bin\\pi.exe","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:47"}
+{"id":"resolveExecutableOverride#47","fn":"resolveExecutableOverride","args":["//server/share/pi","win32"],"result":"//server/share/pi","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:48"}
+{"id":"resolveExecutableOverride#48","fn":"resolveExecutableOverride","args":["\\","win32"],"result":"\\","origin":"rust/garcon-agents-common/tests/inputs/executable-override.jsonl:49"}

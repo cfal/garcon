@@ -1,0 +1,10 @@
+{"fn":"convertCodexWaitFunctionCall","args":["at","wait","{\"cell_id\":\"\",\"yield_time_ms\":-1.5,\"max_tokens\":\"2\",\"terminate\":false}"]}
+{"fn":"convertCodexWaitFunctionCall","args":["at","wait",{"cell_id":42,"yield_time_ms":30}]}
+{"fn":"convertCodexWaitFunctionCall","args":["at","wait",{"cell_id":"7","max_tokens":123,"terminate":true}]}
+{"fn":"convertCodexWaitFunctionCall","args":["at","wait",["7"]]}
+{"fn":"convertCodexFunctionCall","args":["at",{"name":"request_user_input","call_id":"question","arguments":{"questions":[{"id":"choice","header":"Mode","question":"Choose a mode","options":[{"label":"Normal"}]}]}}]}
+{"fn":"convertCodexFunctionCall","args":["at",{"name":"request_user_input","call_id":"invalid-question","arguments":"{}"}]}
+{"fn":"convertCodexFunctionCall","args":["at",{"name":"shell_command","call_id":"a","arguments":{"command":"","cmd":"pwd"}}]}
+{"fn":"convertCodexFunctionCall","args":["at",{"name":"shell_command","call_id":"b","arguments":"{\"command\":\" \",\"cmd\":\"pwd\"}"}]}
+{"fn":"convertCodexFunctionCall","args":["at",{"name":"update_plan","call_id":"a","arguments":{"items":null,"todos":[],"plan":[{"step":"ignored","status":"completed"}]}}]}
+{"fn":"convertCodexFunctionCall","args":["at",{"name":"update_plan","call_id":"b","arguments":{"items":[null,{"step":"first","status":"in_progress"},{"content":"second","status":"done"},{"content":"third"}]}}]}

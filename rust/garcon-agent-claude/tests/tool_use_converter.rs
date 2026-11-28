@@ -1,13 +1,16 @@
 use garcon_agent_claude::{
+    cli_protocol::convert_cli_message_to_chat_messages,
     permission_tool_converter::convert_claude_permission_request,
     tool_use_converter::convert_claude_tool_use,
 };
 use garcon_cases::{
     CaseError, ReplayOptions, ResultOrderException, markers, replay_with_options, text, unknown,
 };
-use garcon_contract::chat_types::ToolUseChatMessage;
-use garcon_interface::producer::AgentRequestedPermission;
-use serde_json::Value;
+use garcon_contract::chat_types::{ChatMessage, ToolUseChatMessage};
+use garcon_interface::{
+    native_message_source::get_native_message_revision_source, producer::AgentRequestedPermission,
+};
+use serde_json::{Value, json};
 
 const QUESTION_ORDER: &str = "the original converter writes allowMultiple before header; the shared parser applied by readers writes header first";
 
@@ -40,6 +43,53 @@ fn encode(row: &ToolUseChatMessage) -> Value {
     };
     let fields = garcon_js::json::from_slice(&serde_json::to_vec(row).unwrap()).unwrap();
     markers::instance(class, fields)
+}
+
+#[test]
+fn recorded_cli_stream_rows_and_native_sources_match() {
+    replay_with_options(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cases/cli-stream"),
+        ReplayOptions {
+            result_order_exceptions: &[ResultOrderException {
+                function: "convertCliStreamFrame",
+                path: "$.result[*].message.fields.questions[*]",
+                reason: QUESTION_ORDER,
+            }],
+            ..Default::default()
+        },
+        |function, args| {
+            if function != "convertCliStreamFrame" {
+                return Err(CaseError::unhandled(function));
+            }
+            let frame = unknown(function, args.first())?;
+            let rows = convert_cli_message_to_chat_messages(&frame, "2026-01-01T00:00:00.000Z")
+                .into_iter()
+                .map(|row| {
+                    let message = match &row.value {
+                        ChatMessage::ToolUse(tool) => encode(tool),
+                        message => {
+                            let class = match message {
+                                ChatMessage::Assistant(_) => "AssistantMessage",
+                                ChatMessage::Thinking(_) => "ThinkingMessage",
+                                ChatMessage::ToolResult(_) => "ToolResultMessage",
+                                _ => panic!("unexpected Claude stream row: {message:?}"),
+                            };
+                            let fields =
+                                garcon_js::json::from_slice(&serde_json::to_vec(message).unwrap())
+                                    .unwrap();
+                            markers::instance(class, fields)
+                        }
+                    };
+                    let source: Value = garcon_js::json::from_slice(
+                        &serde_json::to_vec(&get_native_message_revision_source(&row)).unwrap(),
+                    )
+                    .unwrap();
+                    json!({"message":message, "source":source})
+                })
+                .collect();
+            Ok(Value::Array(rows))
+        },
+    );
 }
 
 #[test]

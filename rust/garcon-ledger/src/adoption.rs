@@ -380,11 +380,11 @@ impl<C> TranscriptAdoptionService<C> {
         if let Err(aborted) = check_signal(signal) {
             return aborted;
         }
-        if error.is::<LockAborted>() {
+        let metadata = error_metadata(error.as_ref());
+        if metadata.name == LockAborted::NAME {
             return error;
         }
         if let Some(logger) = &self.options.logger {
-            let metadata = error_metadata(error.as_ref());
             let reason = metadata
                 .code
                 .filter(|code| !code.is_empty())

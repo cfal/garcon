@@ -1,10 +1,11 @@
 {
   "name": "tickets-surrogates",
-  "description": "Unpaired UTF-16 escapes in ticket mutation text are refused before a write; a real replacement character and a paired escape remain valid.",
+  "description": "Ticket mutations reject the actual ill-formed field before writing, preserve genuine replacement characters and paired escapes, and use the last value of duplicate fields.",
   "steps": [
     {"name":"bootstrap","http":{"method":"GET","path":"/api/v1/tickets/bootstrap"}},
     {"name":"create-lone-title","http":{"method":"POST","path":"/api/v1/tickets/mutate","json":{"requestId":"00000000-0000-4000-8000-000000000001","expectedStoreId":"{{bootstrap.body.storeId}}","payload":{"action":"create","input":{"title":"bad \ud800","project":"parity"}}}}},
     {"name":"create-lone-description","http":{"method":"POST","path":"/api/v1/tickets/mutate","json":{"requestId":"00000000-0000-4000-8000-000000000001","expectedStoreId":"{{bootstrap.body.storeId}}","payload":{"action":"create","input":{"title":"Valid title","description":"bad \udc00","project":"parity"}}}}},
+    {"name":"create-replacement-title-with-lone-description","http":{"method":"POST","path":"/api/v1/tickets/mutate","json":{"requestId":"00000000-0000-4000-8000-000000000001","expectedStoreId":"{{bootstrap.body.storeId}}","payload":{"action":"create","input":{"title":"Genuine \ufffd","description":"bad \udc00","project":"parity"}}}}},
     {"name":"create-lone-project","http":{"method":"POST","path":"/api/v1/tickets/mutate","json":{"requestId":"00000000-0000-4000-8000-000000000001","expectedStoreId":"{{bootstrap.body.storeId}}","payload":{"action":"create","input":{"title":"Valid title","project":"bad \ud800"}}}}},
     {"name":"create-lone-label","http":{"method":"POST","path":"/api/v1/tickets/mutate","json":{"requestId":"00000000-0000-4000-8000-000000000001","expectedStoreId":"{{bootstrap.body.storeId}}","payload":{"action":"create","input":{"title":"Valid title","project":"parity","labels":["bad \ud800"]}}}}},
     {"name":"create-replacement-character","http":{"method":"POST","path":"/api/v1/tickets/mutate","json":{"requestId":"00000000-0000-4000-8000-000000000001","expectedStoreId":"{{bootstrap.body.storeId}}","payload":{"action":"create","input":{"title":"Genuine \ufffd","project":"parity"}}}}},
@@ -12,6 +13,7 @@
     {"name":"close-lone-comment","http":{"method":"POST","path":"/api/v1/tickets/mutate","json":{"requestId":"00000000-0000-4000-8000-000000000002","expectedStoreId":"{{bootstrap.body.storeId}}","payload":{"action":"close","ticketId":"{{create-replacement-character.body.ticket.id}}","expectedRevision":1,"comment":"bad \ud800"}}}},
     {"name":"update-lone-title","http":{"method":"POST","path":"/api/v1/tickets/mutate","json":{"requestId":"00000000-0000-4000-8000-000000000002","expectedStoreId":"{{bootstrap.body.storeId}}","payload":{"action":"update","ticketId":"{{create-replacement-character.body.ticket.id}}","expectedRevision":1,"patch":{"title":"bad \ud800"}}}}},
     {"name":"create-valid-pair","http":{"method":"POST","path":"/api/v1/tickets/mutate","json":{"requestId":"00000000-0000-4000-8000-000000000002","expectedStoreId":"{{bootstrap.body.storeId}}","payload":{"action":"create","input":{"title":"Paired \ud83d\ude03","project":"parity"}}}}},
+    {"name":"create-final-replacement-title","http":{"method":"POST","path":"/api/v1/tickets/mutate","headers":{"Content-Type":"application/json"},"body":"{\"requestId\":\"00000000-0000-4000-8000-000000000003\",\"expectedStoreId\":\"{{bootstrap.body.storeId}}\",\"payload\":{\"action\":\"create\",\"input\":{\"title\":\"bad \\ud800\",\"title\":\"Genuine \\ufffd\",\"project\":\"parity\"}}}"}},
     {"name":"list-only-valid-writes","http":{"method":"GET","path":"/api/v1/tickets"}}
   ]
 }

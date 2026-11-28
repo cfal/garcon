@@ -1,0 +1,14 @@
+{
+  "module": "server-agents/opencode/src/agents/opencode/tool-result-converter.ts",
+  "tests": [
+    "server-agents/opencode/src/agents/opencode/__tests__/tool-result-converter.test.js",
+    "server-agents/opencode/src/agents/opencode/__tests__/history-loader.test.js"
+  ],
+  "inputs": null,
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 81,
+  "sha256": "27f8cba4f3b531b3bfc316c1affc155b754a553f01c8d36548f6e30aa91b62ed"
+}

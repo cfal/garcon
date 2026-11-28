@@ -380,6 +380,7 @@ async fn unported_inventory_matches_the_original_after_subtracting_registered_ha
         service::ApiProviderService, store::ApiProviderStore,
     };
     use garcon_stores::executors::config_store::ExecutorConfigStore;
+    use garcon_stores::snippets::setup::initialize_snippet_and_preamble_stores;
     use garcon_stores::tickets::{service::TicketServiceOptions, setup::initialize_tickets};
 
     let config = tempfile::tempdir().unwrap();
@@ -402,6 +403,14 @@ async fn unported_inventory_matches_the_original_after_subtracting_registered_ha
         assignments,
         Rc::new(|id| id == "local"),
     ));
+    let catalogs = LocalSet::new()
+        .run_until(initialize_snippet_and_preamble_stores(
+            directory,
+            &garcon_js::SystemClock,
+            None,
+        ))
+        .await
+        .unwrap();
     let tickets = Rc::new(initialize_tickets(
         config.path(),
         TicketServiceOptions {
@@ -415,6 +424,8 @@ async fn unported_inventory_matches_the_original_after_subtracting_registered_ha
         &edge_routes,
         &routes::api_providers::create_api_provider_routes(providers),
         &routes::executors::create_executor_connection_routes(&executors, None, "/tools".into()),
+        &routes::preambles::create_preamble_routes(&catalogs.preambles),
+        &routes::snippets::create_snippet_routes(&catalogs.snippets),
         &routes::tickets::create_ticket_routes(&tickets),
     ])
     .unwrap();

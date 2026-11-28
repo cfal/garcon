@@ -8,7 +8,7 @@ use garcon_interface::{
     resources::{ExecutorCallOptions, ExecutorResult},
 };
 use garcon_runtime::providers::discovery::discover_api_provider_models;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -109,6 +109,25 @@ async fn serve_case(selection: Selection, replies: Vec<Reply>) -> ExecutorResult
     Ok(json!({"result":result?,"calls":calls}))
 }
 
+async fn discover_at_zero_timeout(model_discovery: ModelDiscoveryKind) -> ExecutorResult<Value> {
+    // A listener that does not respond makes the deadline independent of HTTP latency.
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+    let result = discover_api_provider_models(
+        ApiProviderDiscoveryRequest {
+            protocol: ApiProtocol::OpenAiCompatible,
+            base_url: format!("http://{}", listener.local_addr()?),
+            api_key: None,
+            model_discovery,
+        },
+        Some(ExecutorCallOptions {
+            timeout_ms: Some(0.0),
+            ..Default::default()
+        }),
+    )
+    .await?;
+    Ok(serde_json::to_value(result)?)
+}
+
 #[test]
 fn replays_discovery_against_the_original_http_probes() {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -121,23 +140,34 @@ fn replays_discovery_against_the_original_http_probes() {
             "/tests/cases/provider-discovery"
         ),
         |function, args| {
-            if function != "discoverModels" {
-                return Err(CaseError::unhandled(function));
+            let input = |index| unknown(function, args.get(index));
+            fn decode<T: DeserializeOwned>(value: &Value) -> Result<T, CaseError> {
+                garcon_js::json::from_str(&garcon_js::json::stringify(value))
+                    .map_err(|error| CaseError::undeliverable(error.to_string()))
             }
-            let selection = garcon_js::json::from_str(&garcon_js::json::stringify(
-                unknown(function, args.first())?.as_ref(),
-            ))
-            .map_err(|error| CaseError::undeliverable(error.to_string()))?;
-            let replies = garcon_js::json::from_str(&garcon_js::json::stringify(
-                unknown(function, args.get(1))?.as_ref(),
-            ))
-            .map_err(|error| CaseError::undeliverable(error.to_string()))?;
             runtime
                 .block_on(async {
-                    timeout(Duration::from_secs(12), serve_case(selection, replies)).await
+                    timeout(Duration::from_secs(12), async {
+                        let result = match function {
+                            "discoverModels" => {
+                                serve_case(decode(input(0)?.as_ref())?, decode(input(1)?.as_ref())?)
+                                    .await
+                            }
+                            "discoverAtZeroTimeout" => {
+                                discover_at_zero_timeout(decode(input(0)?.as_ref())?).await
+                            }
+                            "discoverApiProviderModels" => {
+                                discover_api_provider_models(decode(input(0)?.as_ref())?, None)
+                                    .await
+                                    .and_then(|result| Ok(serde_json::to_value(result)?))
+                            }
+                            _ => return Err(CaseError::unhandled(function)),
+                        };
+                        result.map_err(|error| CaseError::undeliverable(error.to_string()))
+                    })
+                    .await
                 })
                 .map_err(|error| CaseError::undeliverable(error.to_string()))?
-                .map_err(|error| CaseError::undeliverable(error.to_string()))
         },
     );
     assert_eq!(stats.with_wildcards, 0);
@@ -226,4 +256,21 @@ async fn validates_the_timeout_before_starting_any_discovery() {
         .await
         .unwrap();
     assert!(result.success);
+
+    let signal = CancellationToken::new();
+    signal.cancel();
+    let cancelled = discover_api_provider_models(
+        no_discovery(),
+        Some(ExecutorCallOptions {
+            timeout_ms: Some(0.0),
+            signal: Some(signal),
+            ..Default::default()
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        cancelled.error.as_deref(),
+        Some("The operation was aborted.")
+    );
 }
