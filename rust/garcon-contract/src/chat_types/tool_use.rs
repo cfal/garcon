@@ -442,10 +442,6 @@ fn parse_codex_subagent_states(value: &Value) -> Option<IndexMap<String, CodexSu
     let states: IndexMap<_, _> = entries
         .into_iter()
         .filter_map(|(key, value)| {
-            // Assignment to __proto__ changes the prototype, not the own keys.
-            if key == "__proto__" {
-                return None;
-            }
             let status = CodexSubagentStatus::parse(value["status"].as_str()?)?;
             let message = value["message"].as_str().map(str::to_owned);
             Some((key.clone(), CodexSubagentState { status, message }))
