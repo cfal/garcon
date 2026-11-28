@@ -1113,6 +1113,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "garcon-search"
+version = "0.0.0"
+dependencies = [
+ "garcon-cases",
+ "garcon-contract",
+ "garcon-js",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "garcon-server"
 version = "0.0.0"
 dependencies = [

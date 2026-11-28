@@ -31,7 +31,7 @@ pub fn failure_reason(error: Failure<'_>) -> String {
     }
 }
 
-pub(crate) fn is_parse_error(error: &(dyn Error + 'static)) -> bool {
+pub fn is_parse_error(error: &(dyn Error + 'static)) -> bool {
     error
         .downcast_ref::<serde_json::Error>()
         .is_some_and(|error| error.is_syntax() || error.is_eof())

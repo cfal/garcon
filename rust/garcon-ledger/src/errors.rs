@@ -10,6 +10,11 @@ use garcon_base::{
 use garcon_contract::async_user_questions::InvalidAsyncQuestionReply;
 use serde::Serialize;
 
+use crate::{
+    failure_fences::SharedLedgerFailure,
+    sqlite_operations::{QueryFailure, SqliteError, TransactionFailure},
+};
+
 #[derive(Debug, thiserror::Error)]
 pub enum LedgerError {
     #[error("{0}")]
@@ -144,6 +149,20 @@ pub fn safe_fence_diagnostic(error: &(dyn Error + 'static)) -> SafeFenceDiagnost
 }
 
 fn cause_metadata<'a>(cause: &'a (dyn Error + 'static)) -> ErrorMetadata<'a> {
+    if let Some(error) = cause.downcast_ref::<SqliteError>() {
+        return error.diagnostic_metadata();
+    }
+    if let Some(error) = cause.downcast_ref::<QueryFailure>() {
+        return cause_metadata(error.0.as_ref());
+    }
+    if let Some(error) = cause.downcast_ref::<TransactionFailure>() {
+        return cause_metadata(error.cause.as_ref());
+    }
+    if let Some(error) = cause.downcast_ref::<SharedLedgerFailure>()
+        && let Some(source) = error.source()
+    {
+        return cause_metadata(source);
+    }
     if let Some(error) = cause.downcast_ref::<UndecodableLedgerRowError>() {
         return error.diagnostic_metadata();
     }

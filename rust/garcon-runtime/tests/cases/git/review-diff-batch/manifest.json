@@ -1,0 +1,42 @@
+{
+  "module": "server/runtime/git/review-diff-batch.ts",
+  "tests": [
+    "rust/parity/fixtures/git/pure.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "loadedGitReviewBodyTotals",
+      "argument": 0,
+      "guard": "rust/parity/fixtures/git/guards.ts#patchBodies",
+      "dropped": 28,
+      "kept": 60
+    },
+    {
+      "fn": "isGitReviewCollectionLimitBody",
+      "argument": 0,
+      "guard": "rust/parity/fixtures/git/guards.ts#onePatchBody",
+      "dropped": 29,
+      "kept": 60
+    },
+    {
+      "fn": "limitGitReviewResponseBodies",
+      "argument": 0,
+      "guard": "rust/parity/fixtures/git/guards.ts#patchBodies",
+      "dropped": 27,
+      "kept": 60
+    },
+    {
+      "fn": "planReviewDiffBatches",
+      "argument": 0,
+      "guard": "rust/parity/fixtures/git/guards.ts#registeredFiles",
+      "dropped": 30,
+      "kept": 60
+    }
+  ],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 248,
+  "sha256": "50fa76cd34f6f6a5b23f9ff87ae67a74a360c7fd23c5f39339d9de10745d3d63"
+}
