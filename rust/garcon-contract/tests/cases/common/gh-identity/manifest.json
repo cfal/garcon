@@ -1,0 +1,26 @@
+{
+  "module": "common/gh-identity.ts",
+  "tests": [
+    "common/__tests__/gh-identity.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/gh-identity.jsonl",
+  "guards": [
+    {
+      "fn": "sameGhRepository",
+      "argument": 0,
+      "guard": "isGhRepositoryIdentity",
+      "dropped": 30,
+      "kept": 0
+    },
+    {
+      "fn": "sameGhRepository",
+      "argument": 1,
+      "guard": "isGhRepositoryIdentity",
+      "dropped": 30,
+      "kept": 0
+    }
+  ],
+  "notCaptured": [],
+  "cases": 462,
+  "sha256": "b029b473b4cbf4b74900088a01dcb3458451996fe160afa743e018227a846599"
+}

@@ -1,0 +1,133 @@
+{"fn":"isGitServiceErrorCode","args":["GIT_INVALID_INPUT"]}
+{"fn":"new GitServiceError","args":["GIT_INVALID_INPUT","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_REQUEST_TOO_LARGE"]}
+{"fn":"new GitServiceError","args":["GIT_REQUEST_TOO_LARGE","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_NOT_REPO"]}
+{"fn":"new GitServiceError","args":["GIT_NOT_REPO","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_OUTSIDE_BASE"]}
+{"fn":"new GitServiceError","args":["GIT_OUTSIDE_BASE","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_AUTH_FAILED"]}
+{"fn":"new GitServiceError","args":["GIT_AUTH_FAILED","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_HOST_KEY"]}
+{"fn":"new GitServiceError","args":["GIT_HOST_KEY","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_NETWORK"]}
+{"fn":"new GitServiceError","args":["GIT_NETWORK","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_UNCOMMITTED_CHANGES"]}
+{"fn":"new GitServiceError","args":["GIT_UNCOMMITTED_CHANGES","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_DIVERGED"]}
+{"fn":"new GitServiceError","args":["GIT_DIVERGED","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_CONFLICT"]}
+{"fn":"new GitServiceError","args":["GIT_CONFLICT","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_NOTHING_TO_COMMIT"]}
+{"fn":"new GitServiceError","args":["GIT_NOTHING_TO_COMMIT","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_REJECTED"]}
+{"fn":"new GitServiceError","args":["GIT_REJECTED","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_NO_UPSTREAM"]}
+{"fn":"new GitServiceError","args":["GIT_NO_UPSTREAM","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_LOCKED"]}
+{"fn":"new GitServiceError","args":["GIT_LOCKED","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_SSH_MISSING"]}
+{"fn":"new GitServiceError","args":["GIT_SSH_MISSING","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_NO_REMOTE"]}
+{"fn":"new GitServiceError","args":["GIT_NO_REMOTE","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_STALE_DOCUMENT"]}
+{"fn":"new GitServiceError","args":["GIT_STALE_DOCUMENT","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_STALE_STASH"]}
+{"fn":"new GitServiceError","args":["GIT_STALE_STASH","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_SERVICE_BUSY"]}
+{"fn":"new GitServiceError","args":["GIT_SERVICE_BUSY","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_RESULT_TOO_LARGE"]}
+{"fn":"new GitServiceError","args":["GIT_RESULT_TOO_LARGE","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_INVALID_RESULT"]}
+{"fn":"new GitServiceError","args":["GIT_INVALID_RESULT","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_UNAVAILABLE"]}
+{"fn":"new GitServiceError","args":["GIT_UNAVAILABLE","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_TIMEOUT"]}
+{"fn":"new GitServiceError","args":["GIT_TIMEOUT","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_MUTATION_OUTCOME_UNKNOWN"]}
+{"fn":"new GitServiceError","args":["GIT_MUTATION_OUTCOME_UNKNOWN","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_OPERATION_FAILED"]}
+{"fn":"new GitServiceError","args":["GIT_OPERATION_FAILED","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_MISSING"]}
+{"fn":"new GitServiceError","args":["GIT_MISSING","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GH_MISSING"]}
+{"fn":"new GitServiceError","args":["GH_MISSING","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GH_AUTH_FAILED"]}
+{"fn":"new GitServiceError","args":["GH_AUTH_FAILED","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GH_NO_GITHUB_REMOTE"]}
+{"fn":"new GitServiceError","args":["GH_NO_GITHUB_REMOTE","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GH_NOT_REPO"]}
+{"fn":"new GitServiceError","args":["GH_NOT_REPO","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GH_NOT_FOUND"]}
+{"fn":"new GitServiceError","args":["GH_NOT_FOUND","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GH_FORBIDDEN"]}
+{"fn":"new GitServiceError","args":["GH_FORBIDDEN","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GH_NETWORK"]}
+{"fn":"new GitServiceError","args":["GH_NETWORK","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GH_RATE_LIMITED"]}
+{"fn":"new GitServiceError","args":["GH_RATE_LIMITED","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GH_OPERATION_FAILED"]}
+{"fn":"new GitServiceError","args":["GH_OPERATION_FAILED","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GH_STALE_PULL_REQUEST"]}
+{"fn":"new GitServiceError","args":["GH_STALE_PULL_REQUEST","Synthetic failure"]}
+{"fn":"isGitServiceErrorCode","args":["GH_MUTATION_REJECTED"]}
+{"fn":"new GitServiceError","args":["GH_MUTATION_REJECTED","Synthetic failure"]}
+{"fn":"new GitServiceError","args":["GIT_INVALID_INPUT",""]}
+{"fn":"new GitServiceError","args":["GIT_INVALID_INPUT","A é中😀 message"]}
+{"fn":"new GitServiceError","args":["GIT_REQUEST_TOO_LARGE",""]}
+{"fn":"new GitServiceError","args":["GIT_REQUEST_TOO_LARGE","A é中😀 message"]}
+{"fn":"new GitServiceError","args":["GIT_NOT_REPO",""]}
+{"fn":"new GitServiceError","args":["GIT_NOT_REPO","A é中😀 message"]}
+{"fn":"isGitServiceErrorCode","args":["toString"]}
+{"fn":"isGitServiceErrorCode","args":["constructor"]}
+{"fn":"isGitServiceErrorCode","args":["hasOwnProperty"]}
+{"fn":"isGitServiceErrorCode","args":["__proto__"]}
+{"fn":"isGitServiceErrorCode","args":["valueOf"]}
+{"fn":"isGitServiceErrorCode","args":["isPrototypeOf"]}
+{"fn":"isGitServiceErrorCode","args":["propertyIsEnumerable"]}
+{"fn":"isGitServiceErrorCode","args":["toLocaleString"]}
+{"fn":"isGitServiceErrorCode","args":["__defineGetter__"]}
+{"fn":"isGitServiceErrorCode","args":["lookupGetter"]}
+{"fn":"isGitServiceErrorCode","args":["git_invalid_input"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_invalid_input"]}
+{"fn":"isGitServiceErrorCode","args":["Git_Invalid_Input"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_INVALID_INPUT "]}
+{"fn":"isGitServiceErrorCode","args":[" GIT_INVALID_INPUT"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_INVALID_INPU"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_INVALID_INPUTT"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_INVALID_INPUT\n"]}
+{"fn":"isGitServiceErrorCode","args":["GH_MISSIN"]}
+{"fn":"isGitServiceErrorCode","args":["GH_MISSINGG"]}
+{"fn":"isGitServiceErrorCode","args":["GH_MISSING0"]}
+{"fn":"isGitServiceErrorCode","args":["0GH_MISSING"]}
+{"fn":"isGitServiceErrorCode","args":["gh_missing"]}
+{"fn":"isGitServiceErrorCode","args":["GIT-MISSING"]}
+{"fn":"isGitServiceErrorCode","args":[""]}
+{"fn":"isGitServiceErrorCode","args":[" "]}
+{"fn":"isGitServiceErrorCode","args":[" "]}
+{"fn":"isGitServiceErrorCode","args":["İ"]}
+{"fn":"isGitServiceErrorCode","args":["K"]}
+{"fn":"isGitServiceErrorCode","args":["GIT_INVİLID_INPUT"]}
+{"fn":"isGitServiceErrorCode","args":["Ｇｈ_MISSING"]}
+{"fn":"isGitServiceErrorCode","args":["ｇｈ_ＭＩｓｓｉｎｇ"]}
+{"fn":"isGitServiceErrorCode","args":["😀"]}
+{"fn":"isGitServiceErrorCode","args":["é"]}
+{"fn":"isGitServiceErrorCode","args":["中文"]}
+{"fn":"isGitServiceErrorCode","args":[null]}
+{"fn":"isGitServiceErrorCode","args":[0]}
+{"fn":"isGitServiceErrorCode","args":[400]}
+{"fn":"isGitServiceErrorCode","args":[501]}
+{"fn":"isGitServiceErrorCode","args":[-1]}
+{"fn":"isGitServiceErrorCode","args":[0.5]}
+{"fn":"isGitServiceErrorCode","args":[true]}
+{"fn":"isGitServiceErrorCode","args":[false]}
+{"fn":"isGitServiceErrorCode","args":[[]]}
+{"fn":"isGitServiceErrorCode","args":[["GIT_INVALID_INPUT"]]}
+{"fn":"isGitServiceErrorCode","args":[["GH_MISSING"]]}
+{"fn":"isGitServiceErrorCode","args":[{}]}
+{"fn":"isGitServiceErrorCode","args":[{"code":"GIT_INVALID_INPUT"}]}
+{"fn":"isGitServiceErrorCode","args":[{"0":"GH_MISSING"}]}
+{"fn":"isGitServiceErrorCode","args":[{"$":"undefined"}]}
+{"fn":"isGitServiceErrorCode","args":[{"$":"number","value":"NaN"}]}
+{"fn":"isGitServiceErrorCode","args":[]}
+{"fn":"isGitServiceErrorCode","args":["GIT_INVALID_INPUT","GH_MISSING"]}

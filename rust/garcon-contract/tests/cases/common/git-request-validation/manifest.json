@@ -1,0 +1,19 @@
+{
+  "module": "common/git-request-validation.ts",
+  "tests": [
+    "common/__tests__/gh-identity.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/git-request-validation.jsonl",
+  "guards": [
+    {
+      "fn": "validateGhRequest",
+      "argument": 0,
+      "guard": "isGhMethod",
+      "dropped": 6,
+      "kept": 0
+    }
+  ],
+  "notCaptured": [],
+  "cases": 2212,
+  "sha256": "8775074365a0c821ad097bb609df782849ec7a0a0e3884c2a016eddfce7149fd"
+}

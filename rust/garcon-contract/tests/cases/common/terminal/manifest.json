@@ -1,0 +1,19 @@
+{
+  "module": "common/terminal.ts",
+  "tests": [
+    "server/runtime/terminals/__tests__/terminal-contracts.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/terminal.jsonl",
+  "guards": [
+    {
+      "fn": "terminalIdForMessage",
+      "argument": 0,
+      "guard": "parseTerminalStreamServerMessage",
+      "dropped": 36,
+      "kept": 24
+    }
+  ],
+  "notCaptured": [],
+  "cases": 876,
+  "sha256": "9f99bbd595e8165c21efb6fa28b9a22b513f26a9e590011d711b5b76f6a7398d"
+}
