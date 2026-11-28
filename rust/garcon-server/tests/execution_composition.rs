@@ -50,6 +50,7 @@ use garcon_ledger::{
     sqlite_operations::LedgerResult,
     store::TranscriptLedgerStore,
 };
+use garcon_stores::executors::config_store::ExecutorConfigStore;
 use serde_json::json;
 use tokio::task::LocalSet;
 use tokio_util::sync::CancellationToken;
@@ -210,9 +211,12 @@ impl WorkingDirectorySettlementPort for Idle {
     }
 }
 
-fn options(workspace_dir: &str, local: Rc<dyn ExecutionRuntimeApi>) -> ExecutionStartup<'_> {
+fn options(
+    executor_config: Rc<ExecutorConfigStore>,
+    local: Rc<dyn ExecutionRuntimeApi>,
+) -> ExecutionStartup {
     ExecutionStartup {
-        workspace_dir,
+        executor_config,
         server_instance_id: "process-instance".into(),
         local,
         resolve_credential: Rc::new(|_, _, _| Box::pin(async { unexpected() })),
@@ -309,14 +313,21 @@ async fn startup_brings_up_the_manager_before_the_stores_and_uses_process_local_
             let root = workspace.path();
             let executor = local_executor(root.to_str().unwrap());
             let local = executor.api();
+            let executor_config = ExecutorConfigStore::open(root.to_str().unwrap())
+                .await
+                .unwrap();
             let instance = local.get_info(None).await.unwrap().instance_id;
             let reads = start_execution_reads(
-                options(root.to_str().unwrap(), local.clone()),
-                |foundation| bind_stores(root, foundation),
+                options(executor_config.clone(), local.clone()),
+                |foundation| {
+                    assert!(Rc::ptr_eq(&foundation.manager.config, &executor_config));
+                    bind_stores(root, foundation)
+                },
             )
             .await
             .unwrap();
             assert!(reads.manager.is_ready("local"));
+            assert!(Rc::ptr_eq(&reads.manager.config, &executor_config));
             assert_eq!(reads.manager.ready_instance_id("local").unwrap(), instance);
             let chat_id = "1767225600000000";
             assert!(reads.registry.get_running_chat_ids_snapshot().is_empty());
@@ -373,10 +384,12 @@ async fn a_store_binding_failure_disposes_the_started_local_runtime() {
             let workspace = tempfile::tempdir().unwrap();
             let executor = local_executor(workspace.path().to_str().unwrap());
             let local = executor.api();
-            let result = start_execution(
-                options(workspace.path().to_str().unwrap(), local.clone()),
-                |_| async { Err("synthetic store failure".into()) },
-            )
+            let executor_config = ExecutorConfigStore::open(workspace.path().to_str().unwrap())
+                .await
+                .unwrap();
+            let result = start_execution(options(executor_config, local.clone()), |_| async {
+                Err("synthetic store failure".into())
+            })
             .await;
             assert_eq!(result.err().unwrap().to_string(), "synthetic store failure");
             assert_eq!(local.availability(), ExecutorAvailability::Disposed);

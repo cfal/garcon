@@ -1487,6 +1487,7 @@ dependencies = [
  "garcon-http",
  "garcon-interface",
  "garcon-ledger",
+ "garcon-stores",
  "http-body-util",
  "hyper",
  "hyper-util",

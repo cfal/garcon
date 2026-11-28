@@ -33,6 +33,7 @@ garcon-execution.workspace = true
 garcon-executor.workspace = true
 garcon-interface.workspace = true
 garcon-ledger.workspace = true
+garcon-stores.workspace = true
 ruzstd = "0.8"
 serde_json.workspace = true
 tempfile = "3"

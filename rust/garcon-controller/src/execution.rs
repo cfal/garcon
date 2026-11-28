@@ -62,8 +62,9 @@ use garcon_ledger::{
 };
 use garcon_stores::executors::config_store::ExecutorConfigStore;
 
-pub struct ExecutionStartup<'a> {
-    pub workspace_dir: &'a str,
+pub struct ExecutionStartup {
+    /// The shell opens this once for provider authority and the connection route.
+    pub executor_config: Rc<ExecutorConfigStore>,
     pub server_instance_id: String,
     pub local: Rc<dyn ExecutionRuntimeApi>,
     pub resolve_credential: ResolveExecutorCredential,
@@ -260,7 +261,7 @@ impl Drop for ExecutionReadHandles {
 }
 
 pub async fn start_execution<Fut>(
-    options: ExecutionStartup<'_>,
+    options: ExecutionStartup,
     bind: impl FnOnce(ExecutionFoundation) -> Fut,
 ) -> ExecutionOperationResult<ExecutionHandles>
 where
@@ -275,7 +276,7 @@ where
 }
 
 pub async fn start_execution_reads<Fut>(
-    options: ExecutionStartup<'_>,
+    options: ExecutionStartup,
     bind: impl FnOnce(ExecutionFoundation) -> Fut,
 ) -> ExecutionOperationResult<ExecutionReadHandles>
 where
@@ -289,26 +290,15 @@ where
 }
 
 async fn start_reads<T, Fut>(
-    options: ExecutionStartup<'_>,
+    options: ExecutionStartup,
     bind: impl FnOnce(ExecutionFoundation) -> Fut,
 ) -> ExecutionOperationResult<(ExecutionReadHandles, T)>
 where
     Fut: Future<Output = ExecutionOperationResult<(ExecutionReadBindings, T)>>,
 {
-    let config = match ExecutorConfigStore::open(options.workspace_dir).await {
-        Ok(config) => config,
-        Err(error) => {
-            if let Err(dispose) = options.local.dispose().await {
-                create_logger("executors").warn(&format!(
-                    "Local executor disposal after startup failed: {dispose}"
-                ));
-            }
-            return Err(error);
-        }
-    };
     let manager = ExecutorManager::start(ExecutorManagerOptions {
         local: options.local,
-        config,
+        config: options.executor_config,
         remote_factory: Rc::new(RemoteExecutorClientFactory),
         resolve_credential: options.resolve_credential,
         logger: Rc::new(create_logger("executors")),
