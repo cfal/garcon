@@ -300,7 +300,10 @@ impl CodexAppServerRuntime {
             self.shutdown_client(&source.client).await;
         }
 
-        let (client, events) = self.new_client(&request.execution)?;
+        let (client, events) = self.new_client(
+            request.execution.env_overrides.as_ref(),
+            request.execution.activation.codex_config.as_ref(),
+        )?;
         *opening = Some((client.clone(), events));
         let initialize = client.connect().await?;
         request.execution.assert_open()?;
