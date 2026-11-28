@@ -1,0 +1,11 @@
+{
+  "module": "common/chat-clear.ts",
+  "tests": [],
+  "inputs": "rust/garcon-contract/tests/inputs/common/chat-clear.jsonl",
+  "guards": [],
+  "jsonArguments": [],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 23,
+  "sha256": "a0e36c0b1c2e1c8c0f97110f759a28273a10060fb89dc1dff0f7816d57507559"
+}
