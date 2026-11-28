@@ -19,7 +19,6 @@ garcon-js.workspace = true
 garcon-stores.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-subtle = "2"
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
