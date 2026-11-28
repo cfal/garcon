@@ -1,6 +1,6 @@
 //! ADR-020 recordings for the browser WebSocket and controller contracts.
 
-use garcon_cases::{CaseError, markers, replay, round_tripped, text, unknown};
+use garcon_cases::{CaseError, javascript_number, markers, replay, round_tripped, text, unknown};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -23,6 +23,24 @@ use garcon_contract::ws_value_parsing::{
     self, canonical_chat_id, non_negative_int, required_path, required_str,
 };
 
+use garcon_contract::handoff_sizing::{
+    is_handoff_context_window_tokens, parse_agent_switch_context_window_tokens,
+    usable_handoff_token_budget,
+};
+use garcon_contract::hidden_bash_command_patterns::{
+    HiddenBashCommandPattern, dedupe_hidden_bash_command_patterns,
+    is_hidden_bash_command_pattern_mode, parse_hidden_bash_command_patterns,
+    validate_hidden_bash_command_pattern,
+};
+use garcon_contract::settings::{
+    default_execution_defaults, generation_selection_executor_error,
+    normalize_agent_switch_compaction_ui_settings, normalize_chat_title_ui_settings,
+    normalize_commit_message_ui_settings, normalize_prompt_refinement_ui_settings,
+    normalize_remote_feature_settings, normalize_remote_settings_snapshot,
+    normalize_ticket_chat_ui_settings, parse_executor_project_preferences,
+    parse_executor_project_preferences_patch,
+};
+
 fn assert_recording(
     module: &str,
     dispatcher: impl FnMut(&str, &[Value]) -> Result<Value, CaseError>,
@@ -37,6 +55,224 @@ fn assert_recording(
 
 fn required_text<'a>(function: &str, argument: Option<&'a Value>) -> Result<&'a str, CaseError> {
     text(function, argument)?.ok_or_else(|| CaseError::unhandled(function))
+}
+
+#[test]
+fn auth_recordings() {
+    use garcon_contract::auth::*;
+
+    assert_recording("auth", |function, args| {
+        let value = unknown(function, args.first())?;
+        let error = |error: AuthValidationError| CaseError::new("Error", error.to_string());
+        Ok(match function {
+            "validateUsername" => json!(validate_username(&value).map_err(error)?),
+            "validatePassword" => json!(validate_password(&value).map_err(error)?),
+            "parseChangeUsernameRequest" => {
+                json!(parse_change_username_request(&value).map_err(error)?)
+            }
+            "parseChangePasswordRequest" => {
+                json!(parse_change_password_request(&value).map_err(error)?)
+            }
+            "parseLoginRequest" => json!(parse_login_request(&value).map_err(error)?),
+            "parseRegisterRequest" => json!(parse_register_request(&value).map_err(error)?),
+            "parseAuthUser" => json!(parse_auth_user(&value).map_err(error)?),
+            "parseAuthSessionResponse" => {
+                json!(parse_auth_session_response(&value).map_err(error)?)
+            }
+            "parseAuthUserResponse" => json!(parse_auth_user_response(&value).map_err(error)?),
+            "parseAuthStatusResponse" => json!(parse_auth_status_response(&value).map_err(error)?),
+            "parseAuthTokenIdentity" => json!(parse_auth_token_identity(&value)),
+            "isAuthSessionId" => json!(is_auth_session_id(&value)),
+            "new AuthValidationError" => {
+                let value = AuthValidationError::new(required_text(function, args.first())?);
+                json!({"$": "error", "name": "Error", "message": value.to_string(), "properties": {}})
+            }
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+fn optional_record<T: Serialize>(value: Option<T>) -> Value {
+    value.map_or_else(markers::undefined, |value| json!(value))
+}
+
+#[test]
+fn settings_recordings() {
+    assert_recording("settings", |function, args| {
+        let value = unknown(function, args.first())?;
+        Ok(match function {
+            "parseExecutorProjectPreferencesPatch" => {
+                json!(parse_executor_project_preferences_patch(&value))
+            }
+            "parseExecutorProjectPreferences" => json!(parse_executor_project_preferences(&value)),
+            "generationSelectionExecutorError" => {
+                json!(generation_selection_executor_error(&value))
+            }
+            "normalizeChatTitleUiSettings" => {
+                optional_record(normalize_chat_title_ui_settings(&value))
+            }
+            "normalizeAgentSwitchCompactionUiSettings" => {
+                optional_record(normalize_agent_switch_compaction_ui_settings(&value))
+            }
+            "normalizeCommitMessageUiSettings" => {
+                optional_record(normalize_commit_message_ui_settings(&value))
+            }
+            "normalizePromptRefinementUiSettings" => {
+                optional_record(normalize_prompt_refinement_ui_settings(&value))
+            }
+            "normalizeTicketChatUiSettings" => {
+                optional_record(normalize_ticket_chat_ui_settings(&value))
+            }
+            "normalizeRemoteFeatureSettings" => json!(normalize_remote_feature_settings(&value)),
+            "defaultExecutionDefaults" => json!(default_execution_defaults()),
+            "normalizeRemoteSettingsSnapshot" => {
+                let snapshot = normalize_remote_settings_snapshot(&value)
+                    .map_err(|error| CaseError::new("Error", error.to_string()))?;
+                let encoded = serde_json::to_string(&snapshot).expect("snapshot is serializable");
+                garcon_js::json::from_str(&encoded).expect("snapshot serializes to JSON")
+            }
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+#[test]
+fn handoff_sizing_recordings() {
+    assert_recording("handoff-sizing", |function, args| {
+        Ok(match function {
+            "parseAgentSwitchContextWindowTokens" => json!(
+                parse_agent_switch_context_window_tokens(unknown(function, args.first())?.as_ref())
+            ),
+            "isHandoffContextWindowTokens" => json!(is_handoff_context_window_tokens(
+                unknown(function, args.first())?.as_ref()
+            )),
+            "usableHandoffTokenBudget" => markers::number(usable_handoff_token_budget(
+                javascript_number(function, args.first())?,
+            )),
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+fn hidden_pattern_entries(value: &Value) -> Option<Vec<HiddenBashCommandPattern>> {
+    value
+        .as_array()?
+        .iter()
+        .map(|entry| {
+            Some(HiddenBashCommandPattern {
+                pattern: entry.get("pattern")?.as_str()?.to_owned(),
+                mode: is_hidden_bash_command_pattern_mode(entry.get("mode")?)?,
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn hidden_bash_command_patterns_recordings() {
+    assert_recording("hidden-bash-command-patterns", |function, args| {
+        let value = unknown(function, args.first())?;
+        Ok(match function {
+            "isHiddenBashCommandPatternMode" => {
+                json!(is_hidden_bash_command_pattern_mode(&value).is_some())
+            }
+            "validateHiddenBashCommandPattern" => {
+                let pattern = required_text(function, args.first())?;
+                let mode =
+                    is_hidden_bash_command_pattern_mode(unknown(function, args.get(1))?.as_ref())
+                        .ok_or_else(|| CaseError::unhandled(function))?;
+                json!(validate_hidden_bash_command_pattern(pattern, mode))
+            }
+            "dedupeHiddenBashCommandPatterns" => {
+                let entries =
+                    hidden_pattern_entries(&value).ok_or_else(|| CaseError::unhandled(function))?;
+                json!(dedupe_hidden_bash_command_patterns(&entries))
+            }
+            "parseHiddenBashCommandPatterns" => json!(parse_hidden_bash_command_patterns(&value)),
+            _ => return Err(CaseError::unhandled(function)),
+        })
+    });
+}
+
+fn pinned_bun_stdout(script: &str, arguments: &[&str]) -> String {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let output = std::process::Command::new("bun")
+        .current_dir(root)
+        .args([
+            "-e",
+            &format!(
+                "if (Bun.version !== '1.4.3') throw new Error('expected Bun 1.4.3');\n{script}"
+            ),
+            "--",
+        ])
+        .args(arguments)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn settings_preserves_agent_values_as_javascript_json_text() {
+    let input = r#"{
+        "version":1,
+        "ui":{},
+        "uiEffective":{},
+        "paths":{"pinnedProjectPaths":[],"browseStartPath":"","recentProjectPaths":[]},
+        "pinnedChatIds":[],
+        "recentAgentSettings":[],
+        "executionDefaults":{
+            "global":{
+                "permissionMode":"default",
+                "thinkingMode":"none",
+                "agentSettingsById":{
+                    "codex":{"ownerId":"codex","schemaVersion":1,
+                        "values":{"one":1.0,"big":9007199254740993,"exp21":1e21,"negativeZero":-0}}
+                }
+            },
+            "byAgent":{}
+        },
+        "projectBasePath":"",
+        "telegram":{"botTokenAvailable":false,"recipientLinked":false,"pendingLink":false}
+    }"#;
+    let original = pinned_bun_stdout(
+        r#"import { normalizeRemoteSettingsSnapshot } from "./common/settings.ts";
+           const snapshot = normalizeRemoteSettingsSnapshot(JSON.parse(Bun.argv.at(-1)));
+           console.log(JSON.stringify(snapshot.executionDefaults.global.agentSettingsById.codex.values));"#,
+        &[input],
+    );
+    let input = garcon_js::json::from_str(input).unwrap();
+    let snapshot = normalize_remote_settings_snapshot(&input).unwrap().unwrap();
+    let settings = &snapshot.execution_defaults.global.agent_settings_by_id["codex"];
+    assert_eq!(
+        serde_json::to_string(&settings.values).unwrap(),
+        original.trim_end()
+    );
+}
+
+#[test]
+fn generation_prompt_constants_match_bun() {
+    use garcon_contract::generation_prompts::*;
+    let original = pinned_bun_stdout(
+        r#"import * as prompts from "./common/generation-prompts.ts";
+           console.log(JSON.stringify(prompts));"#,
+        &[],
+    );
+    let original: Value = garcon_js::json::from_str(&original).unwrap();
+    assert_eq!(
+        original,
+        json!({
+            "GENERATION_PROMPT_TEMPLATE_MAX_LENGTH": GENERATION_PROMPT_TEMPLATE_MAX_LENGTH,
+            "COMMIT_MESSAGE_FILES_TOKEN": COMMIT_MESSAGE_FILES_TOKEN,
+            "COMMIT_MESSAGE_DIFF_TOKEN": COMMIT_MESSAGE_DIFF_TOKEN,
+            "PROMPT_REFINEMENT_USER_PROMPT_TOKEN": PROMPT_REFINEMENT_USER_PROMPT_TOKEN,
+            "DEFAULT_COMMIT_MESSAGE_PROMPT": DEFAULT_COMMIT_MESSAGE_PROMPT,
+            "DEFAULT_PROMPT_REFINEMENT_PROMPT": DEFAULT_PROMPT_REFINEMENT_PROMPT,
+        })
+    );
 }
 
 #[test]

@@ -5,5 +5,6 @@
 pub mod errors;
 pub mod files;
 pub mod git;
+pub mod native_message_source;
 pub mod resources;
 pub mod terminals;

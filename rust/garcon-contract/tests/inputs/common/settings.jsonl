@@ -1,0 +1,21 @@
+{"fn":"parseExecutorProjectPreferencesPatch","args":[{}]}
+{"fn":"parseExecutorProjectPreferencesPatch","args":[{"12345678-1234-1234-1234-123456789abc":{"defaultPath":"","pinnedPaths":["  /folder ",""]}}]}
+{"fn":"parseExecutorProjectPreferencesPatch","args":[{"12345678-1234-1234-1234-123456789abc":{"recentPaths":[]}}]}
+{"fn":"parseExecutorProjectPreferencesPatch","args":[{"12345678-1234-1234-1234-123456789abc":{"defaultPath":null}}]}
+{"fn":"parseExecutorProjectPreferencesPatch","args":[{"local":{"pinnedPaths":[]}}]}
+{"fn":"parseExecutorProjectPreferences","args":[{}]}
+{"fn":"parseExecutorProjectPreferences","args":[{"12345678-1234-1234-1234-123456789abc":{"defaultPath":"","pinnedPaths":["/folder"],"recentPaths":[],"extra":true}}]}
+{"fn":"parseExecutorProjectPreferences","args":[{"12345678-1234-1234-1234-123456789abc":{"pinnedPaths":[],"recentPaths":[null]}}]}
+{"fn":"generationSelectionExecutorError","args":[null]}
+{"fn":"generationSelectionExecutorError","args":[{"executorId":false}]}
+{"fn":"generationSelectionExecutorError","args":[{"executorId":"local"}]}
+{"fn":"generationSelectionExecutorError","args":[{"executorId":"12345678-1234-1234-1234-123456789abc","agentId":"codex","model":"\ufeff"}]}
+{"fn":"generationSelectionExecutorError","args":[{"executorId":"12345678-1234-1234-1234-123456789abc","agentId":"codex","model":"m"}]}
+{"fn":"normalizeTicketChatUiSettings","args":[{}]}
+{"fn":"normalizeTicketChatUiSettings","args":[{"customPrompt":"","enabled":true}]}
+{"fn":"normalizeTicketChatUiSettings","args":[{"customPrompt":"  \t"}]}
+{"fn":"defaultExecutionDefaults","args":[]}
+{"fn":"normalizeChatTitleUiSettings","args":[{"executorId":null,"apiProviderId":null,"modelEndpointId":"UPPER","modelProtocol":"anthropic-messages","thinkingMode":"invalid"}]}
+{"fn":"normalizeChatTitleUiSettings","args":[{"executorId":false,"apiProviderId":"abc","modelEndpointId":"abc_1","modelProtocol":"unknown","model":"","enabled":false}]}
+{"fn":"normalizeRemoteSettingsSnapshot","args":[{"version":-1,"uiEffective":{"commitMessage":{"agentId":"codex","model":"m","executorId":false}}}]}
+{"fn":"normalizeRemoteSettingsSnapshot","args":[{"version":{"$":"number","value":"-0"},"ui":{"appIdentity":{"title":" \ufeff Work "},"notifications":{"telegram":{"enabled":false}}},"uiEffective":{"promptRefinement":{"agentId":"codex","model":"","executorId":null}},"paths":{"pinnedProjectPaths":[],"browseStartPath":"","recentProjectPaths":[],"byExecutor":{}},"pinnedChatIds":[],"recentAgentSettings":[{"executorId":null,"agentId":"codex","model":" m "}],"executionDefaults":{"global":{"permissionMode":"default","thinkingMode":"none","agentSettingsById":{}},"byAgent":{"codex":{}}},"projectBasePath":"","telegram":{"botTokenAvailable":false,"recipientLinked":false,"pendingLink":false}}]}

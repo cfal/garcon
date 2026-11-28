@@ -1,9 +1,13 @@
 //! TLS for the adapters, the Rust form of the TLS Bun provides itself: rustls
-//! with the bundled webpki roots, with an explicit authority bundle in their
-//! place, or as an unverified outer layer.
+//! with default trust, with an explicit authority bundle in its place, or
+//! as an unverified outer layer.
 
-use std::sync::Arc;
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
+use garcon_base::log::{Logger, create_logger};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::ring::default_provider;
 use rustls::crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature};
@@ -52,23 +56,79 @@ impl ClientTls {
         Ok(Connector::Rustls(Arc::new(config)))
     }
 
-    fn roots(&self) -> Result<RootCertStore, TlsSetup> {
+    fn roots(&self) -> Result<Arc<RootCertStore>, TlsSetup> {
+        let Self::Authorities(pem) = self else {
+            static DEFAULT: OnceLock<Arc<RootCertStore>> = OnceLock::new();
+            return Ok(Arc::clone(
+                DEFAULT.get_or_init(|| Arc::new(default_roots())),
+            ));
+        };
+        // An explicit `ca` replaces all default trust sources.
+        let certificates = CertificateDer::pem_slice_iter(pem)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| TlsSetup)?;
         let mut roots = RootCertStore::empty();
-        match self {
-            // An explicit `ca` takes the place of the bundled roots.
-            Self::Authorities(pem) => {
-                let certificates = CertificateDer::pem_slice_iter(pem)
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|_| TlsSetup)?;
-                roots.add_parsable_certificates(certificates);
-                if roots.is_empty() {
-                    return Err(TlsSetup);
+        roots.add_parsable_certificates(certificates);
+        if roots.is_empty() {
+            return Err(TlsSetup);
+        }
+        Ok(Arc::new(roots))
+    }
+}
+
+fn default_roots() -> RootCertStore {
+    let mut roots = RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+    // Bun's WebSocket store includes the OpenSSL default paths even without
+    // NODE_USE_SYSTEM_CA. Each environment override replaces just its path.
+    let file = env::var_os("SSL_CERT_FILE").unwrap_or_else(|| "/etc/ssl/cert.pem".into());
+    let _ = add_pem_file(&mut roots, Path::new(&file));
+    let directories = env::var_os("SSL_CERT_DIR").unwrap_or_else(|| "/etc/ssl/certs".into());
+    for directory in env::split_paths(&directories) {
+        if let Ok(entries) = fs::read_dir(directory) {
+            for entry in entries.flatten() {
+                if is_hashed_certificate(&entry.file_name().to_string_lossy())
+                    && entry.path().is_file()
+                {
+                    let _ = add_pem_file(&mut roots, &entry.path());
                 }
             }
-            _ => roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned()),
         }
-        Ok(roots)
     }
+
+    if let Some(extra) = env::var_os("NODE_EXTRA_CA_CERTS").filter(|path| !path.is_empty()) {
+        let extra = PathBuf::from(extra);
+        if let Err(error) = add_pem_file(&mut roots, &extra) {
+            create_logger("noise-ws").warn(&format!(
+                "Ignoring extra certificates from {}: {error}",
+                extra.display()
+            ));
+        }
+    }
+    roots
+}
+
+fn is_hashed_certificate(name: &str) -> bool {
+    name.split_once('.').is_some_and(|(hash, index)| {
+        hash.len() == 8
+            && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+            && !index.is_empty()
+            && index.bytes().all(|byte| byte.is_ascii_digit())
+    })
+}
+
+fn add_pem_file(roots: &mut RootCertStore, path: &Path) -> std::io::Result<()> {
+    let certificates = CertificateDer::pem_file_iter(path)
+        .and_then(|certificates| certificates.collect::<Result<Vec<_>, _>>())
+        .map_err(std::io::Error::other)?;
+    let mut file_roots = RootCertStore::empty();
+    let (added, ignored) = file_roots.add_parsable_certificates(certificates);
+    if added == 0 || ignored != 0 {
+        return Err(std::io::Error::other("invalid CA certificate bundle"));
+    }
+    roots.extend(file_roots.roots);
+    Ok(())
 }
 
 /// `rejectUnauthorized: false`: any certificate chain and host is accepted.

@@ -84,7 +84,8 @@ export async function loadScenarios(repoRoot: string, only?: string): Promise<Sc
     const parsed: unknown = JSON.parse(await readFile(join(directory, file), 'utf8'));
     assertScenario(parsed, file);
     if (`${parsed.name}.json` !== file) throw new Error(`${file}: name must match the file name`);
-    if (!only || parsed.name === only) scenarios.push(parsed);
+    if (only === undefined || parsed.name === only) scenarios.push(parsed);
   }
+  if (only !== undefined && scenarios.length === 0) throw new Error(`Unknown scenario: ${only}`);
   return scenarios;
 }

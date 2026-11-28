@@ -44,4 +44,5 @@ zeroize = "1"
 [dev-dependencies]
 garcon-cases.workspace = true
 rcgen = { version = "0.14", default-features = false, features = ["pem", "ring"] }
+tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

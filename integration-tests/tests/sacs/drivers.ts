@@ -723,7 +723,7 @@ const directAnthropicDriver = directDriver(
   (fixture) => fixture.fakeProviders.anthropic,
 );
 
-export const sacsScriptedDriverFactories: readonly SacsDriverFactory[] = [
+export const allSacsScriptedDriverFactories: readonly SacsDriverFactory[] = [
   claudeDriver,
   codexDriver,
   directOpenAiResponsesDriver,
@@ -734,3 +734,17 @@ export const sacsScriptedDriverFactories: readonly SacsDriverFactory[] = [
   // Runs wherever the pinned agy binary is installed; CI installs it.
   ...(ANTIGRAVITY_BINARY ? [antigravityDriver] : []),
 ];
+
+function selectScriptedDrivers(selection: string | undefined): readonly SacsDriverFactory[] {
+  if (selection === undefined) return allSacsScriptedDriverFactories;
+  const requested = new Set(selection.split(',').map((id) => id.trim()));
+  const available = allSacsScriptedDriverFactories.map((driver) => driver.id);
+  for (const id of requested) {
+    if (!available.includes(id)) {
+      throw new Error(`GARCON_SACS_DRIVERS names an unknown or unavailable driver: ${JSON.stringify(id)} (available: ${available.join(', ')})`);
+    }
+  }
+  return allSacsScriptedDriverFactories.filter((driver) => requested.has(driver.id));
+}
+
+export const sacsScriptedDriverFactories = selectScriptedDrivers(process.env.GARCON_SACS_DRIVERS);

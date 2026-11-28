@@ -111,8 +111,10 @@ export function encodeError(error: Error, path: string, seen: Set<object>, insta
 
 // A thrown value: an Error with its name, message, and own enumerable
 // properties; anything else as the value itself.
-export function encodeThrown(value: unknown, path: string, seen: Set<object>): Json {
-  return value instanceof Error ? encodeError(value, path, seen) : { [MARKER]: 'throw', value: encodeInto(value, path, seen) };
+function encodeThrown(value: unknown, path: string, seen: Set<object>, instances: boolean): Json {
+  return value instanceof Error
+    ? encodeError(value, path, seen, instances)
+    : { [MARKER]: 'throw', value: encodeInto(value, path, seen, instances) };
 }
 
 function encodeInto(value: unknown, path: string, seen: Set<object>, instances = false): Json {
@@ -261,7 +263,7 @@ export function encodeOutcome(outcome: Outcome, instances = false): EncodedValue
   const seen = new Set<object>();
   try {
     const result = outcome.kind === 'throw'
-      ? encodeThrown(outcome.value, '$.result', seen)
+      ? encodeThrown(outcome.value, '$.result', seen, instances)
       : encodeInto(outcome.value, '$.result', seen, instances);
     return { ok: true, value: result };
   } catch (error) {

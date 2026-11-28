@@ -1,0 +1,1 @@
+{"fn":"validateUsername","args":[{"$":"utf16","value":[55296],"text":"\ufffd"}],"result":"\ufffd","reason":"The JSON boundary decodes a lone surrogate as U+FFFD, which the username validator accepts like any genuine U+FFFD.","approval":"manager 2026-11-28"}

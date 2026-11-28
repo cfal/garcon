@@ -1,0 +1,12 @@
+{"fn":"isHiddenBashCommandPatternMode","args":["regex"]}
+{"fn":"isHiddenBashCommandPatternMode","args":["glob"]}
+{"fn":"isHiddenBashCommandPatternMode","args":["REGEX"]}
+{"fn":"isHiddenBashCommandPatternMode","args":[null]}
+{"fn":"validateHiddenBashCommandPattern","args":["(?<=git )([a-z]+)\\1","regex"]}
+{"fn":"validateHiddenBashCommandPattern","args":["[z-a]","regex"]}
+{"fn":"validateHiddenBashCommandPattern","args":["\\p{abc}","regex"]}
+{"fn":"validateHiddenBashCommandPattern","args":["\\q","regex"]}
+{"fn":"validateHiddenBashCommandPattern","args":["(","glob"]}
+{"fn":"validateHiddenBashCommandPattern","args":["[\ud83d\ude00-\ud83d\ude01]","regex"]}
+{"fn":"validateHiddenBashCommandPattern","args":["[\ud83d\ude01-\ud83d\ude00]","regex"]}
+{"fn":"validateHiddenBashCommandPattern","args":["[\ud83d\ude00-a]","regex"]}

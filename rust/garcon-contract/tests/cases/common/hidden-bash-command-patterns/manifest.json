@@ -1,0 +1,41 @@
+{
+  "module": "common/hidden-bash-command-patterns.ts",
+  "tests": [
+    "common/__tests__/hidden-bash-command-patterns.test.js"
+  ],
+  "inputs": "rust/garcon-contract/tests/inputs/common/hidden-bash-command-patterns.jsonl",
+  "guards": [
+    {
+      "fn": "validateHiddenBashCommandPattern",
+      "argument": 1,
+      "guard": "isHiddenBashCommandPatternMode",
+      "dropped": 1934,
+      "kept": 0
+    },
+    {
+      "fn": "dedupeHiddenBashCommandPatterns",
+      "argument": 0,
+      "guard": "parseHiddenBashCommandPatterns",
+      "dropped": 459,
+      "kept": 60
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "isHiddenBashCommandPatternMode",
+      "argument": 0
+    },
+    {
+      "fn": "parseHiddenBashCommandPatterns",
+      "argument": 0
+    },
+    {
+      "fn": "dedupeHiddenBashCommandPatterns",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 481,
+  "sha256": "c9ba1975cf4d282c6432b6233d7495245e9adae31f4fdfc5e642787fb8fcf21a"
+}

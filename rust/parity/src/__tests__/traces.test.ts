@@ -10,12 +10,22 @@ test('records contract response headers without incidental headers', () => {
   expect(contractHeaders(new Headers({
     'X-Content-Type-Options': 'nosniff',
     'X-Garcon-Executor-Instance': 'fixture-instance',
+    'X-Garcon-File-Revision': '7',
+    'X-Garcon-File-List-Truncated': 'true',
+    'X-Robots-Tag': 'noindex',
+    'Referrer-Policy': 'no-referrer',
+    'Link': '</canonical>; rel="canonical"',
     'X-Unrelated': 'ignored',
     'Content-Length': '12',
   }))).toEqual({
     'content-length': '12',
     'x-content-type-options': 'nosniff',
     'x-garcon-executor-instance': 'fixture-instance',
+    'x-garcon-file-revision': '7',
+    'x-garcon-file-list-truncated': 'true',
+    'x-robots-tag': 'noindex',
+    'referrer-policy': 'no-referrer',
+    link: '</canonical>; rel="canonical"',
   });
 });
 
@@ -112,6 +122,38 @@ test('the opt-in client writes one named trace with HTTP, replies and attributed
         '["1234567890123456","chat-title-updated"]': [expect.objectContaining({ title: 'Synthetic', clientRequestId: 'an-http-command' })],
       },
     });
+    expect(traces.get(suite)?.['assigns placeholders in exchange order rather than callback order']).toMatchObject({
+      http: [
+        { request: { path: '/first' }, body: { value: { chatId: '{{chatId1}}', url: 'http://{{loopback}}:{{port1}}' } } },
+        { request: { path: '/second' }, body: { value: { chatId: '{{chatId2}}', url: 'http://{{loopback}}:{{port2}}' } } },
+      ],
+      broadcasts: { '["{{chatId2}}","changed"]': [{ type: 'changed', chatId: '{{chatId2}}' }] },
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('names traces under conditional and parameterized describes', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'parity-trace-fixture-'));
+  const repoRoot = resolve(import.meta.dir, '../../../..');
+  const suite = 'rust/parity/src/__tests__/fixtures/trace-describe.test.ts';
+  try {
+    const run = Bun.spawn([process.execPath, 'test', join(repoRoot, suite)], {
+      cwd: repoRoot,
+      env: { ...process.env, GARCON_TEST_TRACE_DIR: directory },
+      stdout: 'ignore',
+      stderr: 'pipe',
+    });
+    const [code, error] = await Promise.all([run.exited, new Response(run.stderr).text()]);
+    expect({ code, error }).toMatchObject({ code: 0 });
+    const traces = await readTraces(directory, 'jsonl');
+    expect(Object.keys(traces.get(suite) ?? {}).sort()).toEqual([
+      'if > same',
+      'row first > skipIf > same',
+      'row second > skipIf > same',
+      'todoIf > same',
+    ]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

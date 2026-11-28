@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { classArgument, echo, reply } from './recorded-values.js';
+import { classArgument, echo, reply, throwWithInstance } from './recorded-values.js';
 
 test('checks strings and returned classes', () => {
   const separators = 'first\u2028second\u2029third\nfourth';
@@ -10,4 +10,9 @@ test('checks strings and returned classes', () => {
   const result = reply(malformed);
   expect(result.nested[0]?.label).toBe(malformed);
   expect(classArgument(result)).toBe('reply');
+});
+
+test('checks thrown classes and classes in an Error', () => {
+  expect(() => throwWithInstance('label', true)).toThrow('invalid reply');
+  expect(() => throwWithInstance('label', false)).toThrow();
 });
