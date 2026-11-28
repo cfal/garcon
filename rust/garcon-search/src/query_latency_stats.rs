@@ -78,7 +78,7 @@ impl QueryLatencyStats {
 
     fn quantiles(&self, field: impl Fn(&RoundedSample) -> u64) -> [u64; 3] {
         let mut sorted: Vec<_> = self.samples.iter().map(field).collect();
-        sorted.sort_unstable();
+        sorted.sort();
         let len = sorted.len();
         if len == 0 {
             [0; 3]
