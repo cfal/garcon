@@ -1,0 +1,70 @@
+{
+  "module": "rust/garcon-search/tests/inputs/search-worker-oracle.ts",
+  "tests": [
+    "rust/garcon-search/tests/inputs/search-worker-frames.cases.ts"
+  ],
+  "inputs": null,
+  "guards": [
+    {
+      "fn": "buildReaderFrames",
+      "argument": 0,
+      "guard": "acceptsSearch",
+      "dropped": 45,
+      "kept": 26
+    },
+    {
+      "fn": "buildReaderFrames",
+      "argument": 1,
+      "guard": "acceptsAllowed",
+      "dropped": 8,
+      "kept": 34
+    },
+    {
+      "fn": "validateReaderStart",
+      "argument": 0,
+      "guard": "acceptsSearch",
+      "dropped": 108,
+      "kept": 60
+    },
+    {
+      "fn": "validateReaderChunk",
+      "argument": 0,
+      "guard": "acceptsAllowed",
+      "dropped": 14,
+      "kept": 60
+    },
+    {
+      "fn": "validateIndexerRows",
+      "argument": 0,
+      "guard": "acceptsIndexRows",
+      "dropped": 67,
+      "kept": 60
+    }
+  ],
+  "jsonArguments": [
+    {
+      "fn": "buildReaderFrames",
+      "argument": 0
+    },
+    {
+      "fn": "buildReaderFrames",
+      "argument": 1
+    },
+    {
+      "fn": "validateReaderStart",
+      "argument": 0
+    },
+    {
+      "fn": "validateReaderChunk",
+      "argument": 0
+    },
+    {
+      "fn": "validateIndexerRows",
+      "argument": 0
+    }
+  ],
+  "bunVersion": "1.4.3",
+  "notCaptured": [],
+  "cases": 254,
+  "sha256": "4938e8ddcd7e70ad090626080fd0918b906001db8aea0d2ce9099f5a1ea4954a"
+}

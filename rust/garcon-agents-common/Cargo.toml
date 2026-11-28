@@ -11,14 +11,17 @@ workspace = true
 
 [dependencies]
 async-trait.workspace = true
+base64 = "0.23"
 futures.workspace = true
 garcon-base.workspace = true
 garcon-contract.workspace = true
 garcon-interface.workspace = true
 garcon-js.workspace = true
 indexmap.workspace = true
+regress = "0.12"
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 uuid = { version = "1", features = ["v4"] }

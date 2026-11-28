@@ -37,7 +37,6 @@ tokio-tungstenite = { version = "0.27", default-features = false, features = ["c
 tokio-util.workspace = true
 url.workspace = true
 uuid = { version = "1", features = ["v4"] }
-webpki-roots = "1"
 x25519-dalek = { version = "2", default-features = false, features = ["static_secrets", "zeroize", "getrandom"] }
 zeroize = "1"
 
