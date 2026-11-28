@@ -5,7 +5,7 @@ use std::{
     rc::Rc,
 };
 
-pub(super) struct Listeners<T: ?Sized> {
+pub(crate) struct Listeners<T: ?Sized> {
     next_id: Cell<u64>,
     callbacks: RefCell<BTreeMap<u64, Rc<T>>>,
 }
